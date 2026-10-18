@@ -457,6 +457,13 @@ def format_job_log(job, log: list) -> tuple[str, int]:
 # ── Copy ────────────────────────────────────────────────────────────────
 
 
+def clone_url(repo: str, kind: str = "https") -> str:
+    """The address ``git clone`` takes for OWNER/NAME, over HTTPS or SSH."""
+    if kind == "ssh":
+        return f"git@github.com:{repo}.git"
+    return f"https://github.com/{repo}.git"
+
+
 @dataclass
 class CopyValues:
     """What the Copy commands put on the clipboard for one item.
@@ -656,6 +663,8 @@ ID_COPY_LINK = wx.NewIdRef()
 ID_COPY_MARKDOWN = wx.NewIdRef()
 ID_COPY_TITLE = wx.NewIdRef()
 ID_COPY_IDENT = wx.NewIdRef()
+ID_COPY_CLONE_HTTPS = wx.NewIdRef()
+ID_COPY_CLONE_SSH = wx.NewIdRef()
 ID_COPY_DETAILS = wx.NewIdRef()
 
 
@@ -1817,6 +1826,11 @@ class GhViewerFrame(wx.Frame):
         copy_menu.Append(ID_COPY_TITLE, "Copy Title\tCtrl+Shift+T")
         self._act_copy_ident = copy_menu.Append(ID_COPY_IDENT, "Copy Number\tCtrl+Shift+I")
         copy_menu.Append(ID_COPY_DETAILS, "Copy Details\tCtrl+Shift+D")
+        # The repository in front of you, from any view: for a terminal or
+        # another tool, where an address on its own won't clone.
+        copy_menu.AppendSeparator()
+        copy_menu.Append(ID_COPY_CLONE_HTTPS, "Copy HTTPS Clone URL")
+        copy_menu.Append(ID_COPY_CLONE_SSH, "Copy SSH Clone URL")
         actions_menu.AppendSubMenu(copy_menu, "Copy")
         # F is the key, in the list and in the repository list. It acts on the
         # repository when the repository list has focus, as Copy does.
@@ -2017,6 +2031,8 @@ class GhViewerFrame(wx.Frame):
         self.Bind(wx.EVT_MENU, lambda e: self._copy("title"), id=ID_COPY_TITLE)
         self.Bind(wx.EVT_MENU, lambda e: self._copy("ident"), id=ID_COPY_IDENT)
         self.Bind(wx.EVT_MENU, lambda e: self._copy("details"), id=ID_COPY_DETAILS)
+        self.Bind(wx.EVT_MENU, lambda e: self._copy_clone_url("https"), id=ID_COPY_CLONE_HTTPS)
+        self.Bind(wx.EVT_MENU, lambda e: self._copy_clone_url("ssh"), id=ID_COPY_CLONE_SSH)
 
     # ── Updates ─────────────────────────────────────────────────────────
 
@@ -4101,6 +4117,19 @@ class GhViewerFrame(wx.Frame):
         else:
             self._announce("Couldn't open the clipboard. Try again.")
 
+    def _copy_clone_url(self, kind: str) -> None:
+        """Copy ▸ Copy HTTPS / SSH Clone URL, for the repository in front of you."""
+        repo = self._repo_in_front()
+        if not repo:
+            self._announce("Select a repository first: there is nothing to clone.")
+            return
+        url = clone_url(repo, kind)
+        noun = "SSH clone URL" if kind == "ssh" else "HTTPS clone URL"
+        if self._set_clipboard(url):
+            self._announce(f"Copied {noun}: {url}")
+        else:
+            self._announce("Couldn't open the clipboard. Try again.")
+
     def _set_clipboard(self, text: str) -> bool:
         clip = wx.TheClipboard
         if not clip.Open():
@@ -4414,6 +4443,9 @@ class GhViewerFrame(wx.Frame):
                     ("item", ID_COPY_LINK, "Copy Link\tCtrl+Shift+C"),
                     ("item", ID_COPY_MARKDOWN, "Copy Markdown Link\tCtrl+Shift+L"),
                     ("item", ID_COPY_IDENT, "Copy Repository Name\tCtrl+Shift+I"),
+                    ("sep",),
+                    ("item", ID_COPY_CLONE_HTTPS, "Copy HTTPS Clone URL"),
+                    ("item", ID_COPY_CLONE_SSH, "Copy SSH Clone URL"),
                 ]),
             ]
             if data in self._pinned_repos:

@@ -638,6 +638,12 @@ The query is GitHub's own search language, exactly as on github.com, so every qu
 - `org:nvaccess braille in:title`
 - for repositories: `screen reader language:python stars:>50`, `topic:accessibility archived:false`
 
+### Search operators
+
+You don't have to remember the qualifiers. In the search dialog, press `F1` or choose **Search Operators…** for a table of them, each with what it means and an example. The table matches what you are searching for: issues and pull requests (reviews, checks, draft, branches, merged), or repositories (stars, language, topics, license). Type in **Filter** to narrow it, for example "review" or "date".
+
+`Enter`, or **Insert into Query**, puts the selected operator into your query where the cursor was. One that needs a value, such as `label:`, is left for you to type it; one that is complete, such as `is:open`, gets a space after it. **Open GitHub Search Documentation** opens GitHub's full reference in your browser.
+
 The results replace the list, best match first. Issue and pull request results read type, number, state, title, repository and when last updated; repository results read the same as Starred and Watched Repositories. The status bar says how many match: "Search — 512 issues and pull requests match repo:nvaccess/nvda braille is:open, showing 100."
 
 | Key | Action |
@@ -680,9 +686,9 @@ The details panel gives the whole event as one sentence, then who, what, the rep
 
 | Key | Action |
 |-----|--------|
-| `Enter` | Open what the event is about on GitHub: the issue, pull request, comment, release or commits |
+| `Enter` | Open what the event is about here in GHManage: an issue or pull request in its repository's Issues & PRs, a release in Releases, a commit in Commits. Anything GHManage has no view for (a push's comparison, a discussion, a wiki page) opens on GitHub |
 | `G` or `Ctrl+Shift+G` | Open the event's repository here in GHManage |
-| `Backspace` | From that repository's issues, come back to the same event |
+| `Backspace` | From what `Enter` or `G` opened, come back to the same event |
 | `F` | Add what the event is about to favorites, or remove it |
 | `Ctrl++` | Load older events |
 | `R` | Reload the feed |
@@ -812,6 +818,10 @@ With a filter on, every key acts on the row you are on: `Enter`, `F`, `C`, `O`, 
 | Copy Title | `Ctrl+Shift+T` | The title: an issue's title, a commit's first line, a release's name |
 | Copy Number, Copy SHA, … | `Ctrl+Shift+I` | The short thing that names the item; see below |
 | Copy Details | `Ctrl+Shift+D` | Everything in the details panel |
+| Copy HTTPS Clone URL | | The repository's address for `git clone`, such as `https://github.com/nvaccess/nvda.git` |
+| Copy SSH Clone URL | | The same over SSH, such as `git@github.com:nvaccess/nvda.git` |
+
+The two clone URLs are for the repository in front of you: the one selected in the repository list when that has focus, the repository of the selected row in a list across repositories, or else the repository open.
 
 The fourth item is named for what it copies in the view you are in:
 
@@ -833,7 +843,8 @@ The fourth item is named for what it copies in the view you are in:
 | My Work, search results | Copy Number, or Copy Repository Name for repositories | `owner/name#208`, since the list mixes repositories; or `owner/name` |
 | Notifications | Copy Number or Repository | the issue or pull request number, or the repository for anything else |
 | Activity | Copy Number, Tag or Repository | the issue or pull request number, the release's tag, or the repository for events about a whole repository |
-| Starred, Watched | Copy Repository Name | `owner/name` |
+| Starred, Watched, Shared With Me, an organization's repositories | Copy Repository Name | `owner/name` |
+| My Organizations | Copy Organization Name | the organization's name |
 
 In Activity, Copy Link and Copy Markdown Link copy what the event is about (the issue, pull request or release) rather than the event itself, the same thing `F` favorites.
 
@@ -947,9 +958,9 @@ On a Mac, use `Cmd` for `Ctrl`.
 
 The **Applications** key, `Shift+F10`, or a right-click opens a context menu (on a Mac, `VO+Shift+M` with VoiceOver, or `Ctrl`-click).
 
-In the item list it starts with what `Enter` does in that view, for example **Show Commits** on a branch or **Open Here** on a search result, and then offers everything the Actions menu offers in that view, with Copy and Pull Request as submenus. It is built from the Actions menu each time, so the two always agree.
+In the item list it starts with what `Enter` does in that view, for example **Show Commits** on a branch or **Open Here** on a search result, and then offers everything the Actions menu offers in that view, with Copy and Pull Request as submenus. It is built from the Actions menu each time, so the two always agree. It ends with **View More** (`Ctrl++`) in every list that loads in pages. On a repository in Starred, Watched, Shared With Me, an organization's repositories or repository search results, it also has **Go To** (see below), and `Backspace` from where it takes you comes back to that row.
 
-In the repository list, a repository's menu has **Open**, **Open on GitHub**, **New Issue…**, **Search This Repository…** (a search starting `repo:owner/name`), **Watch Settings…**, Copy, and **Remove from List…** for a repository you opened by address. These are the same commands as on the Actions menu, for the repository selected. A saved search's menu has **Run Search** and **Remove Saved Search**; Favorites and the other entries at the top have **Open**.
+In the repository list, a repository's menu has **Open**, **Open on GitHub**, **Go To**, **New Issue…**, **Search This Repository…** (a search starting `repo:owner/name`), **Watch Settings…**, **Add to Favorites** or **Remove from Favorites**, Copy, and **Remove from List…** for a repository you opened by address. **Go To** opens the repository straight on one of its views: Issues & PRs, Branches, Commits, Tags, Releases, Workflows, Workflow Runs, Labels or GitHub Pages. Copy includes **Copy HTTPS Clone URL** and **Copy SSH Clone URL**, the addresses `git clone` takes. These are the same commands as on the Actions menu, for the repository selected. A saved search's menu has **Run Search** and **Remove Saved Search**; Favorites and the other entries at the top have **Open**.
 
 ---
 
@@ -1079,7 +1090,7 @@ On a Mac, use `Cmd` in place of `Ctrl` for every shortcut that has one, `Option`
 
 | Key | Action |
 |-----|--------|
-| `Enter` | Open what the event is about on GitHub |
+| `Enter` | Open what the event is about here, or on GitHub when GHManage has no view for it |
 | `G` or `Ctrl+Shift+G` | Open the event's repository in GHManage |
 | `F` | Favorite what the event is about |
 

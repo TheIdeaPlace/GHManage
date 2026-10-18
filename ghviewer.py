@@ -21,6 +21,7 @@ import wx
 import updater
 from version import __version__ as APP_VERSION
 from pinned_repos import add_pinned, load_pinned, remove_pinned
+import search_help
 from favorites import FavoriteEntry, load_favorites, save_favorites, is_favorite, toggle_favorite
 from saved_searches import (
     KIND_ISSUES, KIND_REPOS, SavedSearch, add_saved_search, load_saved_searches,
@@ -457,6 +458,13 @@ def format_job_log(job, log: list) -> tuple[str, int]:
 # ── Copy ────────────────────────────────────────────────────────────────
 
 
+def clone_url(repo: str, kind: str = "https") -> str:
+    """The address ``git clone`` takes for OWNER/NAME, over HTTPS or SSH."""
+    if kind == "ssh":
+        return f"git@github.com:{repo}.git"
+    return f"https://github.com/{repo}.git"
+
+
 @dataclass
 class CopyValues:
     """What the Copy commands put on the clipboard for one item.
@@ -656,6 +664,8 @@ ID_COPY_LINK = wx.NewIdRef()
 ID_COPY_MARKDOWN = wx.NewIdRef()
 ID_COPY_TITLE = wx.NewIdRef()
 ID_COPY_IDENT = wx.NewIdRef()
+ID_COPY_CLONE_HTTPS = wx.NewIdRef()
+ID_COPY_CLONE_SSH = wx.NewIdRef()
 ID_COPY_DETAILS = wx.NewIdRef()
 
 
@@ -701,6 +711,39 @@ SEARCH_VIEWS = (VIEW_SEARCH_ISSUES, VIEW_SEARCH_REPOS)
 # Lists across repositories where G opens the selected row's repository here.
 GO_TO_REPO_VIEWS = (VIEW_ACTIVITY, VIEW_NOTIFICATIONS, VIEW_MY_WORK, VIEW_SEARCH_ISSUES,
                     VIEW_SEARCH_REPOS)
+# A repository's views, as its context menu's Go To lists them (#51).
+REPO_GO_TO = [
+    (VIEW_ISSUES, "Issues & PRs"),
+    (VIEW_BRANCHES, "Branches"),
+    (VIEW_COMMITS, "Commits"),
+    (VIEW_TAGS, "Tags"),
+    (VIEW_RELEASES, "Releases"),
+    (VIEW_WORKFLOWS, "Workflows"),
+    (VIEW_WORKFLOW, "Workflow Runs"),
+    (VIEW_LABELS, "Labels"),
+    (VIEW_PAGES, "GitHub Pages"),
+]
+ID_GO_TO_VIEW = {view: wx.NewIdRef() for view, _ in REPO_GO_TO}
+
+
+def go_to_submenu() -> tuple:
+    """The Go To submenu of a repository's context menu: each of its views."""
+    return ("sub", "Go To", [("item", ID_GO_TO_VIEW[view], label) for view, label in REPO_GO_TO])
+
+
+# The view a GitHub address of each kind opens in here, for Open Address
+# and Activity alike; and the kinds whose own row is then selected.
+ADDRESS_VIEWS = {
+    "item": VIEW_ISSUES,
+    "commit": VIEW_COMMITS,
+    "branch": VIEW_COMMITS,
+    "release": VIEW_RELEASES,
+    "run": VIEW_WORKFLOW,
+}
+PENDING_KINDS = ("item", "commit", "release", "run")
+# Views that load everything at once, where View More has nothing to add.
+NO_MORE_VIEWS = (VIEW_FAVORITES, VIEW_MY_WORK, VIEW_ORGS, VIEW_JOBS, VIEW_ARTIFACTS,
+                 VIEW_PAGES, VIEW_PAGEFILES)
 # Views listing repositories; Enter on one opens it here.
 REPO_LIST_VIEWS = (VIEW_STARRED, VIEW_WATCHED, VIEW_ORG, VIEW_SHARED)
 
@@ -1289,10 +1332,16 @@ class SearchDialog(wx.Dialog):
             "  screen reader language:python stars:>50   (repositories)"
         )
         outer.Add(wx.StaticText(self, label=help_text), 0, wx.ALL, 10)
+        # F1 here is this help, not the user guide: the window's menus don't
+        # reach into a dialog, and this is the help you want while typing.
+        self.operators_btn = wx.Button(self, label="Search &Operators… (F1)")
+        outer.Add(self.operators_btn, 0, wx.LEFT | wx.RIGHT, 10)
         outer.Add(self.CreateStdDialogButtonSizer(wx.OK | wx.CANCEL), 0, wx.ALIGN_RIGHT | wx.ALL, 10)
         self.SetSizerAndFit(outer)
         self.SetMinSize((520, -1))
         self.Bind(wx.EVT_BUTTON, self._on_ok, id=wx.ID_OK)
+        self.operators_btn.Bind(wx.EVT_BUTTON, lambda e: self._show_operators())
+        self.Bind(wx.EVT_CHAR_HOOK, self._on_char_hook)
         wx.CallAfter(self.query_ctrl.SetFocus)
         # The last search, selected so typing replaces it; or a start such as
         # "repo:owner/name ", with the cursor after it to go on typing.
@@ -1308,6 +1357,98 @@ class SearchDialog(wx.Dialog):
 
     def values(self) -> tuple[str, str]:
         return self.KINDS[self.kind_ctrl.GetSelection()][0], self.query_ctrl.GetValue().strip()
+
+    def _on_char_hook(self, event: wx.KeyEvent) -> None:
+        if event.GetKeyCode() == wx.WXK_F1 and not event.HasAnyModifiers():
+            self._show_operators()
+            return
+        event.Skip()
+
+    def _show_operators(self) -> None:
+        """The operators for what is being searched; the one chosen goes into
+        the query where the cursor was."""
+        kind = self.KINDS[self.kind_ctrl.GetSelection()][0]
+        at = self.query_ctrl.GetInsertionPoint()
+        dlg = SearchOperatorsDialog(self, kind)
+        try:
+            chosen = dlg.chosen if dlg.ShowModal() == wx.ID_OK else None
+        finally:
+            dlg.Destroy()
+        if chosen is not None:
+            text, at = search_help.insert_operator(self.query_ctrl.GetValue(), at, chosen)
+            self.query_ctrl.SetValue(text)
+            self.query_ctrl.SetInsertionPoint(at)
+        self.query_ctrl.SetFocus()
+
+
+class SearchOperatorsDialog(wx.Dialog):
+    """Search ▸ Search Operators (F1): GitHub's qualifiers for what is being
+    searched, as a table of operator, meaning and example, with a filter.
+    Enter puts the selected one into the query."""
+
+    def __init__(self, parent: wx.Window, kind: str) -> None:
+        what = "repositories" if kind == KIND_REPOS else "issues and pull requests"
+        super().__init__(parent, title=f"Search Operators for {what}",
+                         style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
+        self.kind = kind
+        self.chosen: search_help.Operator | None = None
+        self.operators = search_help.operators_for(kind)
+        self._shown: list = []
+        outer = wx.BoxSizer(wx.VERTICAL)
+
+        label = "&Filter"
+        outer.Add(wx.StaticText(self, label=label), 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
+        self.filter_ctrl = wx.TextCtrl(self)
+        self.filter_ctrl.SetName(label.replace("&", ""))
+        outer.Add(self.filter_ctrl, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
+
+        label = "&Operators"
+        outer.Add(wx.StaticText(self, label=label), 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
+        self.list = wx.ListCtrl(self, style=wx.LC_REPORT | wx.LC_SINGLE_SEL, size=(640, 300))
+        self.list.SetName(label.replace("&", ""))
+        for i, (heading, width) in enumerate((("Operator", 170), ("Meaning", 300), ("Example", 220))):
+            self.list.InsertColumn(i, heading, width=width)
+        outer.Add(self.list, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
+
+        outer.Add(wx.StaticText(self, label=search_help.GENERAL_NOTE), 0, wx.ALL, 10)
+
+        buttons = wx.BoxSizer(wx.HORIZONTAL)
+        insert = wx.Button(self, wx.ID_OK, "&Insert into Query")
+        insert.SetDefault()
+        docs = wx.Button(self, label="Open GitHub Search &Documentation")
+        close = wx.Button(self, wx.ID_CANCEL, "Close")
+        for b in (insert, docs, close):
+            buttons.Add(b, 0, wx.LEFT, 6)
+        outer.Add(buttons, 0, wx.ALIGN_RIGHT | wx.ALL, 10)
+        self.SetSizerAndFit(outer)
+
+        self.filter_ctrl.Bind(wx.EVT_TEXT, lambda e: self._fill())
+        self.list.Bind(wx.EVT_LIST_ITEM_ACTIVATED, lambda e: self._choose())
+        self.Bind(wx.EVT_BUTTON, lambda e: self._choose(), id=wx.ID_OK)
+        docs.Bind(wx.EVT_BUTTON, lambda e: webbrowser.open(search_help.DOCS[kind]))
+        self._fill()
+        wx.CallAfter(self.list.SetFocus)
+
+    def _fill(self) -> None:
+        self._shown = search_help.matching(self.operators, self.filter_ctrl.GetValue())
+        self.list.DeleteAllItems()
+        for i, o in enumerate(self._shown):
+            self.list.InsertItem(i, o.op)
+            self.list.SetItem(i, 1, o.meaning)
+            self.list.SetItem(i, 2, o.example)
+        if self._shown:
+            self.list.Select(0)
+            self.list.Focus(0)
+
+    def _choose(self) -> None:
+        if not self.IsModal():
+            return  # Enter on the list and the default button both ask
+        row = self.list.GetFirstSelected()
+        if row < 0 or row >= len(self._shown):
+            wx.Bell()
+            return
+        self.chosen = self._shown[row]
+        self.EndModal(wx.ID_OK)
 
 
 # ── Pull request dialogs ────────────────────────────────────────────────
@@ -1575,6 +1716,10 @@ class GhViewerFrame(wx.Frame):
         # brings you back to the same item without fetching the list again:
         # (view, items, more, item, limit).
         self._return_to: tuple | None = None
+        # The view a repository opened from a list landed in: Backspace there
+        # goes back to the list (Issues & PRs, or a release or commit from
+        # Activity).
+        self._return_view: str = VIEW_ISSUES
         # Something to select once the view now loading arrives — set when a
         # GitHub address names one thing in a list (an issue, a release, a
         # run): (fetch token, view, kind, ref). Bound to the load it was set
@@ -1787,7 +1932,7 @@ class GhViewerFrame(wx.Frame):
         file_menu.AppendSeparator()
         file_menu.Append(ID_SWITCH_ACCOUNT, "Switch GitHub Account…\tCtrl+Shift+K")
         file_menu.AppendSeparator()
-        file_menu.Append(ID_REFRESH, "Refresh\tCtrl+R")
+        file_menu.Append(ID_REFRESH, "Refresh (R)\tCtrl+R")
         file_menu.Append(ID_VIEW_MORE, "View More\tCtrl++")
         file_menu.AppendSeparator()
         file_menu.Append(ID_SEARCH, "Search GitHub…\tCtrl+Shift+F")
@@ -1817,15 +1962,21 @@ class GhViewerFrame(wx.Frame):
         copy_menu.Append(ID_COPY_TITLE, "Copy Title\tCtrl+Shift+T")
         self._act_copy_ident = copy_menu.Append(ID_COPY_IDENT, "Copy Number\tCtrl+Shift+I")
         copy_menu.Append(ID_COPY_DETAILS, "Copy Details\tCtrl+Shift+D")
+        # The repository in front of you, from any view: for a terminal or
+        # another tool, where an address on its own won't clone.
+        copy_menu.AppendSeparator()
+        copy_menu.Append(ID_COPY_CLONE_HTTPS, "Copy HTTPS Clone URL")
+        copy_menu.Append(ID_COPY_CLONE_SSH, "Copy SSH Clone URL")
         actions_menu.AppendSubMenu(copy_menu, "Copy")
         # F is the key, in the list and in the repository list. It acts on the
         # repository when the repository list has focus, as Copy does.
         actions_menu.Append(ID_FAVORITE, FAVORITE_LABEL)
         actions_menu.AppendSeparator()
-        self._act_close = actions_menu.Append(ID_CLOSE_ITEM, "Close Issue/PR\tCtrl+W")
-        self._act_reopen = actions_menu.Append(ID_REOPEN, "Reopen Issue/PR\tCtrl+Shift+W")
-        self._act_comment = actions_menu.Append(ID_COMMENT, "Add Comment…\tCtrl+M")
-        self._act_new_issue = actions_menu.Append(ID_NEW_ISSUE, "New Issue…\tCtrl+N")
+        # C, O, M and N are the keys in the issues list, like K, V and D below.
+        self._act_close = actions_menu.Append(ID_CLOSE_ITEM, "Close Issue/PR (C)\tCtrl+W")
+        self._act_reopen = actions_menu.Append(ID_REOPEN, "Reopen Issue/PR (O)\tCtrl+Shift+W")
+        self._act_comment = actions_menu.Append(ID_COMMENT, "Add Comment… (M)\tCtrl+M")
+        self._act_new_issue = actions_menu.Append(ID_NEW_ISSUE, "New Issue… (N)\tCtrl+N")
         # Pull requests. K, V and D are the keys in the issues list.
         pr_menu = wx.Menu()
         pr_menu.Append(ID_PR_CHECKS, "&Checks (K)")
@@ -1858,7 +2009,7 @@ class GhViewerFrame(wx.Frame):
         self._act_run_rerun = actions_menu.Append(ID_RUN_RERUN, "Rerun… (E)")
         self._act_run_cancel = actions_menu.Append(ID_RUN_CANCEL, "Cancel Run… (X)")
         self._act_open_site = actions_menu.Append(
-            ID_OPEN_PAGES_SITE, "Open Published Site"
+            ID_OPEN_PAGES_SITE, "Open Published Site (S)"
         )
         actions_menu.AppendSeparator()
         self._act_select_branch = actions_menu.Append(
@@ -1870,7 +2021,7 @@ class GhViewerFrame(wx.Frame):
         actions_menu.AppendSeparator()
         # G in Activity and Notifications; here so the command can be found.
         self._act_go_to_repo = actions_menu.Append(
-            ID_GO_TO_EVENT_REPO, "Go to Event's Repository\tCtrl+Shift+G"
+            ID_GO_TO_EVENT_REPO, "Go to Event's Repository (G)\tCtrl+Shift+G"
         )
         actions_menu.AppendSeparator()
         # Notifications. M, U and Delete are the keys in the list; the
@@ -1962,7 +2113,7 @@ class GhViewerFrame(wx.Frame):
 
         view_menu.AppendSeparator()
         self._show_read_item = view_menu.AppendCheckItem(
-            ID_SHOW_READ, "Include Read Notifications"
+            ID_SHOW_READ, "Include Read Notifications (I)"
         )
 
         menu_bar.Append(view_menu, "View")
@@ -2011,12 +2162,16 @@ class GhViewerFrame(wx.Frame):
         self.Bind(wx.EVT_MENU, self.on_view_shared, id=ID_VIEW_SHARED)
         self.Bind(wx.EVT_MENU, self.on_view_orgs, id=ID_VIEW_ORGS)
         self.Bind(wx.EVT_MENU, self.on_favorite, id=ID_FAVORITE)
+        for view, menu_id in ID_GO_TO_VIEW.items():
+            self.Bind(wx.EVT_MENU, lambda e, v=view: self._go_to_repo_view(v), id=menu_id)
         self.Bind(wx.EVT_MENU, self.on_go_to_event_repo, id=ID_GO_TO_EVENT_REPO)
         self.Bind(wx.EVT_MENU, lambda e: self._copy("link"), id=ID_COPY_LINK)
         self.Bind(wx.EVT_MENU, lambda e: self._copy("markdown"), id=ID_COPY_MARKDOWN)
         self.Bind(wx.EVT_MENU, lambda e: self._copy("title"), id=ID_COPY_TITLE)
         self.Bind(wx.EVT_MENU, lambda e: self._copy("ident"), id=ID_COPY_IDENT)
         self.Bind(wx.EVT_MENU, lambda e: self._copy("details"), id=ID_COPY_DETAILS)
+        self.Bind(wx.EVT_MENU, lambda e: self._copy_clone_url("https"), id=ID_COPY_CLONE_HTTPS)
+        self.Bind(wx.EVT_MENU, lambda e: self._copy_clone_url("ssh"), id=ID_COPY_CLONE_SSH)
 
     # ── Updates ─────────────────────────────────────────────────────────
 
@@ -2200,11 +2355,11 @@ class GhViewerFrame(wx.Frame):
         self._act_save_search.Enable(self.view_mode in SEARCH_VIEWS)
         self._act_go_to_repo.Enable(self.view_mode in GO_TO_REPO_VIEWS)
         self._act_go_to_repo.SetItemLabel(
-            "Go to Notification's Repository\tCtrl+Shift+G"
+            "Go to Notification's Repository (G)\tCtrl+Shift+G"
             if self.view_mode == VIEW_NOTIFICATIONS
-            else "Go to Event's Repository\tCtrl+Shift+G"
+            else "Go to Event's Repository (G)\tCtrl+Shift+G"
             if self.view_mode == VIEW_ACTIVITY
-            else "Go to Repository\tCtrl+Shift+G"
+            else "Go to Repository (G)\tCtrl+Shift+G"
         )
         notifications = self.view_mode == VIEW_NOTIFICATIONS
         for entry in (self._act_mark_read, self._act_unsubscribe, self._act_mark_all_read):
@@ -2287,9 +2442,10 @@ class GhViewerFrame(wx.Frame):
             self.label_filter = ""
         if mode not in (VIEW_PAGES, VIEW_PAGEFILES):
             self.pages_site = None
-        if mode != VIEW_ISSUES:
-            # The way back to the feed is from the repo's issues, where G
-            # left you; anywhere else Backspace means something of its own.
+        if mode != getattr(self, "_return_view", VIEW_ISSUES):
+            # The way back to the list is from the view it opened in, where G
+            # or Enter left you; anywhere else Backspace means something of
+            # its own.
             self._return_to = None
         self.filter_text = ""  # clear filter on view switch
         # Update columns for the new view
@@ -3216,7 +3372,7 @@ class GhViewerFrame(wx.Frame):
             )
         self._set_view_status(
             message,
-            "Enter=open in browser  G=go to repository  Ctrl++=view more  "
+            "Enter=open  G=go to repository  Ctrl++=view more  "
             "R=refresh  F=favorite  Ctrl+F=filter",
         )
         self._update_title()
@@ -4101,6 +4257,19 @@ class GhViewerFrame(wx.Frame):
         else:
             self._announce("Couldn't open the clipboard. Try again.")
 
+    def _copy_clone_url(self, kind: str) -> None:
+        """Copy ▸ Copy HTTPS / SSH Clone URL, for the repository in front of you."""
+        repo = self._repo_in_front()
+        if not repo:
+            self._announce("Select a repository first: there is nothing to clone.")
+            return
+        url = clone_url(repo, kind)
+        noun = "SSH clone URL" if kind == "ssh" else "HTTPS clone URL"
+        if self._set_clipboard(url):
+            self._announce(f"Copied {noun}: {url}")
+        else:
+            self._announce("Couldn't open the clipboard. Try again.")
+
     def _set_clipboard(self, text: str) -> bool:
         clip = wx.TheClipboard
         if not clip.Open():
@@ -4123,6 +4292,13 @@ class GhViewerFrame(wx.Frame):
         A load in progress passes no keys, which takes the last view's keys off
         the bar — they may not work in the view that is on its way.
         """
+        if (keys and getattr(self, "_return_to", None)
+                and self.view_mode == getattr(self, "_return_view", VIEW_ISSUES)):
+            # Backspace goes back to the list this was opened from, whatever
+            # it would do in this view otherwise (Commits > Branches).
+            back = f"Backspace=back to {self._view_label(self._return_to[0], lower=True)}"
+            keys = "  ".join([k for k in keys.split("  ") if k and not k.startswith("Backspace=")]
+                             + [back])
         self.status_bar.set_item("message", message)
         self.status_bar.set_item("keys", keys)
         self._update_filter_status()
@@ -4265,6 +4441,7 @@ class GhViewerFrame(wx.Frame):
         VIEW_LABELS: "List Issues and PRs with This Label",
         VIEW_PAGES: "Browse Published Pages",
         VIEW_NOTIFICATIONS: "Open",
+        VIEW_ACTIVITY: "Open",
         VIEW_MY_WORK: "Open Here",
         VIEW_SEARCH_ISSUES: "Open Here",
         VIEW_SEARCH_REPOS: "Open Here",
@@ -4323,6 +4500,15 @@ class GhViewerFrame(wx.Frame):
         entries += walk(self._actions_menu)
         while entries and entries[-1] == ("sep",):
             entries.pop()
+        if isinstance(item, RepoEntry):
+            # After Enter's entry.
+            at = 1 if entries[:1] and entries[0][1] == ID_CTX_OPEN else 0
+            entries[at:at] = [("sep",), go_to_submenu(), ("sep",)]
+        # View More lives on the File menu, so it was missing here, where
+        # people look for "what else can I do in this list" (#52).
+        if self.view_mode not in NO_MORE_VIEWS:
+            entries += ([("sep",)] if entries else []) + [
+                ("item", ID_VIEW_MORE, "View More\tCtrl++")]
         # Say which way F goes for this row, or leave it off where there is
         # nothing it could favorite.
         if self.view_mode == VIEW_FAVORITES:
@@ -4338,8 +4524,12 @@ class GhViewerFrame(wx.Frame):
             if entry[0] == "item" and entry[1] == ID_FAVORITE:
                 if fav_label:
                     out.append(("item", ID_FAVORITE, fav_label))
+            elif entry == ("sep",) and (not out or out[-1] == ("sep",)):
+                continue
             else:
                 out.append(entry)
+        while out and out[-1] == ("sep",):
+            out.pop()
         return out
 
     @staticmethod
@@ -4401,6 +4591,7 @@ class GhViewerFrame(wx.Frame):
             entries = [
                 ("item", ID_REPO_OPEN, "Open\tEnter"),
                 ("item", ID_REPO_BROWSER, "Open on GitHub"),
+                go_to_submenu(),
                 ("sep",),
                 ("item", ID_NEW_ISSUE, "New Issue…\tCtrl+N"),
                 ("item", ID_SEARCH_REPO, "Search This Repository…\tCtrl+Shift+S"),
@@ -4414,6 +4605,9 @@ class GhViewerFrame(wx.Frame):
                     ("item", ID_COPY_LINK, "Copy Link\tCtrl+Shift+C"),
                     ("item", ID_COPY_MARKDOWN, "Copy Markdown Link\tCtrl+Shift+L"),
                     ("item", ID_COPY_IDENT, "Copy Repository Name\tCtrl+Shift+I"),
+                    ("sep",),
+                    ("item", ID_COPY_CLONE_HTTPS, "Copy HTTPS Clone URL"),
+                    ("item", ID_COPY_CLONE_SSH, "Copy SSH Clone URL"),
                 ]),
             ]
             if data in self._pinned_repos:
@@ -4453,6 +4647,22 @@ class GhViewerFrame(wx.Frame):
             self._announce("Select a repository first: Search This Repository needs one.")
             return
         self._search_flow(prefill=(KIND_ISSUES, f"repo:{repo} "))
+
+    def _go_to_repo_view(self, view: str) -> None:
+        """Go To ▸ <view> on a repository's context menu: open the repository
+        in front of you on that view. From a row in a list of repositories,
+        Backspace comes back to the row."""
+        repo, source = self._repo_in_front_from()
+        if not repo:
+            self._announce("Select a repository first.")
+            return
+        if source == "row":
+            self._open_repo_from_list(repo, self._focused_item(), view)
+        else:
+            if view == VIEW_COMMITS:
+                self.commit_branch = ""  # its default branch, not one picked elsewhere
+            self._select_repo(repo, view)
+            self._select_in_repo_list(repo)
 
     def _repo_entry_action(self, action: str) -> None:
         """A repository-list context menu action, on the repo selected there."""
@@ -4770,6 +4980,9 @@ class GhViewerFrame(wx.Frame):
             self._toggle_favorite()
         elif key == ord("R"):
             self.on_refresh(None)
+        elif (key == wx.WXK_BACK and self._return_to
+              and self.view_mode == getattr(self, "_return_view", VIEW_ISSUES)):
+            self._return_to_list()
         elif key == wx.WXK_BACK and self.view_mode in PARENT_VIEW:
             # Backspace steps back up a drill-down (artifacts -> runs, commits -> branches)
             parent = PARENT_VIEW[self.view_mode]
@@ -4779,8 +4992,6 @@ class GhViewerFrame(wx.Frame):
                 self._pending_focus_row = logins.index(self._org) if self._org in logins else 0
             self._switch_view(parent)
             self._announce(f"Back to {self._VIEW_LABELS.get(parent, parent).lower()}")
-        elif key == wx.WXK_BACK and self.view_mode == VIEW_ISSUES and self._return_to:
-            self._return_to_list()
         elif key == wx.WXK_BACK and self.view_mode == VIEW_ISSUES and self.label_filter:
             # Issues restricted to a label is a drill-down too, even though the
             # view mode is the same one you reach with Ctrl+1.
@@ -4814,8 +5025,21 @@ class GhViewerFrame(wx.Frame):
         webbrowser.open(self.pages_site.url)
         self._announce(f"Opened {self.pages_site.url} in browser")
 
-    def _open_event(self, item: ActivityEvent) -> None:
-        """Open an activity event's page on github.com."""
+    def _open_event(self, item: ActivityEvent, in_browser: bool = False) -> None:
+        """Enter in Activity: what the event is about, here when GHManage has
+        a view for it, with Backspace back to the event; otherwise, and for
+        Open in Browser (Ctrl+O), on GitHub."""
+        if not in_browser and item.subject_kind in ("issue", "PR") and item.number and item.repo:
+            self._open_item_here(item)
+            return
+        target = parse_github_url(item.url) if item.url and not in_browser else None
+        view = ADDRESS_VIEWS.get(target.kind) if target else None
+        if view and target.repo and target.kind != "item":
+            branch = target.ref if target.kind == "branch" else ""
+            self._open_repo_from_list(target.repo, item, view, branch=branch)
+            if target.kind in PENDING_KINDS:
+                self._set_pending_target(view, target.kind, target.ref)
+            return
         if not item.url:
             self._announce("No URL for this event")
             return
@@ -4836,11 +5060,13 @@ class GhViewerFrame(wx.Frame):
             return
         self._open_repo_from_list(item.repo, item)
 
-    def _open_repo_from_list(self, repo: str, item) -> None:
-        """Open ``repo`` from a list of many (Activity, Starred, Watched).
+    def _open_repo_from_list(self, repo: str, item, view: str = VIEW_ISSUES,
+                             branch: str = "") -> None:
+        """Open ``repo`` from a list of many (Activity, Starred, Watched), in
+        ``view``; for Commits, on ``branch`` or else the default branch.
 
-        Remembers the list and the item you were on, so Backspace from the
-        repo's issues brings you back to it.
+        Remembers the list and the item you were on, so Backspace from that
+        view brings you back to it.
         """
         # The item itself, not its row: with a quick filter on, the row
         # number means something else once the filter is gone.
@@ -4852,9 +5078,12 @@ class GhViewerFrame(wx.Frame):
             more = False
         saved = (self.view_mode, list(self._view_source()), bool(more),
                  item, self.current_limit)
-        self._select_repo(repo)
+        if view == VIEW_COMMITS:
+            self.commit_branch = branch
+        self._select_repo(repo, view)
         # Set after _select_repo, which clears it for an ordinary repo change.
         self._return_to = saved
+        self._return_view = view
         # Select it in the repo list too when it is there, so the list on the
         # left agrees with what the right side is showing — and nothing when
         # it isn't, rather than leaving the list you came from selected.
@@ -5158,7 +5387,7 @@ class GhViewerFrame(wx.Frame):
         if not item:
             return
         if isinstance(item, ActivityEvent):
-            self._open_event(item)
+            self._open_event(item, in_browser=True)
             return
         if isinstance(item, Notification):
             self._open_notification(item, in_browser=True)
@@ -5263,19 +5492,13 @@ class GhViewerFrame(wx.Frame):
             self._refresh_repo_list()
             self._select_repo(repo)
             return
-        view = {
-            "item": VIEW_ISSUES,
-            "commit": VIEW_COMMITS,
-            "branch": VIEW_COMMITS,
-            "release": VIEW_RELEASES,
-            "run": VIEW_WORKFLOW,
-        }.get(target.kind, target.ref if target.kind == "view" else VIEW_ISSUES)
+        view = ADDRESS_VIEWS.get(target.kind, target.ref if target.kind == "view" else VIEW_ISSUES)
         if view == VIEW_COMMITS:
             # Set before the switch, which loads the commits of commit_branch:
             # the branch named, or the default branch for a commit address.
             self.commit_branch = target.ref if target.kind == "branch" else ""
         self._select_repo(repo, view)
-        if target.kind in ("item", "commit", "release", "run"):
+        if target.kind in PENDING_KINDS:
             self._set_pending_target(view, target.kind, target.ref)
         self._select_in_repo_list(repo)
 

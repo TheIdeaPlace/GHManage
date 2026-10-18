@@ -38,6 +38,8 @@ class FakeMenu:
 
 
 SEP = FakeItem(sep=True)
+# The last entry wherever a list can load more (#52).
+MORE = ("item", ghviewer.ID_VIEW_MORE, "View More\tCtrl++")
 
 
 def _frame(view, item, actions):
@@ -68,6 +70,8 @@ def test_entries_mirror_the_enabled_actions():
         ("sub", "Copy", [("item", 3, "Copy Link")]),
         ("sep",),
         ("item", 6, "New Issue…"),
+        ("sep",),
+        MORE,
     ]
 
 
@@ -81,13 +85,13 @@ def test_enter_s_action_comes_first_where_it_is_not_the_browser():
 
 def test_no_open_entry_without_a_selection():
     f = _frame(ghviewer.VIEW_BRANCHES, None, FakeMenu(FakeItem(1, "Compare")))
-    assert Frame._context_entries(f) == [("item", 1, "Compare")]
+    assert Frame._context_entries(f) == [("item", 1, "Compare"), ("sep",), MORE]
 
 
 def test_an_empty_submenu_is_left_out():
     actions = FakeMenu(FakeItem(2, "Pull Request", sub=FakeMenu(FakeItem(3, "Merge", enabled=False))))
     f = _frame(ghviewer.VIEW_ISSUES, None, actions)
-    assert Frame._context_entries(f) == []
+    assert Frame._context_entries(f) == [MORE]
 
 
 def test_every_open_label_is_for_a_real_view():
@@ -199,7 +203,7 @@ def test_no_duplicate_of_enter_from_the_actions_menu():
                        FakeItem(9, "Open in Browser"))
     f = _frame(ghviewer.VIEW_WORKFLOWS, Workflow(1, "CI", "ci.yml", "active"), actions)
     labels = [e[2] for e in Frame._context_entries(f) if e[0] == "item"]
-    assert labels == ["Run on a Branch…\tEnter", "Open in Browser"]
+    assert labels == ["Run on a Branch…\tEnter", "Open in Browser", "View More\tCtrl++"]
 
 
 def test_an_expired_artifact_offers_no_download():
@@ -207,4 +211,69 @@ def test_an_expired_artifact_offers_no_download():
     actions = FakeMenu(FakeItem(ghviewer.ID_ACT_DOWNLOAD_ARTIFACT, "Download Artifact…"),
                        FakeItem(9, "Copy"))
     f = _frame(ghviewer.VIEW_ARTIFACTS, Artifact(1, "build", 10, True, "", 9), actions)
-    assert Frame._context_entries(f) == [("item", 9, "Copy")]
+    assert Frame._context_entries(f) == [("item", 9, "Copy")]   # all there is: no View More
+
+
+@pytest.mark.parametrize("view", [ghviewer.VIEW_FAVORITES, ghviewer.VIEW_MY_WORK, ghviewer.VIEW_ORGS])
+def test_no_view_more_where_everything_is_already_loaded(view):
+    f = _frame(view, None, FakeMenu(FakeItem(1, "Copy")))
+    assert MORE not in Frame._context_entries(f)
+
+
+# ── Go To on a repository's context menu (#51) ─────────────────────────
+
+
+def _go_to(entries):
+    return next((e for e in entries if e[0] == "sub" and e[1] == "Go To"), None)
+
+
+def test_a_repository_s_menu_goes_to_each_of_its_views():
+    sub = _go_to(Frame._repo_context_entries(_repo_frame(), "o/r"))
+    assert [e[2] for e in sub[2]] == [label for _, label in ghviewer.REPO_GO_TO]
+    assert [e[1] for e in sub[2]] == [ghviewer.ID_GO_TO_VIEW[v] for v, _ in ghviewer.REPO_GO_TO]
+
+
+def test_a_repository_row_s_menu_has_go_to_too():
+    from gh_data import RepoEntry
+    f = _frame(ghviewer.VIEW_STARRED, RepoEntry("o/r", url="u"), FakeMenu(FakeItem(9, "Copy")))
+    assert _go_to(Frame._context_entries(f)) is not None
+    # Not on a row that isn't a repository
+    f = _frame(ghviewer.VIEW_ISSUES, Item(1, "T", "OPEN", "u", False), FakeMenu(FakeItem(9, "Copy")))
+    assert _go_to(Frame._context_entries(f)) is None
+
+
+@pytest.mark.parametrize("source, expected", [
+    ("row", [("from list", "o/r", ghviewer.VIEW_RELEASES)]),
+    ("list", [("select", "o/r", ghviewer.VIEW_RELEASES), ("in list", "o/r")]),
+])
+def test_go_to_opens_the_repository_on_that_view(source, expected):
+    events = []
+    f = SimpleNamespace(announced=[], commit_branch="old")
+    f._announce = f.announced.append
+    f._repo_in_front_from = lambda: ("o/r", source)
+    f._focused_item = lambda: "row item"
+    f._open_repo_from_list = lambda repo, item, view: events.append(("from list", repo, view))
+    f._select_repo = lambda repo, view: events.append(("select", repo, view))
+    f._select_in_repo_list = lambda repo: events.append(("in list", repo))
+    Frame._go_to_repo_view(f, ghviewer.VIEW_RELEASES)
+    assert events == expected
+
+
+def test_go_to_commits_starts_on_the_default_branch():
+    f = SimpleNamespace(announced=[], commit_branch="feature")
+    f._repo_in_front_from = lambda: ("o/r", "list")
+    f._select_repo = lambda repo, view: None
+    f._select_in_repo_list = lambda repo: None
+    Frame._go_to_repo_view(f, ghviewer.VIEW_COMMITS)
+    assert f.commit_branch == ""
+
+
+def test_never_two_separators_together_or_at_either_end():
+    from gh_data import RepoEntry
+    # Every action greyed out: Enter's entry, Go To and View More
+    actions = FakeMenu(SEP, FakeItem(5, "Close", enabled=False), SEP)
+    f = _frame(ghviewer.VIEW_STARRED, RepoEntry("o/r", url="u"), actions)
+    entries = Frame._context_entries(f)
+    kinds = [e[0] for e in entries]
+    assert kinds[0] != "sep" and kinds[-1] != "sep"
+    assert all(not (a == b == "sep") for a, b in zip(kinds, kinds[1:]))

@@ -295,3 +295,30 @@ def test_mac_item_list_accepts_row_numbers():
         lst.EnsureVisible(lst.RowToItem(1))  # an item still works
     finally:
         frame.Destroy()
+
+
+# ── Clone URLs (#50) ───────────────────────────────────────────────────
+
+
+def test_clone_urls():
+    assert ghviewer.clone_url("o/r") == "https://github.com/o/r.git"
+    assert ghviewer.clone_url("o/r", "ssh") == "git@github.com:o/r.git"
+
+
+@pytest.mark.parametrize("kind, expected, noun", [
+    ("https", "https://github.com/nvaccess/nvda.git", "HTTPS clone URL"),
+    ("ssh", "git@github.com:nvaccess/nvda.git", "SSH clone URL"),
+])
+def test_copy_clone_url_of_the_repository_in_front(kind, expected, noun):
+    f = _frame()
+    f._repo_in_front = lambda: "nvaccess/nvda"
+    Frame._copy_clone_url(f, kind)
+    assert f.clipboard == [expected]
+    assert f.announced == [f"Copied {noun}: {expected}"]
+
+
+def test_copy_clone_url_with_no_repository_says_so():
+    f = _frame()
+    f._repo_in_front = lambda: None
+    Frame._copy_clone_url(f, "https")
+    assert f.clipboard == [] and "Select a repository first" in f.announced[0]

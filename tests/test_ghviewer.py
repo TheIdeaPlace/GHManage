@@ -636,7 +636,7 @@ def test_enter_on_a_starred_repo_opens_it_and_remembers_the_way_back():
     f.git_items, f._activity_more, f.current_limit = [STAR], False, 200
     f._focused_item = lambda: STAR
     opened = []
-    f._select_repo = opened.append
+    f._select_repo = lambda repo, view=ghviewer.VIEW_ISSUES: opened.append(repo)
     f._open_repo_from_list = lambda repo, item: Frame._open_repo_from_list(f, repo, item)
     Frame.on_item_activated(f, None)
     assert opened == ["nvaccess/nvda"] and f.repo_list.selection == 0
@@ -719,7 +719,7 @@ def test_g_with_a_filter_goes_to_the_repo_you_heard():
     f._activity_more, f.current_limit = True, 100
     f._focused_item = lambda: Frame._focused_item(f)
     opened = []
-    f._select_repo = opened.append
+    f._select_repo = lambda repo, view=ghviewer.VIEW_ISSUES: opened.append(repo)
     Frame._go_to_event_repo(f)
     assert opened == ["o/c"]
 
@@ -839,7 +839,7 @@ def test_activity_loaded_status(call_later):
     Frame._on_activity_loaded(f, 1, [EVENT] * 100, True)
     msg, keys = f.statuses[-1]
     assert msg == "Activity — 100 events, newest first. Ctrl++ loads older ones."
-    assert "G=go to repository" in keys and "Enter=open in browser" in keys
+    assert "G=go to repository" in keys and "Enter=open  " in keys
     assert f._activity_more is True
     assert f.git_items == [EVENT] * 100
     assert call_later[-1][1] == (0,)  # focus on the newest
@@ -938,7 +938,7 @@ def test_go_to_event_repo_opens_it_and_selects_it_in_the_list():
     f.git_items, f._activity_more, f.current_limit = [EVENT], True, 200
     f._focused_item = lambda: EVENT
     opened = []
-    f._select_repo = opened.append
+    f._select_repo = lambda repo, view=ghviewer.VIEW_ISSUES: opened.append(repo)
     Frame._go_to_event_repo(f)
     assert opened == ["x/proj"] and f.repo_list.selection == 0
     # Remembered for Backspace: the events, whether there are more, the event
@@ -952,7 +952,7 @@ def test_go_to_a_repo_not_in_the_list_deselects_activity():
     f.list_ctrl = FakeItemList(0)
     f.git_items, f._activity_more, f.current_limit = [EVENT], False, 100
     f._focused_item = lambda: EVENT
-    f._select_repo = lambda r: None
+    f._select_repo = lambda r, view=None: None
     Frame._go_to_event_repo(f)
     assert f.repo_list.selection == ghviewer.wx.NOT_FOUND
 
@@ -1042,7 +1042,7 @@ def test_backspace_after_g_with_a_filter_lands_on_that_event(call_later):
     f._activity_more, f.filter_text = True, "o/c"
     f._focused_item = lambda: Frame._focused_item(f)
     f._row_item = lambda row: Frame._row_item(f, row)
-    f._select_repo = lambda repo: setattr(f, "view_mode", ghviewer.VIEW_ISSUES)
+    f._select_repo = lambda repo, view=ghviewer.VIEW_ISSUES: setattr(f, "view_mode", view)
     Frame._go_to_event_repo(f)
 
     f._switch_view = lambda mode, load=True: (setattr(f, "view_mode", mode),
@@ -1406,7 +1406,7 @@ def test_enter_on_a_favorite_repository_opens_it_here_and_backspace_returns():
     f.favorites, f.git_items, f._activity_more, f.current_limit = [fav], [fav], False, 100
     f._focused_item = lambda: fav
     opened = []
-    f._select_repo = opened.append
+    f._select_repo = lambda repo, view=ghviewer.VIEW_ISSUES: opened.append(repo)
     Frame.on_item_activated(f, None)
     assert opened == ["nvaccess/nvda"]
     assert f._return_to[0] == ghviewer.VIEW_FAVORITES and f._return_to[3] is fav
@@ -1449,3 +1449,100 @@ def test_the_character_after_a_claimed_key_goes_no_further(monkeypatch, claimed)
     later = CharEvent()
     Frame.on_list_char(f, later)
     assert later.passed_on
+
+
+# ── Enter in Activity opens the event's subject here (#42) ─────────────
+
+
+def _subject_event(**kw):
+    base = dict(event_type="IssueCommentEvent", actor="alice", repo="o/r",
+                action="commented on issue #12")
+    base.update(kw)
+    return ghviewer.ActivityEvent(**base)
+
+
+def _event_frame():
+    f = _frame(view_mode=ghviewer.VIEW_ACTIVITY)
+    f.opened, f.browsed = [], []
+    f._open_item_here = lambda item: f.opened.append(("item", item.repo, item.number))
+    f._open_repo_from_list = lambda repo, item, view=ghviewer.VIEW_ISSUES, branch="": (
+        f.opened.append(("repo", repo, view) + ((branch,) if branch else ())))
+    f._set_pending_target = lambda view, kind, ref: f.opened.append(("target", kind, ref))
+    return f
+
+
+def test_enter_on_an_issue_event_opens_the_issue_here():
+    f = _event_frame()
+    Frame._open_event(f, _subject_event(subject_kind="issue", number=12,
+                                url="https://github.com/o/r/issues/12#issuecomment-1"))
+    assert f.opened == [("item", "o/r", 12)]
+
+
+@pytest.mark.parametrize("url, view, kind, ref", [
+    ("https://github.com/o/r/releases/tag/v1.2", ghviewer.VIEW_RELEASES, "release", "v1.2"),
+    ("https://github.com/o/r/commit/abc1234#commitcomment-9", ghviewer.VIEW_COMMITS,
+     "commit", "abc1234"),
+])
+def test_enter_on_a_release_or_commit_event_opens_its_view_here(url, view, kind, ref):
+    f = _event_frame()
+    Frame._open_event(f, _subject_event(event_type="ReleaseEvent", url=url))
+    assert f.opened == [("repo", "o/r", view), ("target", kind, ref)]
+
+
+def test_enter_on_an_event_with_no_view_here_opens_github(monkeypatch):
+    opened = []
+    monkeypatch.setattr(ghviewer.webbrowser, "open", opened.append)
+    f = _event_frame()
+    url = "https://github.com/o/r/compare/aaa...bbb"
+    Frame._open_event(f, _subject_event(event_type="PushEvent", action="pushed 2 commits", url=url))
+    assert f.opened == [] and opened == [url]
+
+
+def test_backspace_returns_from_the_view_an_event_opened_in():
+    f = _frame(view_mode=ghviewer.VIEW_COMMITS, _return_to=("x",),
+               _return_view=ghviewer.VIEW_COMMITS, label_filter="")
+    went = []
+    f._return_to_list = lambda: went.append("back")
+    f._switch_view = lambda view: went.append(("parent", view))
+    f._modifiers_down = lambda ev: False
+    Frame._on_list_key(f, FakeListKey(ghviewer.wx.WXK_BACK))
+    # Back to Activity, not up to Branches, Commits' usual parent
+    assert went == ["back"]
+
+
+def test_enter_on_a_branch_address_opens_its_commits():
+    f = _event_frame()
+    Frame._open_event(f, _subject_event(event_type="CreateEvent",
+                                        url="https://github.com/o/r/tree/fix-focus"))
+    # On that branch, with nothing to select in it
+    assert f.opened == [("repo", "o/r", ghviewer.VIEW_COMMITS, "fix-focus")]
+
+
+def test_open_in_browser_on_an_event_opens_github(monkeypatch):
+    opened = []
+    monkeypatch.setattr(ghviewer.webbrowser, "open", opened.append)
+    f = _event_frame()
+    url = "https://github.com/o/r/issues/12#issuecomment-1"
+    Frame._open_event(f, _subject_event(subject_kind="issue", number=12, url=url),
+                      in_browser=True)
+    assert f.opened == [] and opened == [url]
+
+
+@pytest.mark.parametrize("view, return_view, keys, expected", [
+    # Commits reached from Activity: back to Activity, not to Branches
+    (ghviewer.VIEW_COMMITS, ghviewer.VIEW_COMMITS, "R=refresh  Backspace=back to branches",
+     "R=refresh  Backspace=back to activity"),
+    (ghviewer.VIEW_RELEASES, ghviewer.VIEW_RELEASES, "R=refresh  Enter=list assets",
+     "R=refresh  Enter=list assets  Backspace=back to activity"),
+    # Somewhere else: as it was
+    (ghviewer.VIEW_COMMITS, ghviewer.VIEW_ISSUES, "Backspace=back to branches",
+     "Backspace=back to branches"),
+])
+def test_the_status_bar_names_the_way_back(view, return_view, keys, expected):
+    set_items = {}
+    f = _frame(view_mode=view, _return_to=(ghviewer.VIEW_ACTIVITY, [], False, None, 100),
+               _return_view=return_view)
+    f.status_bar = SimpleNamespace(set_item=lambda k, v: set_items.__setitem__(k, v))
+    f._update_filter_status = lambda: None
+    Frame._set_view_status(f, "msg", keys)
+    assert set_items["keys"] == expected

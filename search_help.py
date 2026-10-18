@@ -126,12 +126,23 @@ def matching(operators: list[Operator], text: str) -> list[Operator]:
 
 
 def insert_operator(query: str, at: int, op: Operator) -> tuple[str, int]:
-    """``query`` with ``op`` put in at position ``at``, and the position just
-    after it. A space goes before it unless it starts the query or follows one."""
+    """``query`` with ``op`` put in at position ``at``, and the cursor's place
+    after it, ready for a value when it takes one.
+
+    In the middle of a word it goes after the word, not into it. It always
+    stands apart from the words either side, so "label:" never joins onto
+    the next word and becomes "label:crash".
+    """
     at = max(0, min(at, len(query)))
+    while 0 < at < len(query) and query[at] != " " and query[at - 1] != " ":
+        at += 1  # inside a word: to its end
     before, after = query[:at], query[at:]
     lead = "" if not before or before.endswith(" ") else " "
     text = lead + op.insert
-    if after.startswith(" ") and text.endswith(" "):
+    cursor = len(before) + len(text)
+    if after and not after.startswith(" ") and not text.endswith(" "):
+        text += " "  # "label: crash": the value is typed before the space
+    elif after.startswith(" ") and text.endswith(" "):
         text = text[:-1]  # one space between, not two
-    return before + text + after, len(before) + len(text)
+        cursor -= 1
+    return before + text + after, cursor

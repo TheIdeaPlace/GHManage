@@ -42,6 +42,10 @@ OPEN = search_help.Operator("is:open", "Open", "is:open")
     ("crash ", 6, OPEN, "crash is:open ", 14),
     ("crash repo:o/r", 5, OPEN, "crash is:open repo:o/r", 13),
     ("x", 99, LABEL, "x label:", 8),             # past the end: at the end
+    # The whole last query selected: Windows puts the cursor at its start
+    ("crash", 0, LABEL, "label: crash", 6),
+    # Inside a word: after the word, not into it
+    ("braille", 4, OPEN, "braille is:open ", 16),
 ])
 def test_insert_operator_at_the_cursor(query, at, op, expected, cursor):
     assert search_help.insert_operator(query, at, op) == (expected, cursor)

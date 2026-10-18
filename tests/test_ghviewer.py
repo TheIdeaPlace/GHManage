@@ -1465,8 +1465,8 @@ def _event_frame():
     f = _frame(view_mode=ghviewer.VIEW_ACTIVITY)
     f.opened, f.browsed = [], []
     f._open_item_here = lambda item: f.opened.append(("item", item.repo, item.number))
-    f._open_repo_from_list = lambda repo, item, view=ghviewer.VIEW_ISSUES: f.opened.append(
-        ("repo", repo, view))
+    f._open_repo_from_list = lambda repo, item, view=ghviewer.VIEW_ISSUES, branch="": (
+        f.opened.append(("repo", repo, view) + ((branch,) if branch else ())))
     f._set_pending_target = lambda view, kind, ref: f.opened.append(("target", kind, ref))
     return f
 
@@ -1508,3 +1508,41 @@ def test_backspace_returns_from_the_view_an_event_opened_in():
     Frame._on_list_key(f, FakeListKey(ghviewer.wx.WXK_BACK))
     # Back to Activity, not up to Branches, Commits' usual parent
     assert went == ["back"]
+
+
+def test_enter_on_a_branch_address_opens_its_commits():
+    f = _event_frame()
+    Frame._open_event(f, _subject_event(event_type="CreateEvent",
+                                        url="https://github.com/o/r/tree/fix-focus"))
+    # On that branch, with nothing to select in it
+    assert f.opened == [("repo", "o/r", ghviewer.VIEW_COMMITS, "fix-focus")]
+
+
+def test_open_in_browser_on_an_event_opens_github(monkeypatch):
+    opened = []
+    monkeypatch.setattr(ghviewer.webbrowser, "open", opened.append)
+    f = _event_frame()
+    url = "https://github.com/o/r/issues/12#issuecomment-1"
+    Frame._open_event(f, _subject_event(subject_kind="issue", number=12, url=url),
+                      in_browser=True)
+    assert f.opened == [] and opened == [url]
+
+
+@pytest.mark.parametrize("view, return_view, keys, expected", [
+    # Commits reached from Activity: back to Activity, not to Branches
+    (ghviewer.VIEW_COMMITS, ghviewer.VIEW_COMMITS, "R=refresh  Backspace=back to branches",
+     "R=refresh  Backspace=back to activity"),
+    (ghviewer.VIEW_RELEASES, ghviewer.VIEW_RELEASES, "R=refresh  Enter=list assets",
+     "R=refresh  Enter=list assets  Backspace=back to activity"),
+    # Somewhere else: as it was
+    (ghviewer.VIEW_COMMITS, ghviewer.VIEW_ISSUES, "Backspace=back to branches",
+     "Backspace=back to branches"),
+])
+def test_the_status_bar_names_the_way_back(view, return_view, keys, expected):
+    set_items = {}
+    f = _frame(view_mode=view, _return_to=(ghviewer.VIEW_ACTIVITY, [], False, None, 100),
+               _return_view=return_view)
+    f.status_bar = SimpleNamespace(set_item=lambda k, v: set_items.__setitem__(k, v))
+    f._update_filter_status = lambda: None
+    Frame._set_view_status(f, "msg", keys)
+    assert set_items["keys"] == expected

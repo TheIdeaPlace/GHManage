@@ -731,10 +731,19 @@ def go_to_submenu() -> tuple:
     return ("sub", "Go To", [("item", ID_GO_TO_VIEW[view], label) for view, label in REPO_GO_TO])
 
 
-# An Activity event's address, by kind, and the view it opens in here.
-EVENT_TARGET_VIEWS = {"commit": VIEW_COMMITS, "release": VIEW_RELEASES, "run": VIEW_WORKFLOW}
+# The view a GitHub address of each kind opens in here, for Open Address
+# and Activity alike; and the kinds whose own row is then selected.
+ADDRESS_VIEWS = {
+    "item": VIEW_ISSUES,
+    "commit": VIEW_COMMITS,
+    "branch": VIEW_COMMITS,
+    "release": VIEW_RELEASES,
+    "run": VIEW_WORKFLOW,
+}
+PENDING_KINDS = ("item", "commit", "release", "run")
 # Views that load everything at once, where View More has nothing to add.
-NO_MORE_VIEWS = (VIEW_FAVORITES, VIEW_MY_WORK, VIEW_ORGS)
+NO_MORE_VIEWS = (VIEW_FAVORITES, VIEW_MY_WORK, VIEW_ORGS, VIEW_JOBS, VIEW_ARTIFACTS,
+                 VIEW_PAGES, VIEW_PAGEFILES)
 # Views listing repositories; Enter on one opens it here.
 REPO_LIST_VIEWS = (VIEW_STARRED, VIEW_WATCHED, VIEW_ORG, VIEW_SHARED)
 
@@ -4283,6 +4292,13 @@ class GhViewerFrame(wx.Frame):
         A load in progress passes no keys, which takes the last view's keys off
         the bar — they may not work in the view that is on its way.
         """
+        if (keys and getattr(self, "_return_to", None)
+                and self.view_mode == getattr(self, "_return_view", VIEW_ISSUES)):
+            # Backspace goes back to the list this was opened from, whatever
+            # it would do in this view otherwise (Commits > Branches).
+            back = f"Backspace=back to {self._view_label(self._return_to[0], lower=True)}"
+            keys = "  ".join([k for k in keys.split("  ") if k and not k.startswith("Backspace=")]
+                             + [back])
         self.status_bar.set_item("message", message)
         self.status_bar.set_item("keys", keys)
         self._update_filter_status()
@@ -4425,6 +4441,7 @@ class GhViewerFrame(wx.Frame):
         VIEW_LABELS: "List Issues and PRs with This Label",
         VIEW_PAGES: "Browse Published Pages",
         VIEW_NOTIFICATIONS: "Open",
+        VIEW_ACTIVITY: "Open",
         VIEW_MY_WORK: "Open Here",
         VIEW_SEARCH_ISSUES: "Open Here",
         VIEW_SEARCH_REPOS: "Open Here",
@@ -4484,14 +4501,14 @@ class GhViewerFrame(wx.Frame):
         while entries and entries[-1] == ("sep",):
             entries.pop()
         if isinstance(item, RepoEntry):
-            # After Enter's entry and its separator.
-            at = 2 if entries[:1] and entries[0][1] == ID_CTX_OPEN else 0
-            entries[at:at] = [go_to_submenu(), ("sep",)]
+            # After Enter's entry.
+            at = 1 if entries[:1] and entries[0][1] == ID_CTX_OPEN else 0
+            entries[at:at] = [("sep",), go_to_submenu(), ("sep",)]
         # View More lives on the File menu, so it was missing here, where
         # people look for "what else can I do in this list" (#52).
         if self.view_mode not in NO_MORE_VIEWS:
             entries += ([("sep",)] if entries else []) + [
-                ("item", ID_VIEW_MORE, "View More	Ctrl++")]
+                ("item", ID_VIEW_MORE, "View More\tCtrl++")]
         # Say which way F goes for this row, or leave it off where there is
         # nothing it could favorite.
         if self.view_mode == VIEW_FAVORITES:
@@ -4507,8 +4524,12 @@ class GhViewerFrame(wx.Frame):
             if entry[0] == "item" and entry[1] == ID_FAVORITE:
                 if fav_label:
                     out.append(("item", ID_FAVORITE, fav_label))
+            elif entry == ("sep",) and (not out or out[-1] == ("sep",)):
+                continue
             else:
                 out.append(entry)
+        while out and out[-1] == ("sep",):
+            out.pop()
         return out
 
     @staticmethod
@@ -5004,17 +5025,20 @@ class GhViewerFrame(wx.Frame):
         webbrowser.open(self.pages_site.url)
         self._announce(f"Opened {self.pages_site.url} in browser")
 
-    def _open_event(self, item: ActivityEvent) -> None:
+    def _open_event(self, item: ActivityEvent, in_browser: bool = False) -> None:
         """Enter in Activity: what the event is about, here when GHManage has
-        a view for it, with Backspace back to the event; otherwise on GitHub."""
-        if item.subject_kind in ("issue", "PR") and item.number and item.repo:
+        a view for it, with Backspace back to the event; otherwise, and for
+        Open in Browser (Ctrl+O), on GitHub."""
+        if not in_browser and item.subject_kind in ("issue", "PR") and item.number and item.repo:
             self._open_item_here(item)
             return
-        target = parse_github_url(item.url) if item.url else None
-        view = EVENT_TARGET_VIEWS.get(target.kind) if target else None
-        if view and target.repo:
-            self._open_repo_from_list(target.repo, item, view)
-            self._set_pending_target(view, target.kind, target.ref)
+        target = parse_github_url(item.url) if item.url and not in_browser else None
+        view = ADDRESS_VIEWS.get(target.kind) if target else None
+        if view and target.repo and target.kind != "item":
+            branch = target.ref if target.kind == "branch" else ""
+            self._open_repo_from_list(target.repo, item, view, branch=branch)
+            if target.kind in PENDING_KINDS:
+                self._set_pending_target(view, target.kind, target.ref)
             return
         if not item.url:
             self._announce("No URL for this event")
@@ -5036,9 +5060,10 @@ class GhViewerFrame(wx.Frame):
             return
         self._open_repo_from_list(item.repo, item)
 
-    def _open_repo_from_list(self, repo: str, item, view: str = VIEW_ISSUES) -> None:
+    def _open_repo_from_list(self, repo: str, item, view: str = VIEW_ISSUES,
+                             branch: str = "") -> None:
         """Open ``repo`` from a list of many (Activity, Starred, Watched), in
-        ``view``.
+        ``view``; for Commits, on ``branch`` or else the default branch.
 
         Remembers the list and the item you were on, so Backspace from that
         view brings you back to it.
@@ -5054,7 +5079,7 @@ class GhViewerFrame(wx.Frame):
         saved = (self.view_mode, list(self._view_source()), bool(more),
                  item, self.current_limit)
         if view == VIEW_COMMITS:
-            self.commit_branch = ""  # the default branch
+            self.commit_branch = branch
         self._select_repo(repo, view)
         # Set after _select_repo, which clears it for an ordinary repo change.
         self._return_to = saved
@@ -5362,7 +5387,7 @@ class GhViewerFrame(wx.Frame):
         if not item:
             return
         if isinstance(item, ActivityEvent):
-            self._open_event(item)
+            self._open_event(item, in_browser=True)
             return
         if isinstance(item, Notification):
             self._open_notification(item, in_browser=True)
@@ -5467,19 +5492,13 @@ class GhViewerFrame(wx.Frame):
             self._refresh_repo_list()
             self._select_repo(repo)
             return
-        view = {
-            "item": VIEW_ISSUES,
-            "commit": VIEW_COMMITS,
-            "branch": VIEW_COMMITS,
-            "release": VIEW_RELEASES,
-            "run": VIEW_WORKFLOW,
-        }.get(target.kind, target.ref if target.kind == "view" else VIEW_ISSUES)
+        view = ADDRESS_VIEWS.get(target.kind, target.ref if target.kind == "view" else VIEW_ISSUES)
         if view == VIEW_COMMITS:
             # Set before the switch, which loads the commits of commit_branch:
             # the branch named, or the default branch for a commit address.
             self.commit_branch = target.ref if target.kind == "branch" else ""
         self._select_repo(repo, view)
-        if target.kind in ("item", "commit", "release", "run"):
+        if target.kind in PENDING_KINDS:
             self._set_pending_target(view, target.kind, target.ref)
         self._select_in_repo_list(repo)
 

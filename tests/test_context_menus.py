@@ -211,7 +211,7 @@ def test_an_expired_artifact_offers_no_download():
     actions = FakeMenu(FakeItem(ghviewer.ID_ACT_DOWNLOAD_ARTIFACT, "Download Artifact…"),
                        FakeItem(9, "Copy"))
     f = _frame(ghviewer.VIEW_ARTIFACTS, Artifact(1, "build", 10, True, "", 9), actions)
-    assert Frame._context_entries(f) == [("item", 9, "Copy"), ("sep",), MORE]
+    assert Frame._context_entries(f) == [("item", 9, "Copy")]   # all there is: no View More
 
 
 @pytest.mark.parametrize("view", [ghviewer.VIEW_FAVORITES, ghviewer.VIEW_MY_WORK, ghviewer.VIEW_ORGS])
@@ -266,3 +266,14 @@ def test_go_to_commits_starts_on_the_default_branch():
     f._select_in_repo_list = lambda repo: None
     Frame._go_to_repo_view(f, ghviewer.VIEW_COMMITS)
     assert f.commit_branch == ""
+
+
+def test_never_two_separators_together_or_at_either_end():
+    from gh_data import RepoEntry
+    # Every action greyed out: Enter's entry, Go To and View More
+    actions = FakeMenu(SEP, FakeItem(5, "Close", enabled=False), SEP)
+    f = _frame(ghviewer.VIEW_STARRED, RepoEntry("o/r", url="u"), actions)
+    entries = Frame._context_entries(f)
+    kinds = [e[0] for e in entries]
+    assert kinds[0] != "sep" and kinds[-1] != "sep"
+    assert all(not (a == b == "sep") for a, b in zip(kinds, kinds[1:]))

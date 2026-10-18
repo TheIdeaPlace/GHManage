@@ -288,56 +288,90 @@ def test_detect_repo_failure_is_none(fake_gh, reply):
     assert gh_data.detect_repo() is None
 
 
-def _repos_reply(own, org=()):
+def _repos_reply(own, orgs=(), shared=()):
     return {"data": {"viewer": {"own": {"nodes": list(own)},
-                                "org": {"nodes": list(org)}}}}
+                                "organizations": {"nodes": list(orgs)},
+                                "shared": {"nodes": list(shared)}}}}
 
 
-def test_list_repos_includes_organization_repos(monkeypatch):
+def _org(login, admin=False, count=3):
+    return {"login": login, "viewerCanAdminister": admin,
+            "repositories": {"totalCount": count}}
+
+
+def test_list_repos_lists_your_own_and_names_your_organizations(monkeypatch):
     queries = []
     own = [{"nameWithOwner": "me/a", "pushedAt": "2026-01-01T00:00:00Z"}]
-    org = [{"nameWithOwner": "myorg/b", "pushedAt": "2026-02-01T00:00:00Z"}]
-    monkeypatch.setattr(gh_data, "_graphql",
-                        lambda q: queries.append(q) or _repos_reply(own, org))
-    # Merged, most recently pushed first
-    assert [r["nameWithOwner"] for r in gh_data.list_repos(5)] == ["myorg/b", "me/a"]
+    monkeypatch.setattr(gh_data, "_graphql", lambda q: queries.append(q) or _repos_reply(
+        own, [_org("bigorg", count=1108), _org("mine", admin=True, count=13)]))
+    listing = gh_data.list_repos(5)
+    # Only your own repos: an organization's are under an entry of its own,
+    # so a big one (#40) can't bury them
+    assert listing.repos == own
+    # The organizations you run first, then by name
+    assert listing.orgs == [gh_data.OrgEntry("mine", True, 13),
+                            gh_data.OrgEntry("bigorg", False, 1108)]
     [query] = queries
-    # Your own and your organizations' asked for separately, so neither
-    # can crowd the other out
     assert "ownerAffiliations: [OWNER]" in query
-    assert "ownerAffiliations: [ORGANIZATION_MEMBER]" in query
-    assert query.count("first: 5,") == 2
-    assert "PUSHED_AT" in query
-
-
-def test_list_repos_lists_a_repo_once(monkeypatch):
-    repo = {"nameWithOwner": "me/a", "pushedAt": "2026-01-01T00:00:00Z"}
-    monkeypatch.setattr(gh_data, "_graphql", lambda q: _repos_reply([repo], [dict(repo)]))
-    assert gh_data.list_repos() == [repo]
+    assert "ORGANIZATION_MEMBER" not in query
+    assert "first: 5," in query and "PUSHED_AT" in query
 
 
 @pytest.mark.parametrize("limit, first", [(0, 1), (250, 100)])
-def test_list_repos_keeps_to_one_page_each(monkeypatch, limit, first):
+def test_list_repos_keeps_to_one_page(monkeypatch, limit, first):
     queries = []
     monkeypatch.setattr(gh_data, "_graphql",
                         lambda q: queries.append(q) or _repos_reply([]))
-    assert gh_data.list_repos(limit) == []
-    assert queries[0].count(f"first: {first},") == 2
+    assert gh_data.list_repos(limit).repos == []
+    assert f"first: {first}, ownerAffiliations: [OWNER]" in queries[0]
 
 
-def test_list_repos_drops_repos_it_was_refused(monkeypatch):
+def test_shared_leaves_out_your_organizations_repos(monkeypatch):
+    # You stay a collaborator on a repo you move into an organization; it is
+    # already under that organization's entry
+    shared = [{"owner": {"login": "Mine"}}, {"owner": {"login": "friend"}}, None]
+    monkeypatch.setattr(gh_data, "_graphql",
+                        lambda q: _repos_reply([], [_org("mine")], shared))
+    assert gh_data.list_repos().shared == 1
+
+
+def test_shared_past_one_page_is_uncounted(monkeypatch):
+    shared = [{"owner": {"login": "friend"}}] * 100
+    monkeypatch.setattr(gh_data, "_graphql", lambda q: _repos_reply([], [], shared))
+    assert gh_data.list_repos().shared is None
+
+
+def test_list_repos_drops_organizations_it_was_refused(monkeypatch):
     # An organization that blocks the app comes back as null, with an error
-    reply = _repos_reply([{"nameWithOwner": "me/a"}], [None])
+    reply = _repos_reply([{"nameWithOwner": "me/a"}, None], [None, _org("ok")])
     reply["errors"] = [{"message": "OAuth App access restrictions"}]
     monkeypatch.setattr(gh_data, "_graphql", lambda q: reply)
-    assert gh_data.list_repos() == [{"nameWithOwner": "me/a"}]
+    listing = gh_data.list_repos()
+    assert listing.repos == [{"nameWithOwner": "me/a"}]
+    assert [o.login for o in listing.orgs] == ["ok"]
 
 
-def test_list_repos_one_half_failing_still_lists_the_other(monkeypatch):
-    reply = {"data": {"viewer": {"own": {"nodes": [{"nameWithOwner": "me/a"}]}, "org": None}},
+def test_list_repos_without_organizations_still_lists_yours(monkeypatch):
+    reply = {"data": {"viewer": {"own": {"nodes": [{"nameWithOwner": "me/a"}]},
+                                 "organizations": None, "shared": None}},
              "errors": [{"message": "Something went wrong"}]}
     monkeypatch.setattr(gh_data, "_graphql", lambda q: reply)
-    assert gh_data.list_repos() == [{"nameWithOwner": "me/a"}]
+    listing = gh_data.list_repos()
+    assert listing.repos == [{"nameWithOwner": "me/a"}]
+    assert listing.orgs == [] and listing.shared == 0
+
+
+def test_fetch_org_repos_most_recently_pushed_first(fake_gh):
+    fake_gh.route("orgs/bigorg/repos?sort=pushed", [{"full_name": "bigorg/a"}, {"name": "x"}])
+    assert [r.name for r in gh_data.fetch_org_repos("bigorg", 10)] == ["bigorg/a"]
+
+
+def test_fetch_shared_repos_skips_your_organizations(fake_gh):
+    fake_gh.route("affiliation=collaborator", [
+        {"full_name": "Mine/a", "owner": {"login": "Mine"}},
+        {"full_name": "friend/b", "owner": {"login": "friend"}},
+    ])
+    assert [r.name for r in gh_data.fetch_shared_repos(10, ["mine"])] == ["friend/b"]
 
 
 @pytest.mark.parametrize("reply, message", [
@@ -472,3 +506,36 @@ def test_create_issue_without_an_address_is_an_error(fake_gh, monkeypatch):
     fake_gh.route("issue create", "something odd\n")
     with pytest.raises(gh_data.GhError):
         gh_data.create_issue("o/r", "T", "")
+
+
+def test_without_read_org_your_own_repos_still_list(monkeypatch):
+    # A token without read:org fails the whole query over `organizations`
+    queries = []
+    own = [{"nameWithOwner": "me/a"}]
+
+    def graphql(q):
+        queries.append(q)
+        if "organizations" in q:
+            return {"data": None, "errors": [{"type": "INSUFFICIENT_SCOPES",
+                                              "message": "needs read:org"}]}
+        return _repos_reply(own)
+    monkeypatch.setattr(gh_data, "_graphql", graphql)
+    listing = gh_data.list_repos()
+    assert listing.repos == own and listing.orgs == [] and listing.shared == 0
+    assert len(queries) == 2
+
+
+def test_a_full_page_of_only_your_organizations_is_nothing_shared(monkeypatch):
+    shared = [{"owner": {"login": "bigorg"}}] * 100
+    monkeypatch.setattr(gh_data, "_graphql",
+                        lambda q: _repos_reply([], [_org("bigorg")], shared))
+    assert gh_data.list_repos().shared == 0
+
+
+def test_shared_repos_stop_after_ten_pages(fake_gh):
+    # A collaborator on a thousand of their organization's repos isn't kept
+    # waiting for every page to find the few shared from outside
+    fake_gh.route("affiliation=collaborator",
+                  [{"full_name": f"bigorg/r{i}", "owner": {"login": "bigorg"}} for i in range(100)])
+    assert gh_data.fetch_shared_repos(100, ["bigorg"]) == []
+    assert len(fake_gh.calls) == 11

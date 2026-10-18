@@ -187,18 +187,20 @@ details panel).
 | `Ctrl+Shift+M` | My Work |
 | `Ctrl+Shift+A` | Activity |
 
-Every view except Favorites, Activity, Starred Repositories, Watched Repositories,
-Notifications, My Work and search results needs a repository, so with none selected
+Every view except Favorites, Activity, Starred and Watched Repositories, Shared With Me,
+an organization's repositories, Notifications, My Work and search results needs a
+repository, so with none selected
 the status bar says "Select a repository first" and the view is left alone. Those don't change
 the repository you are in, so `Ctrl+1` takes you back to it.
 
 ### Starred and watched repositories
 
-The repository list starts with six entries that aren't single repositories:
+The repository list starts with seven entries that aren't single repositories:
 **★ Favorites**, **Activity**, **Starred Repositories**, **Watched Repositories**,
-**Notifications** and **My Work**. After them come your saved searches, any
-repositories you opened by address, then your own repositories and those of
-organizations you belong to. Starred and Watched are also on View ▸ View Mode.
+**Notifications**, **My Work** and **My Organizations** (Enter on an organization
+lists its repositories). After them come **Shared With Me** (other people's
+repositories you collaborate on, when there are any), your saved searches, any
+repositories you opened by address, then your own repositories. Starred and Watched are also on View ▸ View Mode.
 
 - **Starred Repositories** — the repositories you have starred, most recently
   starred first.

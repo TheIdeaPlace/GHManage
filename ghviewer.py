@@ -156,6 +156,13 @@ from gh_data import (
     count_watched_repos,
     fetch_starred_repos,
     fetch_watched_repos,
+    fetch_org_repos,
+    fetch_orgs,
+    fetch_shared_repos,
+    OrgEntry,
+    RepoListing,
+    ORG_COLUMNS,
+    ORG_DEFAULT_COLUMNS,
     open_in_browser,
     parent_repo,
     reopen_item,
@@ -532,6 +539,8 @@ def copy_values(item) -> CopyValues | None:
         return CopyValues(item.url, item.path, item.path, "Path", item.path)
     if isinstance(item, RepoEntry):
         return CopyValues(item.url, item.name, item.name, "Repository Name", item.name)
+    if isinstance(item, OrgEntry):
+        return CopyValues(item.url, item.login, item.login, "Organization Name", item.login)
     if isinstance(item, ActivityEvent):
         # What the event is about, when it is about something with an address
         # of its own — the same thing F favorites.
@@ -597,6 +606,9 @@ ID_VIEW_PAGES = wx.NewIdRef()
 ID_VIEW_ACTIVITY = wx.NewIdRef()
 ID_VIEW_STARRED = wx.NewIdRef()
 ID_VIEW_WATCHED = wx.NewIdRef()
+ID_VIEW_SHARED = wx.NewIdRef()
+ID_VIEW_ORGS = wx.NewIdRef()
+ID_FAVORITE = wx.NewIdRef()
 ID_VIEW_NOTIFICATIONS = wx.NewIdRef()
 ID_MARK_READ = wx.NewIdRef()
 ID_MARK_ALL_READ = wx.NewIdRef()
@@ -669,13 +681,18 @@ VIEW_NOTIFICATIONS = "notifications"  # your GitHub notifications
 VIEW_MY_WORK = "my_work"       # open issues and PRs that need you, everywhere
 VIEW_SEARCH_ISSUES = "search_issues"  # GitHub-wide search: issues and PRs
 VIEW_SEARCH_REPOS = "search_repos"    # GitHub-wide search: repositories
+VIEW_ORGS = "orgs"             # the organizations you belong to
+VIEW_ORG = "org"               # one organization's repositories (drill-down; which: _org)
+VIEW_SHARED = "shared"         # others' repositories you are a collaborator on
 
 # Views that are not views *of a repo*, so they work with none selected.
 REPOLESS_VIEWS = (VIEW_FAVORITES, VIEW_NOTIFICATIONS, VIEW_MY_WORK, VIEW_ACTIVITY,
-                  VIEW_STARRED, VIEW_WATCHED, VIEW_SEARCH_ISSUES, VIEW_SEARCH_REPOS)
+                  VIEW_STARRED, VIEW_WATCHED, VIEW_SEARCH_ISSUES, VIEW_SEARCH_REPOS,
+                  VIEW_ORGS, VIEW_ORG, VIEW_SHARED)
 # The repoless views fetched from GitHub (Favorites is read from disk).
 FEED_VIEWS = (VIEW_NOTIFICATIONS, VIEW_MY_WORK, VIEW_ACTIVITY, VIEW_STARRED,
-              VIEW_WATCHED, VIEW_SEARCH_ISSUES, VIEW_SEARCH_REPOS)
+              VIEW_WATCHED, VIEW_SEARCH_ISSUES, VIEW_SEARCH_REPOS, VIEW_ORGS, VIEW_ORG,
+              VIEW_SHARED)
 # Views listing issues and pull requests (Items), shown with the issue
 # details. Only Issues & PRs is of one repo; the issue actions (close,
 # reopen, comment) belong to it alone.
@@ -685,7 +702,7 @@ SEARCH_VIEWS = (VIEW_SEARCH_ISSUES, VIEW_SEARCH_REPOS)
 GO_TO_REPO_VIEWS = (VIEW_ACTIVITY, VIEW_NOTIFICATIONS, VIEW_MY_WORK, VIEW_SEARCH_ISSUES,
                     VIEW_SEARCH_REPOS)
 # Views listing repositories; Enter on one opens it here.
-REPO_LIST_VIEWS = (VIEW_STARRED, VIEW_WATCHED)
+REPO_LIST_VIEWS = (VIEW_STARRED, VIEW_WATCHED, VIEW_ORG, VIEW_SHARED)
 
 # clientData of the pseudo-entries at the top of the repository list.
 FAVORITES_ENTRY = "__favorites__"
@@ -696,6 +713,10 @@ SEARCH_ENTRY_PREFIX = "__search__:"
 ACTIVITY_ENTRY = "__activity__"
 STARRED_ENTRY = "__starred__"
 WATCHED_ENTRY = "__watched__"
+MY_ORGS_ENTRY = "__my_orgs__"
+# Shown only when someone has shared a repository with you.
+SHARED_ENTRY = "__shared__"
+SHARED_LABEL = "Shared With Me"
 
 # The category entries after ★ Favorites, in order, with their labels.
 CATEGORY_ENTRIES = [
@@ -706,6 +727,7 @@ CATEGORY_ENTRIES = [
     (WATCHED_ENTRY, "Watched Repositories"),
     (NOTIFICATIONS_ENTRY, "Notifications"),
     (MY_WORK_ENTRY, "My Work"),
+    (MY_ORGS_ENTRY, "My Organizations"),
 ]
 # Which repo-list entry stands for which view, both ways.
 VIEW_ENTRIES = {
@@ -715,6 +737,8 @@ VIEW_ENTRIES = {
     VIEW_ACTIVITY: ACTIVITY_ENTRY,
     VIEW_STARRED: STARRED_ENTRY,
     VIEW_WATCHED: WATCHED_ENTRY,
+    VIEW_SHARED: SHARED_ENTRY,
+    VIEW_ORGS: MY_ORGS_ENTRY,
 }
 ENTRY_VIEWS = {entry: view for view, entry in VIEW_ENTRIES.items()}
 # The categories whose entry carries a count, like ★ Favorites (6), and how
@@ -724,6 +748,9 @@ COUNTED_ENTRIES = {
     STARRED_ENTRY: count_starred_repos,
     WATCHED_ENTRY: count_watched_repos,
 }
+
+# The Actions menu item for F. Context menus name what it will do instead.
+FAVORITE_LABEL = "Add or Remove Favorite (F)"
 
 USER_GUIDE_URL = "https://theideaplace.github.io/GHManage/"
 
@@ -736,6 +763,7 @@ PARENT_VIEW = {
     VIEW_JOBS: VIEW_WORKFLOW,
     VIEW_ASSETS: VIEW_RELEASES,
     VIEW_PAGEFILES: VIEW_PAGES,
+    VIEW_ORG: VIEW_ORGS,
 }
 
 # Columns for the favorites view (mixed item types)
@@ -765,6 +793,9 @@ VIEW_COLUMNS = {
     VIEW_MY_WORK: (MY_WORK_DEFAULT_COLUMNS, MY_WORK_COLUMNS),
     VIEW_SEARCH_ISSUES: (SEARCH_ITEM_DEFAULT_COLUMNS, SEARCH_ITEM_COLUMNS),
     VIEW_SEARCH_REPOS: (REPO_DEFAULT_COLUMNS, REPO_COLUMNS),
+    VIEW_ORGS: (ORG_DEFAULT_COLUMNS, ORG_COLUMNS),
+    VIEW_ORG: (REPO_DEFAULT_COLUMNS, REPO_COLUMNS),
+    VIEW_SHARED: (REPO_DEFAULT_COLUMNS, REPO_COLUMNS),
 }
 
 
@@ -1574,6 +1605,12 @@ class GhViewerFrame(wx.Frame):
         self._repos_loaded_once: bool = False
         # How many repositories each counted category holds, once known.
         self._category_counts: dict[str, int] = {}
+        # The organizations you belong to, for My Organizations, and the one
+        # whose repositories are showing.
+        self._orgs: list = []
+        self._org: str = ""
+        # Whether the Shared With Me entry is in the repo list.
+        self._show_shared: bool = False
 
         self._build_ui()
         self._bind_events()
@@ -1730,6 +1767,8 @@ class GhViewerFrame(wx.Frame):
                            "repo": 220, "updated": 130})
         elif self.view_mode in (VIEW_MY_WORK, VIEW_SEARCH_ISSUES):
             widths.update({"why": 130, "repo": 200, "title": 380})
+        elif self.view_mode == VIEW_ORGS:
+            widths.update({"organization": 240, "role": 100, "repositories": 110})
         elif self.view_mode in REPO_LIST_VIEWS or self.view_mode == VIEW_SEARCH_REPOS:
             widths.update({"repo": 240, "description": 380, "language": 100,
                            "stars": 80, "pushed": 100, "owner": 140})
@@ -1779,6 +1818,9 @@ class GhViewerFrame(wx.Frame):
         self._act_copy_ident = copy_menu.Append(ID_COPY_IDENT, "Copy Number\tCtrl+Shift+I")
         copy_menu.Append(ID_COPY_DETAILS, "Copy Details\tCtrl+Shift+D")
         actions_menu.AppendSubMenu(copy_menu, "Copy")
+        # F is the key, in the list and in the repository list. It acts on the
+        # repository when the repository list has focus, as Copy does.
+        actions_menu.Append(ID_FAVORITE, FAVORITE_LABEL)
         actions_menu.AppendSeparator()
         self._act_close = actions_menu.Append(ID_CLOSE_ITEM, "Close Issue/PR\tCtrl+W")
         self._act_reopen = actions_menu.Append(ID_REOPEN, "Reopen Issue/PR\tCtrl+Shift+W")
@@ -1869,6 +1911,9 @@ class GhViewerFrame(wx.Frame):
         show_menu.AppendRadioItem(ID_VIEW_ACTIVITY, "Activity\tCtrl+Shift+A")
         show_menu.AppendRadioItem(ID_VIEW_STARRED, "Starred Repositories")
         show_menu.AppendRadioItem(ID_VIEW_WATCHED, "Watched Repositories")
+        show_menu.AppendRadioItem(ID_VIEW_SHARED, "Shared With Me")
+        # Checked too while one organization's repositories are showing.
+        show_menu.AppendRadioItem(ID_VIEW_ORGS, "My Organizations")
         view_menu.AppendSubMenu(show_menu, "View Mode")
 
         view_menu.AppendSeparator()
@@ -1963,6 +2008,9 @@ class GhViewerFrame(wx.Frame):
         self.Bind(wx.EVT_MENU, lambda e: self._unsubscribe_notification(), id=ID_UNSUBSCRIBE)
         self.Bind(wx.EVT_MENU, self.on_view_starred, id=ID_VIEW_STARRED)
         self.Bind(wx.EVT_MENU, self.on_view_watched, id=ID_VIEW_WATCHED)
+        self.Bind(wx.EVT_MENU, self.on_view_shared, id=ID_VIEW_SHARED)
+        self.Bind(wx.EVT_MENU, self.on_view_orgs, id=ID_VIEW_ORGS)
+        self.Bind(wx.EVT_MENU, self.on_favorite, id=ID_FAVORITE)
         self.Bind(wx.EVT_MENU, self.on_go_to_event_repo, id=ID_GO_TO_EVENT_REPO)
         self.Bind(wx.EVT_MENU, lambda e: self._copy("link"), id=ID_COPY_LINK)
         self.Bind(wx.EVT_MENU, lambda e: self._copy("markdown"), id=ID_COPY_MARKDOWN)
@@ -2107,6 +2155,8 @@ class GhViewerFrame(wx.Frame):
         menu_bar.Check(ID_SHOW_READ, self._include_read)
         menu_bar.Check(ID_VIEW_STARRED, self.view_mode == VIEW_STARRED)
         menu_bar.Check(ID_VIEW_WATCHED, self.view_mode == VIEW_WATCHED)
+        menu_bar.Check(ID_VIEW_SHARED, self.view_mode == VIEW_SHARED)
+        menu_bar.Check(ID_VIEW_ORGS, self.view_mode in (VIEW_ORGS, VIEW_ORG))
         # State filter
         menu_bar.Check(ID_STATE_OPEN, self.state_filter == "open")
         menu_bar.Check(ID_STATE_CLOSED, self.state_filter == "closed")
@@ -2289,6 +2339,7 @@ class GhViewerFrame(wx.Frame):
             # menu too. A right-click on a row raises this as well.
             self.list_ctrl.Bind(wx.EVT_CONTEXT_MENU, self.on_item_context_menu)
             self.Bind(wx.EVT_LIST_KEY_DOWN, self.on_list_key_down, self.list_ctrl)
+            self.list_ctrl.Bind(wx.EVT_CHAR, self.on_list_char)
         self.details_text.Bind(wx.EVT_CHAR_HOOK, self.on_details_key_down)
         # Frame-level, so Insert/Delete in the Labels view work wherever focus
         # is — including the details panel, which is where the text describing
@@ -2348,11 +2399,11 @@ class GhViewerFrame(wx.Frame):
 
         def worker() -> None:
             try:
-                repos = list_repos(limit=100)
+                listing = list_repos(limit=100)
             except GhError as exc:
                 wx.CallAfter(self._on_repos_error, str(exc))
                 return
-            wx.CallAfter(self._on_repos_loaded, repos, token=token)
+            wx.CallAfter(self._on_repos_loaded, listing, token=token)
             # The counts come after the list, one small call each, so the
             # list is never kept waiting for them. A count that can't be had
             # is left off rather than shown wrong.
@@ -2387,11 +2438,19 @@ class GhViewerFrame(wx.Frame):
         SetString rather than a rebuild, as the Favorites count does, so the
         row you are on in the list stays where it is.
         """
-        labels = dict(CATEGORY_ENTRIES)
+        labels = dict(self._category_entries())
         for i in range(self.repo_list.GetCount()):
             entry = self.repo_list.GetClientData(i)
             if entry in labels:
                 self._set_repo_list_label(i, self._category_label(entry, labels[entry]))
+
+    def _category_entries(self) -> list:
+        """Every entry after ★ Favorites, in order, with its label: the fixed
+        categories, then Shared With Me when there is any."""
+        entries = list(CATEGORY_ENTRIES)
+        if self._show_shared:
+            entries.append((SHARED_ENTRY, SHARED_LABEL))
+        return entries
 
     def _set_repo_list_label(self, i: int, label: str) -> None:
         """Change one repo-list entry's text — only if it actually changes.
@@ -2404,12 +2463,27 @@ class GhViewerFrame(wx.Frame):
         if self.repo_list.GetString(i) != label:
             self.repo_list.SetString(i, label)
 
-    def _on_repos_loaded(self, repos: list[dict], token: int | None = None) -> None:
+    def _on_repos_loaded(self, repos, token: int | None = None) -> None:
+        """Build the repository list: from a fresh ``RepoListing``, or from the
+        repos already cached (a plain list) for a rebuild."""
         # A load superseded by a later one must not land on top of it. No
         # token means a rebuild from what is already cached, which is always
         # current.
         if token is not None and token != self._repo_token:
             return
+        if isinstance(repos, RepoListing):
+            listing, repos = repos, repos.repos
+            self._orgs = listing.orgs
+            # None is "more than a page", so there is something to show.
+            self._show_shared = listing.shared != 0
+            counts = {MY_ORGS_ENTRY: len(listing.orgs),
+                      SHARED_ENTRY: listing.shared or None}
+            for entry, n in counts.items():
+                # Unknown now means unknown: not the number from last time.
+                if n is None:
+                    self._category_counts.pop(entry, None)
+                else:
+                    self._category_counts[entry] = n
         self._all_repos = repos
         # Remember what was selected so the rebuild puts you back on it,
         # rather than at the top of the list while you are arrowing through.
@@ -2421,7 +2495,7 @@ class GhViewerFrame(wx.Frame):
         n_fav = len(self.favorites)
         fav_label = f"★ Favorites ({n_fav})" if n_fav else "★ Favorites"
         self.repo_list.Append(fav_label, clientData=FAVORITES_ENTRY)
-        for entry, label in CATEGORY_ENTRIES:
+        for entry, label in self._category_entries():
             self.repo_list.Append(self._category_label(entry, label), clientData=entry)
         # Saved searches next: Enter runs one.
         for saved in getattr(self, "saved_searches", []):
@@ -2441,7 +2515,8 @@ class GhViewerFrame(wx.Frame):
                     break
             label = f"📌 {name} — {desc}" if desc else f"📌 {name}"
             self.repo_list.Append(label, clientData=name)
-        # Then the user's own repos and their organizations'
+        # Then the user's own repos. Organizations' are under My
+        # Organizations, so a big one can't bury these.
         for repo in repos:
             name = repo.get("nameWithOwner", "")
             if name in shown:
@@ -2467,8 +2542,9 @@ class GhViewerFrame(wx.Frame):
 
     def _current_entry(self):
         """The repo-list entry for what the right-hand side shows, or None."""
-        if self.view_mode in VIEW_ENTRIES:
-            return VIEW_ENTRIES[self.view_mode]
+        entry = self._view_entry(self.view_mode)
+        if entry:
+            return entry
         if self.view_mode in SEARCH_VIEWS:
             search = getattr(self, "_search", None)
             for saved in getattr(self, "saved_searches", []):
@@ -2508,11 +2584,50 @@ class GhViewerFrame(wx.Frame):
         self._activate_repo_entry()
 
     def on_repo_key_down(self, event: wx.KeyEvent) -> None:
-        """Handle Enter key on repo list — load the selected repo."""
+        """Enter opens the selected entry; F favorites the selected repository."""
         if event.GetKeyCode() == wx.WXK_RETURN:
             self._activate_repo_entry()
             return  # swallow the key
+        if event.GetKeyCode() == ord("F") and not self._modifiers_down(event):
+            self._favorite_selected_repo()
+            return
         event.Skip()
+
+    def _selected_repo_entry(self) -> RepoEntry | None:
+        """The repository selected in the repository list, if it is one."""
+        idx = self.repo_list.GetSelection()
+        name = self.repo_list.GetClientData(idx) if idx != wx.NOT_FOUND else None
+        if not is_repo_entry(name):
+            return None
+        desc = next((r.get("description") or "" for r in self._all_repos
+                     if r.get("nameWithOwner") == name), "")
+        return RepoEntry(name, desc, f"https://github.com/{name}")
+
+    def _favorite_selected_repo(self) -> None:
+        """F in the repository list: favorite the repository, or unfavorite it."""
+        repo = self._selected_repo_entry()
+        if repo is None:
+            self._announce("Select a repository to favorite.")
+            return
+        entry = self._build_favorite_entry(repo)
+        self.favorites, was_added = toggle_favorite(entry, self.favorites)
+        if was_added:
+            self._announce("Added to favorites")
+        else:
+            self._announce("Removed from favorites")
+        self._refresh_repo_list_fav_count()
+        if self.view_mode == VIEW_FAVORITES:
+            self._load_favorites_view()
+        else:
+            self._redraw_favorite_marks()
+
+    def on_favorite(self, event: wx.CommandEvent) -> None:
+        """Actions ▸ Add or Remove Favorite: the repository when the
+        repository list has focus, else the row in the list."""
+        if self._pane_index(self._current_focus()) == 0:
+            self._favorite_selected_repo()
+        else:
+            self._toggle_favorite()
 
     def _activate_repo_entry(self) -> None:
         """Open whatever is selected in the repo list: a repo or a pseudo-entry."""
@@ -2572,6 +2687,15 @@ class GhViewerFrame(wx.Frame):
             self.current_limit = self.page_size
             self._load_items()
 
+    def _select_org(self, login: str) -> None:
+        """Enter on an organization in My Organizations: its repositories.
+        Backspace goes back up to the organizations."""
+        if self.view_mode == VIEW_ORG and login != self._org:
+            # A filter typed for one organization means nothing in the next.
+            self.filter_text = ""
+        self._org = login
+        self._select_category(VIEW_ORG)
+
     # ── Item loading ───────────────────────────────────────────────────
 
     def _begin_fetch(self) -> int:
@@ -2591,8 +2715,12 @@ class GhViewerFrame(wx.Frame):
         """True if `token` is still the load whose results the list wants."""
         return token == self._fetch_token
 
-    def _load_favorites_view(self) -> None:
-        """Populate the list with all favorited items (mixed types, cross-repo)."""
+    def _load_favorites_view(self, focus=None) -> None:
+        """Populate the list with all favorited items (mixed types, cross-repo).
+
+        ``focus`` is a favorite to land on (Backspace from a repository
+        opened from here), found by its address since the list is reread.
+        """
         # Favorites load synchronously from disk, but still take a token — an
         # in-flight repo fetch must not land on top of them.
         self._begin_fetch()
@@ -2605,11 +2733,14 @@ class GhViewerFrame(wx.Frame):
         n = len(self.favorites)
         self._set_view_status(
             f"★ Favorites — {n} item{'s' if n != 1 else ''}.",
-            "F=unfavorite  Enter=open in browser  Ctrl+F=filter",
+            "F=unfavorite  Enter=open (a repository here, the rest in the browser)  "
+            "Ctrl+O=open on GitHub  Ctrl+F=filter",
         )
         self._update_title()
+        url = getattr(focus, "url", None)
+        row = next((i for i, f in enumerate(self._shown) if url and f.url == url), 0)
         if filtered:
-            wx.CallLater(100, self._focus_list)
+            wx.CallLater(100, self._focus_list, row)
 
     def _load_items(self) -> None:
         # Name the view as well as the repo: after a Ctrl+<n> switch this is the
@@ -2626,8 +2757,12 @@ class GhViewerFrame(wx.Frame):
         elif self.view_mode in SEARCH_VIEWS:
             query = self._search[1] if self._search else ""
             self._set_view_status(f"Searching GitHub for {query}…")
+        elif self.view_mode == VIEW_ORG:
+            self._set_view_status(f"Loading {self._org}'s repositories…")
+        elif self.view_mode == VIEW_ORGS:
+            self._set_view_status("Loading your organizations…")
         elif self.view_mode in REPO_LIST_VIEWS:
-            self._set_view_status(f"Loading your {view_label.lower()}…")
+            self._set_view_status(f"Loading {self._view_label(self.view_mode, lower=True)}…")
         else:
             self._set_view_status(f"Loading {view_label} for {self.repo}…")
         self.list_ctrl.DeleteAllItems()
@@ -2639,6 +2774,9 @@ class GhViewerFrame(wx.Frame):
         view = self.view_mode
         limit = self.current_limit
         include_read = self._include_read
+        org = self._org
+        org_logins = [o.login for o in self._orgs]
+        entry = self._view_entry(view) if view in REPO_LIST_VIEWS else None
         search = self._search
         # View More in a search: what is already listed, to add the next page to
         more_of, self._search_more = getattr(self, "_search_more", None), None
@@ -2732,15 +2870,24 @@ class GhViewerFrame(wx.Frame):
                 elif view == VIEW_ACTIVITY:
                     events, more = fetch_activity(limit)
                     wx.CallAfter(self._on_activity_loaded, token, events, more, focus_row)
+                elif view == VIEW_ORGS:
+                    wx.CallAfter(self._on_orgs_loaded, token, fetch_orgs(), focus_row)
                 elif view in REPO_LIST_VIEWS:
-                    fetch = fetch_starred_repos if view == VIEW_STARRED else fetch_watched_repos
-                    repos = fetch(limit)
+                    if view == VIEW_ORG:
+                        repos = fetch_org_repos(org, limit)
+                    elif view == VIEW_SHARED:
+                        repos = fetch_shared_repos(limit, org_logins)
+                    elif view == VIEW_STARRED:
+                        repos = fetch_starred_repos(limit)
+                    else:
+                        repos = fetch_watched_repos(limit)
                     # A full page may not be all of them; ask for the count
-                    # so the entry in the repo list stays true.
+                    # so the entry in the repo list stays true. Organizations
+                    # and Shared were counted with the repo list.
                     count = None
-                    if len(repos) >= limit:
+                    if len(repos) >= limit and entry in COUNTED_ENTRIES:
                         try:
-                            count = COUNTED_ENTRIES[VIEW_ENTRIES[view]]()
+                            count = COUNTED_ENTRIES[entry]()
                         except GhError:
                             pass
                     wx.CallAfter(self._on_repo_list_loaded, token, repos, focus_row, count)
@@ -2804,11 +2951,31 @@ class GhViewerFrame(wx.Frame):
         VIEW_MY_WORK: "My Work",
         VIEW_SEARCH_ISSUES: "Search Results",
         VIEW_SEARCH_REPOS: "Repository Search Results",
+        VIEW_ORGS: "My Organizations",
+        VIEW_ORG: "Organization Repositories",
+        VIEW_SHARED: SHARED_LABEL,
     }
+
+    def _view_label(self, view: str, lower: bool = False) -> str:
+        """A view's name for titles and messages. An organization's carries
+        its name, which keeps its capitals when the rest is lowered."""
+        if view == VIEW_ORG and self._org:
+            return f"{self._org} {'repositories' if lower else 'Repositories'}"
+        if view == VIEW_SHARED and lower:
+            return "repositories shared with you"  # "back to shared with me" isn't English
+        label = self._VIEW_LABELS.get(view, view.title())
+        return label.lower() if lower else label
+
+    def _view_entry(self, view: str):
+        """The repo-list entry standing for ``view``, or None. An
+        organization's repositories are reached through My Organizations."""
+        if view == VIEW_ORG:
+            return MY_ORGS_ENTRY
+        return VIEW_ENTRIES.get(view)
 
     def _update_title(self) -> None:
         """Set the window title: <view> [<branch>] — <repo> — ghviewer."""
-        view_label = self._VIEW_LABELS.get(self.view_mode, self.view_mode.title())
+        view_label = self._view_label(self.view_mode)
         parts: list[str] = [view_label]
         # Include branch where it matters (commits view)
         if self.view_mode == VIEW_COMMITS and self.commit_branch:
@@ -2839,7 +3006,7 @@ class GhViewerFrame(wx.Frame):
         screen reader may pick up as the associated label, and SetName is the
         control's own accessible name for when it does not.
         """
-        label = self._VIEW_LABELS.get(self.view_mode, self.view_mode.title())
+        label = self._view_label(self.view_mode)
         self.list_label.SetLabel(label)
         self.list_ctrl.SetName(label)
 
@@ -2893,7 +3060,7 @@ class GhViewerFrame(wx.Frame):
         label_info = f" labelled '{self.label_filter}'" if self.label_filter else ""
         label_hint = "  Backspace=back to labels" if self.label_filter else ""
         if self._return_to:
-            back = self._VIEW_LABELS.get(self._return_to[0], "list").lower()
+            back = self._view_label(self._return_to[0], lower=True)
             label_hint = f"  Backspace=back to {back}"
         self._set_view_status(
             f"{source} — {n_issues} issues, {n_prs} PRs ({self.state_filter}){label_info}. "
@@ -3200,7 +3367,7 @@ class GhViewerFrame(wx.Frame):
     def _on_repo_list_loaded(
         self, token: int, repos: list, focus=0, count: int | None = None,
     ) -> None:
-        """Starred or Watched: one row per repository.
+        """Starred, Watched, Shared or an organization's: one row per repository.
 
         ``focus`` is the row to land on, or the repository to land on wherever
         the list now shows it (Backspace from a repo opened from here).
@@ -3211,19 +3378,28 @@ class GhViewerFrame(wx.Frame):
         self.items = []
         filtered = self._populate_filtered_list(repos, use_favorite_prefix=True)
         n = len(repos)
-        label = self._VIEW_LABELS[self.view_mode]
+        label = self._view_label(self.view_mode)
         if n < self.current_limit:
             # The whole list is here, so its length is the count: newer than
             # the one fetched at startup if you have starred something since.
             count = n
-        if count is not None:
-            self._category_counts[VIEW_ENTRIES[self.view_mode]] = count
+        if count is not None and self.view_mode == VIEW_ORG:
+            # The count belongs to the organization's row, not an entry.
+            for org in self._orgs:
+                if org.login == self._org:
+                    org.repo_count = count
+        elif count is not None:
+            self._category_counts[self._view_entry(self.view_mode)] = count
             self._refresh_category_labels()
         if n:
             more = " Ctrl++ loads more." if n >= self.current_limit else ""
             message = f"{label} — {n} repositor{'ies' if n != 1 else 'y'}.{more}"
         elif self.view_mode == VIEW_STARRED:
             message = f"{label} — you haven't starred any repositories."
+        elif self.view_mode == VIEW_ORG:
+            message = f"{label} — none that you can see."
+        elif self.view_mode == VIEW_SHARED:
+            message = f"{label} — nobody has shared a repository with you."
         else:
             message = f"{label} — you aren't watching any repositories."
         self._set_view_status(
@@ -3235,6 +3411,30 @@ class GhViewerFrame(wx.Frame):
         row = focus if isinstance(focus, int) else max(self._row_of(focus), 0)
         if filtered:
             wx.CallLater(100, self._focus_list, row)
+
+    def _on_orgs_loaded(self, token: int, orgs: list, focus=0) -> None:
+        """My Organizations: one row per organization you belong to."""
+        if not self._fetch_is_current(token):
+            return  # the user has moved on; these belong to a view they left
+        self._orgs = orgs
+        self.git_items = orgs
+        self.items = []
+        filtered = self._populate_filtered_list(orgs)
+        self._category_counts[MY_ORGS_ENTRY] = len(orgs)
+        self._refresh_category_labels()
+        n = len(orgs)
+        if n:
+            message = (f"My Organizations — {n} organization{'s' if n != 1 else ''}, "
+                       "the ones you own first.")
+        else:
+            message = "My Organizations — you don't belong to any organizations."
+        self._set_view_status(
+            message,
+            "Enter=list its repositories  Ctrl+O=open on GitHub  R=refresh  Ctrl+F=filter",
+        )
+        self._update_title()
+        if filtered:
+            wx.CallLater(100, self._focus_list, focus if isinstance(focus, int) else 0)
 
     def _focus_list(self, row: int = 0) -> None:
         """Move keyboard focus to the list and select a row (the first by default)."""
@@ -3409,7 +3609,10 @@ class GhViewerFrame(wx.Frame):
         lines.append("")
         lines.append("─" * 60)
         lines.append("")
-        lines.append("Press Enter to open in browser.")
+        if fav.item_type == "repository":
+            lines.append("Press Enter to open it here in GHManage, Ctrl+O to open it on GitHub.")
+        else:
+            lines.append("Press Enter to open in browser.")
         lines.append("Press F to remove from favorites.")
         self.details_text.SetValue("\n".join(lines))
 
@@ -3737,6 +3940,18 @@ class GhViewerFrame(wx.Frame):
             lines.append("")
             lines.append(f"Press Enter to open {item.name} here in GHManage.")
             lines.append("Press Ctrl+O to open it on GitHub.")
+        elif isinstance(item, OrgEntry):
+            lines.append(item.login)
+            lines.append(f"Your role: {item.role}")
+            if item.repo_count is not None:
+                lines.append(f"Repositories you can see: {item.repo_count:,}")
+            lines.append("URL:")
+            lines.append(item.url)
+            lines.append("")
+            lines.append("─" * 60)
+            lines.append("")
+            lines.append(f"Press Enter to list {item.login}'s repositories.")
+            lines.append("Press Ctrl+O to open it on GitHub.")
         elif isinstance(item, Notification):
             lines.append(f"#{item.number} {item.title}" if item.number else item.title)
             lines.append(f"{item.kind} in {item.repo}" if item.kind else item.repo)
@@ -3826,6 +4041,9 @@ class GhViewerFrame(wx.Frame):
         VIEW_ACTIVITY: "Number, Tag or Repository",
         VIEW_STARRED: "Repository Name",
         VIEW_WATCHED: "Repository Name",
+        VIEW_ORGS: "Organization Name",
+        VIEW_ORG: "Repository Name",
+        VIEW_SHARED: "Repository Name",
         VIEW_NOTIFICATIONS: "Number or Repository",
         VIEW_MY_WORK: "Number",
         VIEW_SEARCH_ISSUES: "Number",
@@ -3992,15 +4210,22 @@ class GhViewerFrame(wx.Frame):
             webbrowser.open(item.url)
             self._announce(f"Opened {item.path} in browser")
             return
-        # In Favorites view, Enter opens in browser
+        # In Favorites view, Enter opens a repository here and the rest in
+        # the browser
         if self.view_mode == VIEW_FAVORITES and isinstance(item, FavoriteEntry):
+            if item.item_type == "repository" and item.repo:
+                self._open_repo_from_list(item.repo, item)
+                return
             if item.url:
                 webbrowser.open(item.url)
                 self._announce(f"Opened {item.title} in browser")
             else:
                 self._announce("No URL for this favorite")
             return
-        # In Starred and Watched, Enter opens the repository here
+        if self.view_mode == VIEW_ORGS and isinstance(item, OrgEntry):
+            self._select_org(item.login)
+            return
+        # In the lists of repositories, Enter opens the repository here
         if self.view_mode in REPO_LIST_VIEWS and isinstance(item, RepoEntry):
             self._open_repo_from_list(item.name, item)
             return
@@ -4045,6 +4270,9 @@ class GhViewerFrame(wx.Frame):
         VIEW_SEARCH_REPOS: "Open Here",
         VIEW_STARRED: "Open Here",
         VIEW_WATCHED: "Open Here",
+        VIEW_ORGS: "List Its Repositories",
+        VIEW_ORG: "Open Here",
+        VIEW_SHARED: "Open Here",
     }
 
     def _context_entries(self) -> list:
@@ -4095,7 +4323,24 @@ class GhViewerFrame(wx.Frame):
         entries += walk(self._actions_menu)
         while entries and entries[-1] == ("sep",):
             entries.pop()
-        return entries
+        # Say which way F goes for this row, or leave it off where there is
+        # nothing it could favorite.
+        if self.view_mode == VIEW_FAVORITES:
+            fav_label = "Remove from Favorites (F)"
+        elif item is None or isinstance(item, OrgEntry) or not getattr(item, "url", ""):
+            fav_label = None
+        elif self._favorite_prefix(item):
+            fav_label = "Remove from Favorites (F)"
+        else:
+            fav_label = "Add to Favorites (F)"
+        out = []
+        for entry in entries:
+            if entry[0] == "item" and entry[1] == ID_FAVORITE:
+                if fav_label:
+                    out.append(("item", ID_FAVORITE, fav_label))
+            else:
+                out.append(entry)
+        return out
 
     @staticmethod
     def _menu_from_entries(entries: list) -> wx.Menu:
@@ -4160,6 +4405,10 @@ class GhViewerFrame(wx.Frame):
                 ("item", ID_NEW_ISSUE, "New Issue…\tCtrl+N"),
                 ("item", ID_SEARCH_REPO, "Search This Repository…\tCtrl+Shift+S"),
                 ("item", ID_WATCH_SETTINGS, "Watch Settings…\tCtrl+Shift+U"),
+                ("item", ID_FAVORITE,
+                 "Remove from Favorites (F)" if is_favorite(f"https://github.com/{data}",
+                                                            self.favorites)
+                 else "Add to Favorites (F)"),
                 ("sep",),
                 ("sub", "Copy", [
                     ("item", ID_COPY_LINK, "Copy Link\tCtrl+Shift+C"),
@@ -4493,6 +4742,21 @@ class GhViewerFrame(wx.Frame):
         return wx.GetMouseState().HasAnyModifiers()
 
     def on_list_key_down(self, event: wx.KeyEvent) -> None:
+        GhViewerFrame._on_list_key(self, event)
+        # A key acted on here still reaches the list as a character, and on
+        # Windows the list looks for a row starting with it: F, R, C and the
+        # rest beeped wherever none did. Remember to swallow that character.
+        self._eat_list_char = not event.GetSkipped()
+
+    def on_list_char(self, event: wx.KeyEvent) -> None:
+        """The character after a key on_list_key_down acted on goes no
+        further; any other goes on to the list's find-as-you-type."""
+        if getattr(self, "_eat_list_char", False):
+            self._eat_list_char = False
+            return
+        event.Skip()
+
+    def _on_list_key(self, event: wx.KeyEvent) -> None:
         key = event.GetKeyCode()
         # The single-letter keys here are bare letters. With a modifier the
         # key belongs to something else — Ctrl+C is copy, not Close — so it is
@@ -4509,6 +4773,10 @@ class GhViewerFrame(wx.Frame):
         elif key == wx.WXK_BACK and self.view_mode in PARENT_VIEW:
             # Backspace steps back up a drill-down (artifacts -> runs, commits -> branches)
             parent = PARENT_VIEW[self.view_mode]
+            if self.view_mode == VIEW_ORG:
+                # Back on the organization you came from, not at the top.
+                logins = [o.login for o in self._orgs]
+                self._pending_focus_row = logins.index(self._org) if self._org in logins else 0
             self._switch_view(parent)
             self._announce(f"Back to {self._VIEW_LABELS.get(parent, parent).lower()}")
         elif key == wx.WXK_BACK and self.view_mode == VIEW_ISSUES and self._return_to:
@@ -4611,6 +4879,8 @@ class GhViewerFrame(wx.Frame):
             self._on_my_work_loaded(token, items, item)
         elif view in SEARCH_VIEWS:
             self._on_search_loaded(token, items, self._search_total, item)
+        elif view == VIEW_FAVORITES:
+            self._load_favorites_view(focus=item)
         elif view == VIEW_NOTIFICATIONS:
             if self._include_read != self._notif_loaded_include:
                 # Include Read was changed while you were away; the list you
@@ -4621,7 +4891,7 @@ class GhViewerFrame(wx.Frame):
                 self._on_notifications_loaded(token, items, more, item, fresh=False)
         else:
             self._on_repo_list_loaded(token, items, item)
-        self._announce(f"Back to {self._VIEW_LABELS.get(view, view).lower()}")
+        self._announce(f"Back to {self._view_label(view, lower=True)}")
 
     def _toggle_favorite(self) -> None:
         """Toggle favorite status on the currently focused item (F key)."""
@@ -4633,7 +4903,7 @@ class GhViewerFrame(wx.Frame):
         if self.view_mode == VIEW_FAVORITES and isinstance(item, FavoriteEntry):
             self.favorites = [f for f in self.favorites if f.url != item.url]
             save_favorites(self.favorites)
-            self._announce(f"Removed '{item.title}' from favorites")
+            self._announce("Removed from favorites")
             self._load_favorites_view()
             self._refresh_repo_list_fav_count()
             return
@@ -4665,9 +4935,9 @@ class GhViewerFrame(wx.Frame):
 
         self.favorites, was_added = toggle_favorite(entry, self.favorites)
         if was_added:
-            self._announce(f"★ Added '{entry.title}' to favorites")
+            self._announce("Added to favorites")
         else:
-            self._announce(f"Removed '{entry.title}' from favorites")
+            self._announce("Removed from favorites")
         self._refresh_repo_list_fav_count()
         self._redraw_favorite_marks()
 
@@ -4868,10 +5138,14 @@ class GhViewerFrame(wx.Frame):
             self._announce("My Work shows up to 100 of each kind. Search (Ctrl+Shift+F) "
                            "finds more.")
             return
+        elif self.view_mode == VIEW_ORGS:
+            self._announce("That is all your organizations.")
+            return
         elif self.view_mode in REPO_LIST_VIEWS:
             if len(self.git_items) < self.current_limit:
-                label = self._VIEW_LABELS[self.view_mode].lower()
-                self._announce(f"That is all your {label}.")
+                label = self._view_label(self.view_mode, lower=True)
+                whose = "" if self.view_mode in (VIEW_ORG, VIEW_SHARED) else "your "
+                self._announce(f"That is all {whose}{label}.")
                 return
             self._pending_focus_row = len(self._shown)
         elif not self.repo:
@@ -5615,6 +5889,12 @@ class GhViewerFrame(wx.Frame):
 
     def on_view_watched(self, event: wx.CommandEvent) -> None:
         self._select_category(VIEW_WATCHED)
+
+    def on_view_shared(self, event: wx.CommandEvent) -> None:
+        self._select_category(VIEW_SHARED)
+
+    def on_view_orgs(self, event: wx.CommandEvent) -> None:
+        self._select_category(VIEW_ORGS)
 
     # ── List display refresh ───────────────────────────────────────────
 

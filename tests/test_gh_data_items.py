@@ -303,14 +303,14 @@ def test_list_repos_lists_your_own_and_names_your_organizations(monkeypatch):
     queries = []
     own = [{"nameWithOwner": "me/a", "pushedAt": "2026-01-01T00:00:00Z"}]
     monkeypatch.setattr(gh_data, "_graphql", lambda q: queries.append(q) or _repos_reply(
-        own, [_org("w3c", count=1108), _org("mine", admin=True, count=13)]))
+        own, [_org("bigorg", count=1108), _org("mine", admin=True, count=13)]))
     listing = gh_data.list_repos(5)
     # Only your own repos: an organization's are under an entry of its own,
     # so a big one (#40) can't bury them
     assert listing.repos == own
     # The organizations you run first, then by name
     assert listing.orgs == [gh_data.OrgEntry("mine", True, 13),
-                            gh_data.OrgEntry("w3c", False, 1108)]
+                            gh_data.OrgEntry("bigorg", False, 1108)]
     [query] = queries
     assert "ownerAffiliations: [OWNER]" in query
     assert "ORGANIZATION_MEMBER" not in query
@@ -362,8 +362,8 @@ def test_list_repos_without_organizations_still_lists_yours(monkeypatch):
 
 
 def test_fetch_org_repos_most_recently_pushed_first(fake_gh):
-    fake_gh.route("orgs/w3c/repos?sort=pushed", [{"full_name": "w3c/a"}, {"name": "x"}])
-    assert [r.name for r in gh_data.fetch_org_repos("w3c", 10)] == ["w3c/a"]
+    fake_gh.route("orgs/bigorg/repos?sort=pushed", [{"full_name": "bigorg/a"}, {"name": "x"}])
+    assert [r.name for r in gh_data.fetch_org_repos("bigorg", 10)] == ["bigorg/a"]
 
 
 def test_fetch_shared_repos_skips_your_organizations(fake_gh):
@@ -526,9 +526,9 @@ def test_without_read_org_your_own_repos_still_list(monkeypatch):
 
 
 def test_a_full_page_of_only_your_organizations_is_nothing_shared(monkeypatch):
-    shared = [{"owner": {"login": "w3c"}}] * 100
+    shared = [{"owner": {"login": "bigorg"}}] * 100
     monkeypatch.setattr(gh_data, "_graphql",
-                        lambda q: _repos_reply([], [_org("w3c")], shared))
+                        lambda q: _repos_reply([], [_org("bigorg")], shared))
     assert gh_data.list_repos().shared == 0
 
 
@@ -536,6 +536,6 @@ def test_shared_repos_stop_after_ten_pages(fake_gh):
     # A collaborator on a thousand of their organization's repos isn't kept
     # waiting for every page to find the few shared from outside
     fake_gh.route("affiliation=collaborator",
-                  [{"full_name": f"w3c/r{i}", "owner": {"login": "w3c"}} for i in range(100)])
-    assert gh_data.fetch_shared_repos(100, ["w3c"]) == []
+                  [{"full_name": f"bigorg/r{i}", "owner": {"login": "bigorg"}} for i in range(100)])
+    assert gh_data.fetch_shared_repos(100, ["bigorg"]) == []
     assert len(fake_gh.calls) == 11

@@ -682,7 +682,7 @@ def list_repos(limit: int = 100) -> RepoListing:
     organizations you are in.
 
     An organization's repositories aren't mixed in with yours: someone in a
-    big organization (W3C has over a thousand) would find their own repos
+    big organization (which may have thousands) would find their own repos
     lost among them. They are under My Organizations instead, each with
     its count, and an organization's repositories are fetched when it is
     opened.
@@ -732,7 +732,7 @@ def list_repos(limit: int = 100) -> RepoListing:
                      if n and ((n.get("owner") or {}).get("login") or "").lower() not in mine)
         # A full page with some outside your organizations may have more
         # after it, so no count. A full page of only your organizations'
-        # (someone added to a hundred of W3C's) is taken to have none: an
+        # (someone added to a hundred of a big organization's) is taken to have none: an
         # entry that opens on nothing is worse than one left out.
         if shared and len(shared_nodes) >= 100:
             shared = None

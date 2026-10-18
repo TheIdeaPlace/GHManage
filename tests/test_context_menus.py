@@ -145,7 +145,7 @@ FAV = FakeItem(ghviewer.ID_FAVORITE, ghviewer.FAVORITE_LABEL)
     (ghviewer.VIEW_FAVORITES, FavoriteEntry("o/r", "issue", "u1", "#1"), [],
      "Remove from Favorites (F)"),
     # Nothing to favorite: no entry at all
-    (ghviewer.VIEW_ORGS, OrgEntry("w3c"), [], None),
+    (ghviewer.VIEW_ORGS, OrgEntry("bigorg"), [], None),
 ])
 def test_the_favorite_entry_says_which_way_it_goes(view, item, favorites, label):
     f = _frame(view, item, FakeMenu(FAV))

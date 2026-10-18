@@ -1248,7 +1248,7 @@ def _listing(repos=(), orgs=(), shared=0):
     return ghviewer.RepoListing(list(repos), list(orgs), shared)
 
 
-ORGS = [OrgEntry("mine", True, 13), OrgEntry("w3c", False, 1108)]
+ORGS = [OrgEntry("mine", True, 13), OrgEntry("bigorg", False, 1108)]
 
 
 def test_my_organizations_is_one_entry_and_your_own_repos_stay_yours():
@@ -1301,7 +1301,7 @@ def test_enter_on_an_organization_lists_its_repositories():
     opened = []
     f._select_org = opened.append
     Frame.on_item_activated(f, None)
-    assert opened == ["w3c"]
+    assert opened == ["bigorg"]
 
 
 def test_backspace_from_an_organization_goes_up_to_it_in_the_list():
@@ -1310,7 +1310,7 @@ def test_backspace_from_an_organization_goes_up_to_it_in_the_list():
 
 def test_an_organizations_repositories_select_my_organizations():
     f = _repo_frame(view=ghviewer.VIEW_ORG)
-    f._org = "w3c"
+    f._org = "bigorg"
     f._view_entry = lambda view: Frame._view_entry(f, view)
     assert Frame._current_entry(f) == ghviewer.MY_ORGS_ENTRY
 
@@ -1329,26 +1329,26 @@ def test_load_items_fetches_the_organizations_their_repos_or_shared(monkeypatch,
     assert landed[-1][1] == ORGS
     for view in (ghviewer.VIEW_ORG, ghviewer.VIEW_SHARED):
         f, _ = _load_frame(view)
-        f._org, f._orgs = "w3c", [OrgEntry("w3c")]
+        f._org, f._orgs = "bigorg", [OrgEntry("bigorg")]
         landed = []
         f._on_repo_list_loaded = lambda *a: landed.append(a)
         Frame._load_items(f)
         assert landed[-1][-1] is None   # counted with the repo list, not again
-    assert calls == ["orgs", ("org", "w3c", 100), ("shared", ("w3c",))]
+    assert calls == ["orgs", ("org", "bigorg", 100), ("shared", ("bigorg",))]
     assert f.statuses[0][0] == "Loading repositories shared with you…"
 
 
 def test_an_organizations_list_names_it_and_corrects_its_row_count(call_later):
     f = _list_frame(ghviewer.VIEW_ORG)
-    f._org, f._orgs = "w3c", [OrgEntry("w3c", False, 1108)]
+    f._org, f._orgs = "bigorg", [OrgEntry("bigorg", False, 1108)]
     Frame._on_repo_list_loaded(f, 1, [STAR] * 3)
-    assert f.statuses[-1][0] == "w3c Repositories — 3 repositories."
+    assert f.statuses[-1][0] == "bigorg Repositories — 3 repositories."
     assert f._orgs[0].repo_count == 3 and f._category_counts == {}
-    assert Frame._view_label(f, ghviewer.VIEW_ORG, lower=True) == "w3c repositories"
+    assert Frame._view_label(f, ghviewer.VIEW_ORG, lower=True) == "bigorg repositories"
 
 
 def test_another_organization_starts_without_the_last_ones_filter():
-    f = _frame(view_mode=ghviewer.VIEW_ORG, filter_text="wcag", _org="w3c")
+    f = _frame(view_mode=ghviewer.VIEW_ORG, filter_text="docs", _org="bigorg")
     f._select_category = lambda view: None
     Frame._select_org(f, "TheIdeaPlace")
     assert f.filter_text == "" and f._org == "TheIdeaPlace"

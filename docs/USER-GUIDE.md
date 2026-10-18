@@ -753,7 +753,7 @@ These lists keep other people's repositories out of the main repository list, wh
 
 An organization's repositories work like Starred and Watched: the same columns, details and keys, and `Enter` on one opens it here, with `Backspace` bringing you back to it.
 
-An organization's repositories are kept out of the list of your own, so belonging to a big organization (W3C has over a thousand repositories) doesn't bury yours. To keep one you use often a keystroke away, favorite it with `F`.
+An organization's repositories are kept out of the list of your own, so belonging to a big organization, which may have hundreds or thousands of repositories, doesn't bury yours. To keep one you use often a keystroke away, favorite it with `F`.
 
 **Shared With Me** lists other people's repositories you have been made a collaborator on. It leaves out repositories owned by your organizations, which are already under My Organizations. It is only in the repository list when there is at least one, and works like Starred and Watched.
 

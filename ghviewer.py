@@ -710,6 +710,8 @@ SEARCH_VIEWS = (VIEW_SEARCH_ISSUES, VIEW_SEARCH_REPOS)
 # Lists across repositories where G opens the selected row's repository here.
 GO_TO_REPO_VIEWS = (VIEW_ACTIVITY, VIEW_NOTIFICATIONS, VIEW_MY_WORK, VIEW_SEARCH_ISSUES,
                     VIEW_SEARCH_REPOS)
+# An Activity event's address, by kind, and the view it opens in here.
+EVENT_TARGET_VIEWS = {"commit": VIEW_COMMITS, "release": VIEW_RELEASES, "run": VIEW_WORKFLOW}
 # Views that load everything at once, where View More has nothing to add.
 NO_MORE_VIEWS = (VIEW_FAVORITES, VIEW_MY_WORK, VIEW_ORGS)
 # Views listing repositories; Enter on one opens it here.
@@ -1586,6 +1588,10 @@ class GhViewerFrame(wx.Frame):
         # brings you back to the same item without fetching the list again:
         # (view, items, more, item, limit).
         self._return_to: tuple | None = None
+        # The view a repository opened from a list landed in: Backspace there
+        # goes back to the list (Issues & PRs, or a release or commit from
+        # Activity).
+        self._return_view: str = VIEW_ISSUES
         # Something to select once the view now loading arrives — set when a
         # GitHub address names one thing in a list (an issue, a release, a
         # run): (fetch token, view, kind, ref). Bound to the load it was set
@@ -2306,9 +2312,10 @@ class GhViewerFrame(wx.Frame):
             self.label_filter = ""
         if mode not in (VIEW_PAGES, VIEW_PAGEFILES):
             self.pages_site = None
-        if mode != VIEW_ISSUES:
-            # The way back to the feed is from the repo's issues, where G
-            # left you; anywhere else Backspace means something of its own.
+        if mode != getattr(self, "_return_view", VIEW_ISSUES):
+            # The way back to the list is from the view it opened in, where G
+            # or Enter left you; anywhere else Backspace means something of
+            # its own.
             self._return_to = None
         self.filter_text = ""  # clear filter on view switch
         # Update columns for the new view
@@ -3235,7 +3242,7 @@ class GhViewerFrame(wx.Frame):
             )
         self._set_view_status(
             message,
-            "Enter=open in browser  G=go to repository  Ctrl++=view more  "
+            "Enter=open  G=go to repository  Ctrl++=view more  "
             "R=refresh  F=favorite  Ctrl+F=filter",
         )
         self._update_title()
@@ -4810,6 +4817,9 @@ class GhViewerFrame(wx.Frame):
             self._toggle_favorite()
         elif key == ord("R"):
             self.on_refresh(None)
+        elif (key == wx.WXK_BACK and self._return_to
+              and self.view_mode == getattr(self, "_return_view", VIEW_ISSUES)):
+            self._return_to_list()
         elif key == wx.WXK_BACK and self.view_mode in PARENT_VIEW:
             # Backspace steps back up a drill-down (artifacts -> runs, commits -> branches)
             parent = PARENT_VIEW[self.view_mode]
@@ -4819,8 +4829,6 @@ class GhViewerFrame(wx.Frame):
                 self._pending_focus_row = logins.index(self._org) if self._org in logins else 0
             self._switch_view(parent)
             self._announce(f"Back to {self._VIEW_LABELS.get(parent, parent).lower()}")
-        elif key == wx.WXK_BACK and self.view_mode == VIEW_ISSUES and self._return_to:
-            self._return_to_list()
         elif key == wx.WXK_BACK and self.view_mode == VIEW_ISSUES and self.label_filter:
             # Issues restricted to a label is a drill-down too, even though the
             # view mode is the same one you reach with Ctrl+1.
@@ -4855,7 +4863,17 @@ class GhViewerFrame(wx.Frame):
         self._announce(f"Opened {self.pages_site.url} in browser")
 
     def _open_event(self, item: ActivityEvent) -> None:
-        """Open an activity event's page on github.com."""
+        """Enter in Activity: what the event is about, here when GHManage has
+        a view for it, with Backspace back to the event; otherwise on GitHub."""
+        if item.subject_kind in ("issue", "PR") and item.number and item.repo:
+            self._open_item_here(item)
+            return
+        target = parse_github_url(item.url) if item.url else None
+        view = EVENT_TARGET_VIEWS.get(target.kind) if target else None
+        if view and target.repo:
+            self._open_repo_from_list(target.repo, item, view)
+            self._set_pending_target(view, target.kind, target.ref)
+            return
         if not item.url:
             self._announce("No URL for this event")
             return
@@ -4876,11 +4894,12 @@ class GhViewerFrame(wx.Frame):
             return
         self._open_repo_from_list(item.repo, item)
 
-    def _open_repo_from_list(self, repo: str, item) -> None:
-        """Open ``repo`` from a list of many (Activity, Starred, Watched).
+    def _open_repo_from_list(self, repo: str, item, view: str = VIEW_ISSUES) -> None:
+        """Open ``repo`` from a list of many (Activity, Starred, Watched), in
+        ``view``.
 
-        Remembers the list and the item you were on, so Backspace from the
-        repo's issues brings you back to it.
+        Remembers the list and the item you were on, so Backspace from that
+        view brings you back to it.
         """
         # The item itself, not its row: with a quick filter on, the row
         # number means something else once the filter is gone.
@@ -4892,9 +4911,12 @@ class GhViewerFrame(wx.Frame):
             more = False
         saved = (self.view_mode, list(self._view_source()), bool(more),
                  item, self.current_limit)
-        self._select_repo(repo)
+        if view == VIEW_COMMITS:
+            self.commit_branch = ""  # the default branch
+        self._select_repo(repo, view)
         # Set after _select_repo, which clears it for an ordinary repo change.
         self._return_to = saved
+        self._return_view = view
         # Select it in the repo list too when it is there, so the list on the
         # left agrees with what the right side is showing — and nothing when
         # it isn't, rather than leaving the list you came from selected.

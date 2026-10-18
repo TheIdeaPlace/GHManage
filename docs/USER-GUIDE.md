@@ -680,9 +680,9 @@ The details panel gives the whole event as one sentence, then who, what, the rep
 
 | Key | Action |
 |-----|--------|
-| `Enter` | Open what the event is about on GitHub: the issue, pull request, comment, release or commits |
+| `Enter` | Open what the event is about here in GHManage: an issue or pull request in its repository's Issues & PRs, a release in Releases, a commit in Commits. Anything GHManage has no view for (a push's comparison, a discussion, a wiki page) opens on GitHub |
 | `G` or `Ctrl+Shift+G` | Open the event's repository here in GHManage |
-| `Backspace` | From that repository's issues, come back to the same event |
+| `Backspace` | From what `Enter` or `G` opened, come back to the same event |
 | `F` | Add what the event is about to favorites, or remove it |
 | `Ctrl++` | Load older events |
 | `R` | Reload the feed |
@@ -1079,7 +1079,7 @@ On a Mac, use `Cmd` in place of `Ctrl` for every shortcut that has one, `Option`
 
 | Key | Action |
 |-----|--------|
-| `Enter` | Open what the event is about on GitHub |
+| `Enter` | Open what the event is about here, or on GitHub when GHManage has no view for it |
 | `G` or `Ctrl+Shift+G` | Open the event's repository in GHManage |
 | `F` | Favorite what the event is about |
 

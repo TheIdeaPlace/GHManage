@@ -239,7 +239,7 @@ whether it is read. **Actions ▸ Mark All as Read** asks first.
 
 | Key | Action |
 |-----|--------|
-| `Enter` (or double-click) | Open what the event is about on GitHub: the issue, pull request, comment, release or commits |
+| `Enter` (or double-click) | Open what the event is about here in GHManage (an issue, pull request, release or commit), with `Backspace` back to the event; anything else on GitHub |
 | `G` or `Ctrl+Shift+G` | Open the event's repository here in GHManage; `Backspace` there brings you back to the same event |
 | `F` | Favorite what the event is about: its issue, pull request, release or discussion |
 | `Ctrl++` | Load older events |

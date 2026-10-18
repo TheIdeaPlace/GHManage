@@ -812,6 +812,10 @@ With a filter on, every key acts on the row you are on: `Enter`, `F`, `C`, `O`, 
 | Copy Title | `Ctrl+Shift+T` | The title: an issue's title, a commit's first line, a release's name |
 | Copy Number, Copy SHA, … | `Ctrl+Shift+I` | The short thing that names the item; see below |
 | Copy Details | `Ctrl+Shift+D` | Everything in the details panel |
+| Copy HTTPS Clone URL | | The repository's address for `git clone`, such as `https://github.com/nvaccess/nvda.git` |
+| Copy SSH Clone URL | | The same over SSH, such as `git@github.com:nvaccess/nvda.git` |
+
+The two clone URLs are for the repository in front of you: the one selected in the repository list when that has focus, the repository of the selected row in a list across repositories, or else the repository open.
 
 The fourth item is named for what it copies in the view you are in:
 
@@ -833,7 +837,8 @@ The fourth item is named for what it copies in the view you are in:
 | My Work, search results | Copy Number, or Copy Repository Name for repositories | `owner/name#208`, since the list mixes repositories; or `owner/name` |
 | Notifications | Copy Number or Repository | the issue or pull request number, or the repository for anything else |
 | Activity | Copy Number, Tag or Repository | the issue or pull request number, the release's tag, or the repository for events about a whole repository |
-| Starred, Watched | Copy Repository Name | `owner/name` |
+| Starred, Watched, Shared With Me, an organization's repositories | Copy Repository Name | `owner/name` |
+| My Organizations | Copy Organization Name | the organization's name |
 
 In Activity, Copy Link and Copy Markdown Link copy what the event is about (the issue, pull request or release) rather than the event itself, the same thing `F` favorites.
 
@@ -947,9 +952,9 @@ On a Mac, use `Cmd` for `Ctrl`.
 
 The **Applications** key, `Shift+F10`, or a right-click opens a context menu (on a Mac, `VO+Shift+M` with VoiceOver, or `Ctrl`-click).
 
-In the item list it starts with what `Enter` does in that view, for example **Show Commits** on a branch or **Open Here** on a search result, and then offers everything the Actions menu offers in that view, with Copy and Pull Request as submenus. It is built from the Actions menu each time, so the two always agree.
+In the item list it starts with what `Enter` does in that view, for example **Show Commits** on a branch or **Open Here** on a search result, and then offers everything the Actions menu offers in that view, with Copy and Pull Request as submenus. It is built from the Actions menu each time, so the two always agree. It ends with **View More** (`Ctrl++`) in every list that loads in pages. On a repository in Starred, Watched, Shared With Me, an organization's repositories or repository search results, it also has **Go To** (see below), and `Backspace` from where it takes you comes back to that row.
 
-In the repository list, a repository's menu has **Open**, **Open on GitHub**, **New Issue…**, **Search This Repository…** (a search starting `repo:owner/name`), **Watch Settings…**, Copy, and **Remove from List…** for a repository you opened by address. These are the same commands as on the Actions menu, for the repository selected. A saved search's menu has **Run Search** and **Remove Saved Search**; Favorites and the other entries at the top have **Open**.
+In the repository list, a repository's menu has **Open**, **Open on GitHub**, **Go To**, **New Issue…**, **Search This Repository…** (a search starting `repo:owner/name`), **Watch Settings…**, **Add to Favorites** or **Remove from Favorites**, Copy, and **Remove from List…** for a repository you opened by address. **Go To** opens the repository straight on one of its views: Issues & PRs, Branches, Commits, Tags, Releases, Workflows, Workflow Runs, Labels or GitHub Pages. Copy includes **Copy HTTPS Clone URL** and **Copy SSH Clone URL**, the addresses `git clone` takes. These are the same commands as on the Actions menu, for the repository selected. A saved search's menu has **Run Search** and **Remove Saved Search**; Favorites and the other entries at the top have **Open**.
 
 ---
 

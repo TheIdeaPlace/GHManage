@@ -710,6 +710,26 @@ SEARCH_VIEWS = (VIEW_SEARCH_ISSUES, VIEW_SEARCH_REPOS)
 # Lists across repositories where G opens the selected row's repository here.
 GO_TO_REPO_VIEWS = (VIEW_ACTIVITY, VIEW_NOTIFICATIONS, VIEW_MY_WORK, VIEW_SEARCH_ISSUES,
                     VIEW_SEARCH_REPOS)
+# A repository's views, as its context menu's Go To lists them (#51).
+REPO_GO_TO = [
+    (VIEW_ISSUES, "Issues & PRs"),
+    (VIEW_BRANCHES, "Branches"),
+    (VIEW_COMMITS, "Commits"),
+    (VIEW_TAGS, "Tags"),
+    (VIEW_RELEASES, "Releases"),
+    (VIEW_WORKFLOWS, "Workflows"),
+    (VIEW_WORKFLOW, "Workflow Runs"),
+    (VIEW_LABELS, "Labels"),
+    (VIEW_PAGES, "GitHub Pages"),
+]
+ID_GO_TO_VIEW = {view: wx.NewIdRef() for view, _ in REPO_GO_TO}
+
+
+def go_to_submenu() -> tuple:
+    """The Go To submenu of a repository's context menu: each of its views."""
+    return ("sub", "Go To", [("item", ID_GO_TO_VIEW[view], label) for view, label in REPO_GO_TO])
+
+
 # An Activity event's address, by kind, and the view it opens in here.
 EVENT_TARGET_VIEWS = {"commit": VIEW_COMMITS, "release": VIEW_RELEASES, "run": VIEW_WORKFLOW}
 # Views that load everything at once, where View More has nothing to add.
@@ -2034,6 +2054,8 @@ class GhViewerFrame(wx.Frame):
         self.Bind(wx.EVT_MENU, self.on_view_shared, id=ID_VIEW_SHARED)
         self.Bind(wx.EVT_MENU, self.on_view_orgs, id=ID_VIEW_ORGS)
         self.Bind(wx.EVT_MENU, self.on_favorite, id=ID_FAVORITE)
+        for view, menu_id in ID_GO_TO_VIEW.items():
+            self.Bind(wx.EVT_MENU, lambda e, v=view: self._go_to_repo_view(v), id=menu_id)
         self.Bind(wx.EVT_MENU, self.on_go_to_event_repo, id=ID_GO_TO_EVENT_REPO)
         self.Bind(wx.EVT_MENU, lambda e: self._copy("link"), id=ID_COPY_LINK)
         self.Bind(wx.EVT_MENU, lambda e: self._copy("markdown"), id=ID_COPY_MARKDOWN)
@@ -4362,6 +4384,10 @@ class GhViewerFrame(wx.Frame):
         entries += walk(self._actions_menu)
         while entries and entries[-1] == ("sep",):
             entries.pop()
+        if isinstance(item, RepoEntry):
+            # After Enter's entry and its separator.
+            at = 2 if entries[:1] and entries[0][1] == ID_CTX_OPEN else 0
+            entries[at:at] = [go_to_submenu(), ("sep",)]
         # View More lives on the File menu, so it was missing here, where
         # people look for "what else can I do in this list" (#52).
         if self.view_mode not in NO_MORE_VIEWS:
@@ -4445,6 +4471,7 @@ class GhViewerFrame(wx.Frame):
             entries = [
                 ("item", ID_REPO_OPEN, "Open\tEnter"),
                 ("item", ID_REPO_BROWSER, "Open on GitHub"),
+                go_to_submenu(),
                 ("sep",),
                 ("item", ID_NEW_ISSUE, "New Issue…\tCtrl+N"),
                 ("item", ID_SEARCH_REPO, "Search This Repository…\tCtrl+Shift+S"),
@@ -4500,6 +4527,22 @@ class GhViewerFrame(wx.Frame):
             self._announce("Select a repository first: Search This Repository needs one.")
             return
         self._search_flow(prefill=(KIND_ISSUES, f"repo:{repo} "))
+
+    def _go_to_repo_view(self, view: str) -> None:
+        """Go To ▸ <view> on a repository's context menu: open the repository
+        in front of you on that view. From a row in a list of repositories,
+        Backspace comes back to the row."""
+        repo, source = self._repo_in_front_from()
+        if not repo:
+            self._announce("Select a repository first.")
+            return
+        if source == "row":
+            self._open_repo_from_list(repo, self._focused_item(), view)
+        else:
+            if view == VIEW_COMMITS:
+                self.commit_branch = ""  # its default branch, not one picked elsewhere
+            self._select_repo(repo, view)
+            self._select_in_repo_list(repo)
 
     def _repo_entry_action(self, action: str) -> None:
         """A repository-list context menu action, on the repo selected there."""

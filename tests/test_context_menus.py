@@ -218,3 +218,51 @@ def test_an_expired_artifact_offers_no_download():
 def test_no_view_more_where_everything_is_already_loaded(view):
     f = _frame(view, None, FakeMenu(FakeItem(1, "Copy")))
     assert MORE not in Frame._context_entries(f)
+
+
+# ── Go To on a repository's context menu (#51) ─────────────────────────
+
+
+def _go_to(entries):
+    return next((e for e in entries if e[0] == "sub" and e[1] == "Go To"), None)
+
+
+def test_a_repository_s_menu_goes_to_each_of_its_views():
+    sub = _go_to(Frame._repo_context_entries(_repo_frame(), "o/r"))
+    assert [e[2] for e in sub[2]] == [label for _, label in ghviewer.REPO_GO_TO]
+    assert [e[1] for e in sub[2]] == [ghviewer.ID_GO_TO_VIEW[v] for v, _ in ghviewer.REPO_GO_TO]
+
+
+def test_a_repository_row_s_menu_has_go_to_too():
+    from gh_data import RepoEntry
+    f = _frame(ghviewer.VIEW_STARRED, RepoEntry("o/r", url="u"), FakeMenu(FakeItem(9, "Copy")))
+    assert _go_to(Frame._context_entries(f)) is not None
+    # Not on a row that isn't a repository
+    f = _frame(ghviewer.VIEW_ISSUES, Item(1, "T", "OPEN", "u", False), FakeMenu(FakeItem(9, "Copy")))
+    assert _go_to(Frame._context_entries(f)) is None
+
+
+@pytest.mark.parametrize("source, expected", [
+    ("row", [("from list", "o/r", ghviewer.VIEW_RELEASES)]),
+    ("list", [("select", "o/r", ghviewer.VIEW_RELEASES), ("in list", "o/r")]),
+])
+def test_go_to_opens_the_repository_on_that_view(source, expected):
+    events = []
+    f = SimpleNamespace(announced=[], commit_branch="old")
+    f._announce = f.announced.append
+    f._repo_in_front_from = lambda: ("o/r", source)
+    f._focused_item = lambda: "row item"
+    f._open_repo_from_list = lambda repo, item, view: events.append(("from list", repo, view))
+    f._select_repo = lambda repo, view: events.append(("select", repo, view))
+    f._select_in_repo_list = lambda repo: events.append(("in list", repo))
+    Frame._go_to_repo_view(f, ghviewer.VIEW_RELEASES)
+    assert events == expected
+
+
+def test_go_to_commits_starts_on_the_default_branch():
+    f = SimpleNamespace(announced=[], commit_branch="feature")
+    f._repo_in_front_from = lambda: ("o/r", "list")
+    f._select_repo = lambda repo, view: None
+    f._select_in_repo_list = lambda repo: None
+    Frame._go_to_repo_view(f, ghviewer.VIEW_COMMITS)
+    assert f.commit_branch == ""

@@ -195,12 +195,12 @@ the repository you are in, so `Ctrl+1` takes you back to it.
 
 ### Starred and watched repositories
 
-The repository list starts with six entries that aren't single repositories:
+The repository list starts with seven entries that aren't single repositories:
 **★ Favorites**, **Activity**, **Starred Repositories**, **Watched Repositories**,
-**Notifications** and **My Work**. After them come **Shared With Me** (other
-people's repositories you collaborate on, when there are any), an entry for each
-organization you belong to, your saved searches, any repositories you opened by
-address, then your own repositories. Starred and Watched are also on View ▸ View Mode.
+**Notifications**, **My Work** and **My Organizations** (Enter on an organization
+lists its repositories). After them come **Shared With Me** (other people's
+repositories you collaborate on, when there are any), your saved searches, any
+repositories you opened by address, then your own repositories. Starred and Watched are also on View ▸ View Mode.
 
 - **Starred Repositories** — the repositories you have starred, most recently
   starred first.

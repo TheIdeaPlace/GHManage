@@ -97,6 +97,7 @@ VIEW_SAMPLES = {
     ghviewer.VIEW_PAGEFILES: PagesFile("index.md", "u"),
     ghviewer.VIEW_STARRED: RepoEntry("o/r", url="u"),
     ghviewer.VIEW_WATCHED: RepoEntry("o/r", url="u"),
+    ghviewer.VIEW_ORGS: ghviewer.OrgEntry("o"),
     ghviewer.VIEW_ORG: RepoEntry("o/r", url="u"),
     ghviewer.VIEW_SHARED: RepoEntry("o/r", url="u"),
     ghviewer.VIEW_JOBS: ghviewer.WorkflowJob(5, "build", url="u"),

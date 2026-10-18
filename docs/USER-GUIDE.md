@@ -22,7 +22,7 @@ GHManage is a keyboard-driven desktop app for your GitHub repositories, built fo
 - [Searching GitHub](#searching-github)
 - [Activity](#activity)
 - [Starred and Watched Repositories](#starred-and-watched-repositories)
-- [Organizations and Shared With Me](#organizations-and-shared-with-me)
+- [My Organizations and Shared With Me](#my-organizations-and-shared-with-me)
 - [Favorites](#favorites)
 - [Quick Filter](#quick-filter)
 - [Copying](#copying)
@@ -269,13 +269,13 @@ It is in this order:
 4. **Watched Repositories**: the repositories you watch, with how many.
 5. **Notifications**, with how many are unread, for example "Notifications (12 unread)". See [Notifications](#notifications).
 6. **My Work**: open issues and pull requests that need you, with how many once it has loaded. See [My Work](#my-work).
-7. **Shared With Me**: other people's repositories you have been made a collaborator on, with how many. It is only there when there is at least one. See [Organizations and Shared With Me](#organizations-and-shared-with-me).
-8. **Each organization you belong to**, marked with a building, with how many of its repositories you can see, for example "🏢 TheIdeaPlace (13)". The ones you are an owner of come first.
+7. **My Organizations**: the organizations you belong to, with how many, for example "My Organizations (3)". See [My Organizations and Shared With Me](#my-organizations-and-shared-with-me).
+8. **Shared With Me**: other people's repositories you have been made a collaborator on, with how many. It is only there when there is at least one.
 9. **Your saved searches**, each marked with a magnifying glass, for example "🔍 NVDA braille bugs". See [Saved searches](#saved-searches).
 10. **Repositories you opened by address**, each marked with a pin, for example "📌 nvaccess/nvda — NVDA, the free and open source screen reader".
 11. **Your own repositories**, most recently pushed first, each followed by its description, up to 100.
 
-The first six are always there, so the same keystrokes from the top of the list always reach them. The first four are where they were before Notifications and My Work arrived. When the list first loads, the status bar says how many repositories it found: "Loaded 42 repositories. Select one to view issues and PRs."
+The first seven are always there, so the same keystrokes from the top of the list always reach them. The first four are where they were before Notifications, My Work and My Organizations arrived. When the list first loads, the status bar says how many repositories it found: "Loaded 42 repositories. Select one to view issues and PRs."
 
 The notification, starred and watched counts are asked for once the list is up, so they appear a moment after the names, without moving you from the entry you are on. If GitHub can't be asked, the entry shows just its name rather than a number that might be wrong. Opening Starred or Watched, or pressing `R` in it, brings its count up to date, so a repository you starred on the web since GHManage started is counted then.
 
@@ -739,15 +739,25 @@ These lists keep other people's repositories out of the main repository list, wh
 
 ---
 
-## Organizations and Shared With Me
+## My Organizations and Shared With Me
 
-Each organization you belong to has its own entry in the repository list, after My Work, for example "🏢 TheIdeaPlace (13)". The number is how many of its repositories you can see. Organizations you are an owner of come first, then the rest by name. `Enter` on one lists its repositories, most recently pushed first. **View → View Mode → Organization Repositories…** does the same, asking which organization when you are in more than one; **Shared With Me** is there too.
+**My Organizations**, after My Work in the repository list, lists the organizations you belong to, the ones you are an owner of first and then the rest by name. It is also on **View → View Mode → My Organizations**. Each row reads the organization's name, your role in it (owner or member) and how many of its repositories you can see.
+
+| Key | Action |
+|-----|--------|
+| `Enter` | List the organization's repositories, most recently pushed first |
+| `Backspace` | From those repositories, come back to My Organizations, on the same organization |
+| `Ctrl+O` | Open the organization on GitHub |
+| `Ctrl+F` | Filter the list |
+| `R` | Reload the list |
+
+An organization's repositories work like Starred and Watched: the same columns, details and keys, and `Enter` on one opens it here, with `Backspace` bringing you back to it.
 
 An organization's repositories are kept out of the list of your own, so belonging to a big organization (W3C has over a thousand repositories) doesn't bury yours. To keep one you use often a keystroke away, favorite it with `F`.
 
-**Shared With Me** lists other people's repositories you have been made a collaborator on. It leaves out repositories owned by your organizations, which are already under those organizations' entries. It is only in the repository list when there is at least one.
+**Shared With Me** lists other people's repositories you have been made a collaborator on. It leaves out repositories owned by your organizations, which are already under My Organizations. It is only in the repository list when there is at least one, and works like Starred and Watched.
 
-Both work like Starred and Watched: the same columns and details, and the same keys (`Enter`, `Backspace`, `Ctrl+O`, `F`, `Ctrl++`, `Ctrl+F` and `R`). They keep the repository you were in, so `Ctrl+1` takes you back to it.
+These keep the repository you were in, so `Ctrl+1` takes you back to it.
 
 ---
 

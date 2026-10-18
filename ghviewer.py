@@ -157,8 +157,12 @@ from gh_data import (
     fetch_starred_repos,
     fetch_watched_repos,
     fetch_org_repos,
+    fetch_orgs,
     fetch_shared_repos,
+    OrgEntry,
     RepoListing,
+    ORG_COLUMNS,
+    ORG_DEFAULT_COLUMNS,
     open_in_browser,
     parent_repo,
     reopen_item,
@@ -535,6 +539,8 @@ def copy_values(item) -> CopyValues | None:
         return CopyValues(item.url, item.path, item.path, "Path", item.path)
     if isinstance(item, RepoEntry):
         return CopyValues(item.url, item.name, item.name, "Repository Name", item.name)
+    if isinstance(item, OrgEntry):
+        return CopyValues(item.url, item.login, item.login, "Organization Name", item.login)
     if isinstance(item, ActivityEvent):
         # What the event is about, when it is about something with an address
         # of its own — the same thing F favorites.
@@ -601,7 +607,7 @@ ID_VIEW_ACTIVITY = wx.NewIdRef()
 ID_VIEW_STARRED = wx.NewIdRef()
 ID_VIEW_WATCHED = wx.NewIdRef()
 ID_VIEW_SHARED = wx.NewIdRef()
-ID_VIEW_ORG = wx.NewIdRef()
+ID_VIEW_ORGS = wx.NewIdRef()
 ID_VIEW_NOTIFICATIONS = wx.NewIdRef()
 ID_MARK_READ = wx.NewIdRef()
 ID_MARK_ALL_READ = wx.NewIdRef()
@@ -674,16 +680,18 @@ VIEW_NOTIFICATIONS = "notifications"  # your GitHub notifications
 VIEW_MY_WORK = "my_work"       # open issues and PRs that need you, everywhere
 VIEW_SEARCH_ISSUES = "search_issues"  # GitHub-wide search: issues and PRs
 VIEW_SEARCH_REPOS = "search_repos"    # GitHub-wide search: repositories
-VIEW_ORG = "org"               # one organization's repositories (which: _org)
+VIEW_ORGS = "orgs"             # the organizations you belong to
+VIEW_ORG = "org"               # one organization's repositories (drill-down; which: _org)
 VIEW_SHARED = "shared"         # others' repositories you are a collaborator on
 
 # Views that are not views *of a repo*, so they work with none selected.
 REPOLESS_VIEWS = (VIEW_FAVORITES, VIEW_NOTIFICATIONS, VIEW_MY_WORK, VIEW_ACTIVITY,
                   VIEW_STARRED, VIEW_WATCHED, VIEW_SEARCH_ISSUES, VIEW_SEARCH_REPOS,
-                  VIEW_ORG, VIEW_SHARED)
+                  VIEW_ORGS, VIEW_ORG, VIEW_SHARED)
 # The repoless views fetched from GitHub (Favorites is read from disk).
 FEED_VIEWS = (VIEW_NOTIFICATIONS, VIEW_MY_WORK, VIEW_ACTIVITY, VIEW_STARRED,
-              VIEW_WATCHED, VIEW_SEARCH_ISSUES, VIEW_SEARCH_REPOS, VIEW_ORG, VIEW_SHARED)
+              VIEW_WATCHED, VIEW_SEARCH_ISSUES, VIEW_SEARCH_REPOS, VIEW_ORGS, VIEW_ORG,
+              VIEW_SHARED)
 # Views listing issues and pull requests (Items), shown with the issue
 # details. Only Issues & PRs is of one repo; the issue actions (close,
 # reopen, comment) belong to it alone.
@@ -704,11 +712,10 @@ SEARCH_ENTRY_PREFIX = "__search__:"
 ACTIVITY_ENTRY = "__activity__"
 STARRED_ENTRY = "__starred__"
 WATCHED_ENTRY = "__watched__"
+MY_ORGS_ENTRY = "__my_orgs__"
 # Shown only when someone has shared a repository with you.
 SHARED_ENTRY = "__shared__"
 SHARED_LABEL = "Shared With Me"
-# An organization you belong to: this prefix and its login.
-ORG_ENTRY_PREFIX = "__org__:"
 
 # The category entries after ★ Favorites, in order, with their labels.
 CATEGORY_ENTRIES = [
@@ -719,6 +726,7 @@ CATEGORY_ENTRIES = [
     (WATCHED_ENTRY, "Watched Repositories"),
     (NOTIFICATIONS_ENTRY, "Notifications"),
     (MY_WORK_ENTRY, "My Work"),
+    (MY_ORGS_ENTRY, "My Organizations"),
 ]
 # Which repo-list entry stands for which view, both ways.
 VIEW_ENTRIES = {
@@ -729,6 +737,7 @@ VIEW_ENTRIES = {
     VIEW_STARRED: STARRED_ENTRY,
     VIEW_WATCHED: WATCHED_ENTRY,
     VIEW_SHARED: SHARED_ENTRY,
+    VIEW_ORGS: MY_ORGS_ENTRY,
 }
 ENTRY_VIEWS = {entry: view for view, entry in VIEW_ENTRIES.items()}
 # The categories whose entry carries a count, like ★ Favorites (6), and how
@@ -750,6 +759,7 @@ PARENT_VIEW = {
     VIEW_JOBS: VIEW_WORKFLOW,
     VIEW_ASSETS: VIEW_RELEASES,
     VIEW_PAGEFILES: VIEW_PAGES,
+    VIEW_ORG: VIEW_ORGS,
 }
 
 # Columns for the favorites view (mixed item types)
@@ -779,6 +789,7 @@ VIEW_COLUMNS = {
     VIEW_MY_WORK: (MY_WORK_DEFAULT_COLUMNS, MY_WORK_COLUMNS),
     VIEW_SEARCH_ISSUES: (SEARCH_ITEM_DEFAULT_COLUMNS, SEARCH_ITEM_COLUMNS),
     VIEW_SEARCH_REPOS: (REPO_DEFAULT_COLUMNS, REPO_COLUMNS),
+    VIEW_ORGS: (ORG_DEFAULT_COLUMNS, ORG_COLUMNS),
     VIEW_ORG: (REPO_DEFAULT_COLUMNS, REPO_COLUMNS),
     VIEW_SHARED: (REPO_DEFAULT_COLUMNS, REPO_COLUMNS),
 }
@@ -786,11 +797,10 @@ VIEW_COLUMNS = {
 
 def is_repo_entry(data) -> bool:
     """Whether a repo-list entry's client data names a repository, rather
-    than Favorites, a category, an organization or a saved search."""
+    than Favorites, a category or a saved search."""
     return (
         isinstance(data, str) and bool(data) and data != FAVORITES_ENTRY
         and data not in ENTRY_VIEWS and not data.startswith(SEARCH_ENTRY_PREFIX)
-        and not data.startswith(ORG_ENTRY_PREFIX)
     )
 
 
@@ -1591,8 +1601,8 @@ class GhViewerFrame(wx.Frame):
         self._repos_loaded_once: bool = False
         # How many repositories each counted category holds, once known.
         self._category_counts: dict[str, int] = {}
-        # The organizations you belong to, each an entry in the repo list, and
-        # the one the organization view is showing.
+        # The organizations you belong to, for My Organizations, and the one
+        # whose repositories are showing.
         self._orgs: list = []
         self._org: str = ""
         # Whether the Shared With Me entry is in the repo list.
@@ -1753,6 +1763,8 @@ class GhViewerFrame(wx.Frame):
                            "repo": 220, "updated": 130})
         elif self.view_mode in (VIEW_MY_WORK, VIEW_SEARCH_ISSUES):
             widths.update({"why": 130, "repo": 200, "title": 380})
+        elif self.view_mode == VIEW_ORGS:
+            widths.update({"organization": 240, "role": 100, "repositories": 110})
         elif self.view_mode in REPO_LIST_VIEWS or self.view_mode == VIEW_SEARCH_REPOS:
             widths.update({"repo": 240, "description": 380, "language": 100,
                            "stars": 80, "pushed": 100, "owner": 140})
@@ -1893,9 +1905,8 @@ class GhViewerFrame(wx.Frame):
         show_menu.AppendRadioItem(ID_VIEW_STARRED, "Starred Repositories")
         show_menu.AppendRadioItem(ID_VIEW_WATCHED, "Watched Repositories")
         show_menu.AppendRadioItem(ID_VIEW_SHARED, "Shared With Me")
-        # Checked while an organization's repositories are showing; choosing
-        # it asks which organization when you are in more than one.
-        show_menu.AppendRadioItem(ID_VIEW_ORG, "Organization Repositories…")
+        # Checked too while one organization's repositories are showing.
+        show_menu.AppendRadioItem(ID_VIEW_ORGS, "My Organizations")
         view_menu.AppendSubMenu(show_menu, "View Mode")
 
         view_menu.AppendSeparator()
@@ -1991,7 +2002,7 @@ class GhViewerFrame(wx.Frame):
         self.Bind(wx.EVT_MENU, self.on_view_starred, id=ID_VIEW_STARRED)
         self.Bind(wx.EVT_MENU, self.on_view_watched, id=ID_VIEW_WATCHED)
         self.Bind(wx.EVT_MENU, self.on_view_shared, id=ID_VIEW_SHARED)
-        self.Bind(wx.EVT_MENU, self.on_view_org, id=ID_VIEW_ORG)
+        self.Bind(wx.EVT_MENU, self.on_view_orgs, id=ID_VIEW_ORGS)
         self.Bind(wx.EVT_MENU, self.on_go_to_event_repo, id=ID_GO_TO_EVENT_REPO)
         self.Bind(wx.EVT_MENU, lambda e: self._copy("link"), id=ID_COPY_LINK)
         self.Bind(wx.EVT_MENU, lambda e: self._copy("markdown"), id=ID_COPY_MARKDOWN)
@@ -2137,7 +2148,7 @@ class GhViewerFrame(wx.Frame):
         menu_bar.Check(ID_VIEW_STARRED, self.view_mode == VIEW_STARRED)
         menu_bar.Check(ID_VIEW_WATCHED, self.view_mode == VIEW_WATCHED)
         menu_bar.Check(ID_VIEW_SHARED, self.view_mode == VIEW_SHARED)
-        menu_bar.Check(ID_VIEW_ORG, self.view_mode == VIEW_ORG)
+        menu_bar.Check(ID_VIEW_ORGS, self.view_mode in (VIEW_ORGS, VIEW_ORG))
         # State filter
         menu_bar.Check(ID_STATE_OPEN, self.state_filter == "open")
         menu_bar.Check(ID_STATE_CLOSED, self.state_filter == "closed")
@@ -2426,12 +2437,10 @@ class GhViewerFrame(wx.Frame):
 
     def _category_entries(self) -> list:
         """Every entry after ★ Favorites, in order, with its label: the fixed
-        categories, then Shared With Me when there is any, then one per
-        organization."""
+        categories, then Shared With Me when there is any."""
         entries = list(CATEGORY_ENTRIES)
         if self._show_shared:
             entries.append((SHARED_ENTRY, SHARED_LABEL))
-        entries += [(ORG_ENTRY_PREFIX + org.login, f"🏢 {org.login}") for org in self._orgs]
         return entries
 
     def _set_repo_list_label(self, i: int, label: str) -> None:
@@ -2458,8 +2467,8 @@ class GhViewerFrame(wx.Frame):
             self._orgs = listing.orgs
             # None is "more than a page", so there is something to show.
             self._show_shared = listing.shared != 0
-            counts = {ORG_ENTRY_PREFIX + o.login: o.repo_count for o in listing.orgs}
-            counts[SHARED_ENTRY] = listing.shared or None
+            counts = {MY_ORGS_ENTRY: len(listing.orgs),
+                      SHARED_ENTRY: listing.shared or None}
             for entry, n in counts.items():
                 # Unknown now means unknown: not the number from last time.
                 if n is None:
@@ -2497,8 +2506,8 @@ class GhViewerFrame(wx.Frame):
                     break
             label = f"📌 {name} — {desc}" if desc else f"📌 {name}"
             self.repo_list.Append(label, clientData=name)
-        # Then the user's own repos. Organizations' have entries of their
-        # own above, so a big one can't bury these.
+        # Then the user's own repos. Organizations' are under My
+        # Organizations, so a big one can't bury these.
         for repo in repos:
             name = repo.get("nameWithOwner", "")
             if name in shown:
@@ -2588,8 +2597,6 @@ class GhViewerFrame(wx.Frame):
             saved = self._saved_search(name[len(SEARCH_ENTRY_PREFIX):])
             if saved:
                 self._run_search(saved.kind, saved.query)
-        elif name.startswith(ORG_ENTRY_PREFIX):
-            self._select_org(name[len(ORG_ENTRY_PREFIX):])
         else:
             self._select_repo(name)
 
@@ -2633,8 +2640,8 @@ class GhViewerFrame(wx.Frame):
             self._load_items()
 
     def _select_org(self, login: str) -> None:
-        """Switch to one organization's repositories. Like Starred, this keeps
-        the repository you were in."""
+        """Enter on an organization in My Organizations: its repositories.
+        Backspace goes back up to the organizations."""
         if self.view_mode == VIEW_ORG and login != self._org:
             # A filter typed for one organization means nothing in the next.
             self.filter_text = ""
@@ -2697,6 +2704,8 @@ class GhViewerFrame(wx.Frame):
             self._set_view_status(f"Searching GitHub for {query}…")
         elif self.view_mode == VIEW_ORG:
             self._set_view_status(f"Loading {self._org}'s repositories…")
+        elif self.view_mode == VIEW_ORGS:
+            self._set_view_status("Loading your organizations…")
         elif self.view_mode in REPO_LIST_VIEWS:
             self._set_view_status(f"Loading {self._view_label(self.view_mode, lower=True)}…")
         else:
@@ -2806,6 +2815,8 @@ class GhViewerFrame(wx.Frame):
                 elif view == VIEW_ACTIVITY:
                     events, more = fetch_activity(limit)
                     wx.CallAfter(self._on_activity_loaded, token, events, more, focus_row)
+                elif view == VIEW_ORGS:
+                    wx.CallAfter(self._on_orgs_loaded, token, fetch_orgs(), focus_row)
                 elif view in REPO_LIST_VIEWS:
                     if view == VIEW_ORG:
                         repos = fetch_org_repos(org, limit)
@@ -2885,6 +2896,7 @@ class GhViewerFrame(wx.Frame):
         VIEW_MY_WORK: "My Work",
         VIEW_SEARCH_ISSUES: "Search Results",
         VIEW_SEARCH_REPOS: "Repository Search Results",
+        VIEW_ORGS: "My Organizations",
         VIEW_ORG: "Organization Repositories",
         VIEW_SHARED: SHARED_LABEL,
     }
@@ -2900,9 +2912,10 @@ class GhViewerFrame(wx.Frame):
         return label.lower() if lower else label
 
     def _view_entry(self, view: str):
-        """The repo-list entry standing for ``view``, or None."""
+        """The repo-list entry standing for ``view``, or None. An
+        organization's repositories are reached through My Organizations."""
         if view == VIEW_ORG:
-            return ORG_ENTRY_PREFIX + self._org
+            return MY_ORGS_ENTRY
         return VIEW_ENTRIES.get(view)
 
     def _update_title(self) -> None:
@@ -3315,7 +3328,12 @@ class GhViewerFrame(wx.Frame):
             # The whole list is here, so its length is the count: newer than
             # the one fetched at startup if you have starred something since.
             count = n
-        if count is not None:
+        if count is not None and self.view_mode == VIEW_ORG:
+            # The count belongs to the organization's row, not an entry.
+            for org in self._orgs:
+                if org.login == self._org:
+                    org.repo_count = count
+        elif count is not None:
             self._category_counts[self._view_entry(self.view_mode)] = count
             self._refresh_category_labels()
         if n:
@@ -3338,6 +3356,30 @@ class GhViewerFrame(wx.Frame):
         row = focus if isinstance(focus, int) else max(self._row_of(focus), 0)
         if filtered:
             wx.CallLater(100, self._focus_list, row)
+
+    def _on_orgs_loaded(self, token: int, orgs: list, focus=0) -> None:
+        """My Organizations: one row per organization you belong to."""
+        if not self._fetch_is_current(token):
+            return  # the user has moved on; these belong to a view they left
+        self._orgs = orgs
+        self.git_items = orgs
+        self.items = []
+        filtered = self._populate_filtered_list(orgs)
+        self._category_counts[MY_ORGS_ENTRY] = len(orgs)
+        self._refresh_category_labels()
+        n = len(orgs)
+        if n:
+            message = (f"My Organizations — {n} organization{'s' if n != 1 else ''}, "
+                       "the ones you own first.")
+        else:
+            message = "My Organizations — you don't belong to any organizations."
+        self._set_view_status(
+            message,
+            "Enter=list its repositories  Ctrl+O=open on GitHub  R=refresh  Ctrl+F=filter",
+        )
+        self._update_title()
+        if filtered:
+            wx.CallLater(100, self._focus_list, focus if isinstance(focus, int) else 0)
 
     def _focus_list(self, row: int = 0) -> None:
         """Move keyboard focus to the list and select a row (the first by default)."""
@@ -3840,6 +3882,18 @@ class GhViewerFrame(wx.Frame):
             lines.append("")
             lines.append(f"Press Enter to open {item.name} here in GHManage.")
             lines.append("Press Ctrl+O to open it on GitHub.")
+        elif isinstance(item, OrgEntry):
+            lines.append(item.login)
+            lines.append(f"Your role: {item.role}")
+            if item.repo_count is not None:
+                lines.append(f"Repositories you can see: {item.repo_count:,}")
+            lines.append("URL:")
+            lines.append(item.url)
+            lines.append("")
+            lines.append("─" * 60)
+            lines.append("")
+            lines.append(f"Press Enter to list {item.login}'s repositories.")
+            lines.append("Press Ctrl+O to open it on GitHub.")
         elif isinstance(item, Notification):
             lines.append(f"#{item.number} {item.title}" if item.number else item.title)
             lines.append(f"{item.kind} in {item.repo}" if item.kind else item.repo)
@@ -3929,6 +3983,7 @@ class GhViewerFrame(wx.Frame):
         VIEW_ACTIVITY: "Number, Tag or Repository",
         VIEW_STARRED: "Repository Name",
         VIEW_WATCHED: "Repository Name",
+        VIEW_ORGS: "Organization Name",
         VIEW_ORG: "Repository Name",
         VIEW_SHARED: "Repository Name",
         VIEW_NOTIFICATIONS: "Number or Repository",
@@ -4105,6 +4160,9 @@ class GhViewerFrame(wx.Frame):
             else:
                 self._announce("No URL for this favorite")
             return
+        if self.view_mode == VIEW_ORGS and isinstance(item, OrgEntry):
+            self._select_org(item.login)
+            return
         # In the lists of repositories, Enter opens the repository here
         if self.view_mode in REPO_LIST_VIEWS and isinstance(item, RepoEntry):
             self._open_repo_from_list(item.name, item)
@@ -4150,6 +4208,7 @@ class GhViewerFrame(wx.Frame):
         VIEW_SEARCH_REPOS: "Open Here",
         VIEW_STARRED: "Open Here",
         VIEW_WATCHED: "Open Here",
+        VIEW_ORGS: "List Its Repositories",
         VIEW_ORG: "Open Here",
         VIEW_SHARED: "Open Here",
     }
@@ -4616,6 +4675,10 @@ class GhViewerFrame(wx.Frame):
         elif key == wx.WXK_BACK and self.view_mode in PARENT_VIEW:
             # Backspace steps back up a drill-down (artifacts -> runs, commits -> branches)
             parent = PARENT_VIEW[self.view_mode]
+            if self.view_mode == VIEW_ORG:
+                # Back on the organization you came from, not at the top.
+                logins = [o.login for o in self._orgs]
+                self._pending_focus_row = logins.index(self._org) if self._org in logins else 0
             self._switch_view(parent)
             self._announce(f"Back to {self._VIEW_LABELS.get(parent, parent).lower()}")
         elif key == wx.WXK_BACK and self.view_mode == VIEW_ISSUES and self._return_to:
@@ -4975,6 +5038,9 @@ class GhViewerFrame(wx.Frame):
             self._announce("My Work shows up to 100 of each kind. Search (Ctrl+Shift+F) "
                            "finds more.")
             return
+        elif self.view_mode == VIEW_ORGS:
+            self._announce("That is all your organizations.")
+            return
         elif self.view_mode in REPO_LIST_VIEWS:
             if len(self.git_items) < self.current_limit:
                 label = self._view_label(self.view_mode, lower=True)
@@ -5136,7 +5202,7 @@ class GhViewerFrame(wx.Frame):
         name = self.repo_list.GetClientData(idx)
         if not name:
             return
-        if name == FAVORITES_ENTRY or name in ENTRY_VIEWS or name.startswith(ORG_ENTRY_PREFIX):
+        if name == FAVORITES_ENTRY or name in ENTRY_VIEWS:
             self._announce("That entry is always in the list.")
             return
         if name.startswith(SEARCH_ENTRY_PREFIX):
@@ -5727,27 +5793,8 @@ class GhViewerFrame(wx.Frame):
     def on_view_shared(self, event: wx.CommandEvent) -> None:
         self._select_category(VIEW_SHARED)
 
-    def on_view_org(self, event: wx.CommandEvent) -> None:
-        """View ▸ View Mode ▸ Organization Repositories: which one, if more
-        than one."""
-        logins = [o.login for o in self._orgs]
-        if not logins:
-            self._update_menu_checks()  # the radio item has checked itself
-            self._announce("You don't belong to any organizations.")
-            return
-        if len(logins) == 1:
-            self._select_org(logins[0])
-            return
-        dlg = wx.SingleChoiceDialog(self, "Show which organization's repositories?",
-                                    "Organization Repositories", logins)
-        if self._org in logins:
-            dlg.SetSelection(logins.index(self._org))
-        chosen = logins[dlg.GetSelection()] if dlg.ShowModal() == wx.ID_OK else None
-        dlg.Destroy()
-        if chosen:
-            self._select_org(chosen)
-        else:
-            self._update_menu_checks()
+    def on_view_orgs(self, event: wx.CommandEvent) -> None:
+        self._select_category(VIEW_ORGS)
 
     # ── List display refresh ───────────────────────────────────────────
 

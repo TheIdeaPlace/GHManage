@@ -306,7 +306,7 @@ UI thread via `wx.CallAfter`. Never touch wx widgets from a worker thread.
 
 - Issues/PRs: use `gh issue list` / `gh pr list` / `gh issue view` / `gh pr view` with `--json`.
 - Actions: `gh issue close` / `gh issue reopen` / `gh issue comment` (same for `pr`).
-- Repos: one GraphQL `viewer` query (`list_repos` → `RepoListing`): your own repos, your organizations with repo counts, and a count of repos shared with you outside them. Organization repos aren't mixed into the list (a big org buried people's own, #40); each org is a repo-list entry (`ORG_ENTRY_PREFIX`, `VIEW_ORG`, `fetch_org_repos`), and Shared With Me (`VIEW_SHARED`, `fetch_shared_repos`, REST `affiliation=collaborator`) shows only when non-empty. / `gh repo view`.
+- Repos: one GraphQL `viewer` query (`list_repos` → `RepoListing`): your own repos, your organizations with repo counts, and a count of repos shared with you outside them. Organization repos aren't mixed into the list (a big org buried people's own, #40); they are under the My Organizations entry (`VIEW_ORGS`, `fetch_orgs`, `OrgEntry`), whose Enter drills into one org's repos (`VIEW_ORG`, `fetch_org_repos`, Backspace via `PARENT_VIEW`); no emoji on these labels. Shared With Me (`VIEW_SHARED`, `fetch_shared_repos`, REST `affiliation=collaborator`) shows only when non-empty. / `gh repo view`.
 - Git metadata: use `gh api` (REST API) — branches, commits, tags, compare, releases, workflow runs.
 - Always pass `--repo OWNER/NAME` when `repo` is not None.
 - `gh` returns newest-first by default for issue/pr lists.

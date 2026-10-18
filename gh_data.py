@@ -601,13 +601,34 @@ def detect_repo() -> Optional[str]:
         return None
 
 
+ORG_COLUMNS = ["organization", "role", "repositories"]
+ORG_DEFAULT_COLUMNS = ["organization", "role", "repositories"]
+
+
 @dataclass
 class OrgEntry:
-    """An organization you belong to, as an entry in the repository list."""
+    """An organization you belong to, a row in My Organizations."""
 
     login: str
     admin: bool = False               # you can administer it
     repo_count: Optional[int] = None  # the repositories in it you can see
+
+    @property
+    def url(self) -> str:
+        return f"https://github.com/{self.login}"
+
+    @property
+    def role(self) -> str:
+        return "owner" if self.admin else "member"
+
+    def to_row(self, columns: list[str]) -> dict[str, str]:
+        count = "" if self.repo_count is None else f"{self.repo_count:,}"
+        mapping = {"organization": self.login, "role": self.role, "repositories": count}
+        return {col: mapping.get(col, "") for col in columns}
+
+    def to_accessible_string(self, columns: list[str]) -> str:
+        row = self.to_row(columns)
+        return ", ".join(f"{col}: {val}" for col, val in row.items() if val)
 
 
 @dataclass
@@ -621,6 +642,38 @@ class RepoListing:
     shared: Optional[int] = 0
 
 
+_ORGS_FIELD = (
+    "organizations(first: 100) "
+    "{ nodes { login viewerCanAdminister repositories { totalCount } } } "
+)
+
+
+def _parse_orgs(viewer: dict) -> list[OrgEntry]:
+    """The organizations in a GraphQL viewer reply, the ones you run first."""
+    orgs: list[OrgEntry] = []
+    # An organization that blocks gh's access leaves a null in its place.
+    for node in (viewer.get("organizations") or {}).get("nodes") or []:
+        if not node or not node.get("login"):
+            continue
+        count = (node.get("repositories") or {}).get("totalCount")
+        orgs.append(OrgEntry(node["login"], bool(node.get("viewerCanAdminister")),
+                             count if isinstance(count, int) else None))
+    orgs.sort(key=lambda o: (not o.admin, o.login.lower()))
+    return orgs
+
+
+def fetch_orgs() -> list[OrgEntry]:
+    """The organizations you belong to, for My Organizations."""
+    reply = _graphql("{ viewer { " + _ORGS_FIELD + "} }")
+    viewer = (reply.get("data") or {}).get("viewer")
+    if viewer is None:
+        errors = reply.get("errors") or []
+        first_error = errors[0] if errors and isinstance(errors[0], dict) else {}
+        raise GhError(first_error.get("message") or reply.get("message")
+                      or "Couldn't list your organizations")
+    return _parse_orgs(viewer)
+
+
 def list_repos(limit: int = 100) -> RepoListing:
     """Your own repositories, your organizations, and what is shared with you.
 
@@ -630,8 +683,9 @@ def list_repos(limit: int = 100) -> RepoListing:
 
     An organization's repositories aren't mixed in with yours: someone in a
     big organization (W3C has over a thousand) would find their own repos
-    lost among them. Each organization becomes an entry of its own instead,
-    with its count, and its repositories are fetched when it is opened.
+    lost among them. They are under My Organizations instead, each with
+    its count, and an organization's repositories are fetched when it is
+    opened.
 
     Shared counts the repositories you are a collaborator on, less those in
     your organizations: you stay a collaborator on a repo you move into an
@@ -645,9 +699,7 @@ def list_repos(limit: int = 100) -> RepoListing:
     )
     extras = (
         "shared: repositories(first: 100, ownerAffiliations: [COLLABORATOR]) "
-        "{ nodes { owner { login } } } "
-        "organizations(first: 100) "
-        "{ nodes { login viewerCanAdminister repositories { totalCount } } } "
+        "{ nodes { owner { login } } } " + _ORGS_FIELD
     )
     reply = _graphql("{ viewer { " + own_part + extras + "} }")
     viewer = (reply.get("data") or {}).get("viewer") or {}
@@ -670,16 +722,7 @@ def list_repos(limit: int = 100) -> RepoListing:
             message += ". Run gh auth login to sign in again."
         raise GhError(message)
     repos = [r for r in own if r and r.get("nameWithOwner")]
-    orgs: list[OrgEntry] = []
-    # An organization that blocks gh's access leaves a null in its place.
-    for node in (viewer.get("organizations") or {}).get("nodes") or []:
-        if not node or not node.get("login"):
-            continue
-        count = (node.get("repositories") or {}).get("totalCount")
-        orgs.append(OrgEntry(node["login"], bool(node.get("viewerCanAdminister")),
-                             count if isinstance(count, int) else None))
-    # The ones you run first, then by name.
-    orgs.sort(key=lambda o: (not o.admin, o.login.lower()))
+    orgs = _parse_orgs(viewer)
     shared_nodes = (viewer.get("shared") or {}).get("nodes")
     if shared_nodes is None:
         shared = 0  # couldn't be had; the entry is left out rather than wrong

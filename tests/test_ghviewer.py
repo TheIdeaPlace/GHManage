@@ -360,7 +360,7 @@ def _row(name, desc=""):
 
 
 CATEGORIES = ["★ Favorites", "Activity", "Starred Repositories", "Watched Repositories",
-              "Notifications", "My Work"]
+              "Notifications", "My Work", "My Organizations"]
 
 
 def test_categories_come_first_then_pinned_then_your_own():
@@ -370,7 +370,7 @@ def test_categories_come_first_then_pinned_then_your_own():
     assert [d for _, d in f.repo_list.rows] == [
         ghviewer.FAVORITES_ENTRY, ghviewer.ACTIVITY_ENTRY, ghviewer.STARRED_ENTRY,
         ghviewer.WATCHED_ENTRY, ghviewer.NOTIFICATIONS_ENTRY, ghviewer.MY_WORK_ENTRY,
-        "p/pin", "me/a"]
+        ghviewer.MY_ORGS_ENTRY, "p/pin", "me/a"]
     assert f.repo_list.selection == 0
     assert f.announced[-1] == "Loaded 2 repositories. Select one to view issues and PRs."
 
@@ -414,7 +414,7 @@ def test_rebuilt_list_keeps_the_current_repo_selected():
 def test_rebuilt_list_keeps_the_row_you_were_on():
     f = _repo_frame()
     Frame._on_repos_loaded(f, [_row("me/a"), _row("me/b")])
-    f.repo_list.SetSelection(7)  # me/b, after the six fixed entries and me/a
+    f.repo_list.SetSelection(8)  # me/b, after the seven fixed entries and me/a
     Frame._on_repos_loaded(f, [_row("me/a"), _row("me/b")])
     assert f.repo_list.GetClientData(f.repo_list.selection) == "me/b"
 
@@ -1056,7 +1056,7 @@ def test_backspace_after_g_with_a_filter_lands_on_that_event(call_later):
 
 
 @pytest.mark.parametrize("view, row", [
-    (ghviewer.VIEW_WATCHED, 3), (ghviewer.VIEW_ACTIVITY, 1), (ghviewer.VIEW_ISSUES, 6),
+    (ghviewer.VIEW_WATCHED, 3), (ghviewer.VIEW_ACTIVITY, 1), (ghviewer.VIEW_ISSUES, 7),
     (ghviewer.VIEW_NOTIFICATIONS, 4), (ghviewer.VIEW_MY_WORK, 5),
 ])
 def test_switching_view_moves_the_repo_list_selection_with_it(view, row):
@@ -1141,13 +1141,13 @@ def test_modifiers_from_a_key_event_come_from_the_event():
 def test_category_entries_show_their_counts_once_known():
     f = _repo_frame()
     Frame._on_repos_loaded(f, [_row("me/a")])
-    assert f.repo_list.labels[:6] == CATEGORIES   # not known yet: just the name
-    f.repo_list.SetSelection(6)
+    assert f.repo_list.labels[:7] == CATEGORIES   # not known yet: just the name
+    f.repo_list.SetSelection(7)
     Frame._on_category_counts(f, {ghviewer.STARRED_ENTRY: 7, ghviewer.WATCHED_ENTRY: 0})
-    assert f.repo_list.labels[:7] == [
+    assert f.repo_list.labels[:8] == [
         "★ Favorites", "Activity", "Starred Repositories (7)", "Watched Repositories (0)",
-        "Notifications", "My Work", "me/a"]
-    assert f.repo_list.selection == 6   # updated in place: you stay where you were
+        "Notifications", "My Work", "My Organizations", "me/a"]
+    assert f.repo_list.selection == 7   # updated in place: you stay where you were
     # A rebuild keeps them
     Frame._on_repos_loaded(f, [_row("me/a")])
     assert f.repo_list.labels[2] == "Starred Repositories (7)"
@@ -1241,64 +1241,92 @@ def test_a_short_list_needs_no_count_call(monkeypatch, inline_worker):
     assert landed[-1][-1] is None
 
 
-# ── Organizations and Shared With Me (#40) ─────────────────────────────
+# ── My Organizations and Shared With Me (#40) ──────────────────────────
 
 
 def _listing(repos=(), orgs=(), shared=0):
     return ghviewer.RepoListing(list(repos), list(orgs), shared)
 
 
-def test_each_organization_has_an_entry_and_your_own_repos_stay_yours():
+ORGS = [OrgEntry("mine", True, 13), OrgEntry("w3c", False, 1108)]
+
+
+def test_my_organizations_is_one_entry_and_your_own_repos_stay_yours():
     f = _repo_frame(pinned=["p/pin"])
-    orgs = [OrgEntry("mine", True, 13),
-            OrgEntry("w3c", False, 1108)]
-    Frame._on_repos_loaded(f, _listing([_row("me/a")], orgs, shared=2))
-    assert f.repo_list.labels == CATEGORIES + [
-        "Shared With Me (2)", "🏢 mine (13)", "🏢 w3c (1,108)", "📌 p/pin", "me/a"]
-    assert [d for _, d in f.repo_list.rows][6:9] == [
-        ghviewer.SHARED_ENTRY, ghviewer.ORG_ENTRY_PREFIX + "mine",
-        ghviewer.ORG_ENTRY_PREFIX + "w3c"]
+    Frame._on_repos_loaded(f, _listing([_row("me/a")], ORGS, shared=2))
+    # One entry for all of them, with no emoji, then Shared With Me
+    assert f.repo_list.labels == CATEGORIES[:6] + [
+        "My Organizations (2)", "Shared With Me (2)", "📌 p/pin", "me/a"]
+    assert [d for _, d in f.repo_list.rows][6:8] == [
+        ghviewer.MY_ORGS_ENTRY, ghviewer.SHARED_ENTRY]
     # Only pinned and your own count as repositories
     assert f.announced[-1] == "Loaded 2 repositories. Select one to view issues and PRs."
     # A rebuild from the cache keeps them
     Frame._on_repos_loaded(f, f._all_repos)
-    assert f.repo_list.labels[7] == "🏢 mine (13)"
+    assert f.repo_list.labels[6:8] == ["My Organizations (2)", "Shared With Me (2)"]
 
 
 @pytest.mark.parametrize("shared, label", [(0, None), (None, "Shared With Me")])
 def test_shared_with_me_is_there_only_when_something_is(shared, label):
     f = _repo_frame()
     Frame._on_repos_loaded(f, _listing([_row("me/a")], shared=shared))
-    assert f.repo_list.labels[6] == (label or "me/a")
+    assert f.repo_list.labels[7] == (label or "me/a")
 
 
-def test_an_organization_entry_is_not_a_repository():
-    assert not ghviewer.is_repo_entry(ghviewer.ORG_ENTRY_PREFIX + "w3c")
+def test_enter_on_my_organizations_lists_them():
+    f = _repo_frame()
+    f.repo_list.Append("My Organizations", ghviewer.MY_ORGS_ENTRY)
+    f.repo_list.SetSelection(0)
+    opened = []
+    f._select_category = opened.append
+    Frame._activate_repo_entry(f)
+    assert opened == [ghviewer.VIEW_ORGS]
+    assert not ghviewer.is_repo_entry(ghviewer.MY_ORGS_ENTRY)
     assert not ghviewer.is_repo_entry(ghviewer.SHARED_ENTRY)
 
 
-def test_enter_on_an_organization_opens_its_repositories():
-    f = _repo_frame()
-    f.repo_list.Append("🏢 w3c", ghviewer.ORG_ENTRY_PREFIX + "w3c")
-    f.repo_list.SetSelection(0)
+def test_organizations_list_names_role_and_count(call_later):
+    f = _list_frame(ghviewer.VIEW_ORGS)
+    Frame._on_orgs_loaded(f, 1, list(ORGS))
+    assert f.statuses[-1][0] == "My Organizations — 2 organizations, the ones you own first."
+    assert f._category_counts == {ghviewer.MY_ORGS_ENTRY: 2}
+    assert ORGS[0].to_row(ghviewer.ORG_COLUMNS) == {
+        "organization": "mine", "role": "owner", "repositories": "13"}
+    assert ORGS[1].to_row(["role", "repositories"]) == {"role": "member", "repositories": "1,108"}
+
+
+def test_enter_on_an_organization_lists_its_repositories():
+    f = _frame(view_mode=ghviewer.VIEW_ORGS)
+    f._focused_item = lambda: ORGS[1]
     opened = []
     f._select_org = opened.append
-    Frame._activate_repo_entry(f)
+    Frame.on_item_activated(f, None)
     assert opened == ["w3c"]
 
 
-def test_the_organization_view_selects_its_own_entry():
+def test_backspace_from_an_organization_goes_up_to_it_in_the_list():
+    assert ghviewer.PARENT_VIEW[ghviewer.VIEW_ORG] == ghviewer.VIEW_ORGS
+
+
+def test_an_organizations_repositories_select_my_organizations():
     f = _repo_frame(view=ghviewer.VIEW_ORG)
     f._org = "w3c"
-    assert Frame._current_entry(f) == ghviewer.ORG_ENTRY_PREFIX + "w3c"
+    f._view_entry = lambda view: Frame._view_entry(f, view)
+    assert Frame._current_entry(f) == ghviewer.MY_ORGS_ENTRY
 
 
-def test_load_items_fetches_the_organization_or_shared_repos(monkeypatch, inline_worker):
+def test_load_items_fetches_the_organizations_their_repos_or_shared(monkeypatch, inline_worker):
     calls = []
+    monkeypatch.setattr(ghviewer, "fetch_orgs", lambda: calls.append("orgs") or list(ORGS))
     monkeypatch.setattr(ghviewer, "fetch_org_repos",
                         lambda org, limit: calls.append(("org", org, limit)) or [STAR])
     monkeypatch.setattr(ghviewer, "fetch_shared_repos",
                         lambda limit, orgs: calls.append(("shared", tuple(orgs))) or [])
+    f, _ = _load_frame(ghviewer.VIEW_ORGS)
+    landed = []
+    f._on_orgs_loaded = lambda *a: landed.append(a)
+    Frame._load_items(f)
+    assert landed[-1][1] == ORGS
     for view in (ghviewer.VIEW_ORG, ghviewer.VIEW_SHARED):
         f, _ = _load_frame(view)
         f._org, f._orgs = "w3c", [OrgEntry("w3c")]
@@ -1306,16 +1334,16 @@ def test_load_items_fetches_the_organization_or_shared_repos(monkeypatch, inline
         f._on_repo_list_loaded = lambda *a: landed.append(a)
         Frame._load_items(f)
         assert landed[-1][-1] is None   # counted with the repo list, not again
-    assert calls == [("org", "w3c", 100), ("shared", ("w3c",))]
+    assert calls == ["orgs", ("org", "w3c", 100), ("shared", ("w3c",))]
     assert f.statuses[0][0] == "Loading repositories shared with you…"
 
 
-def test_an_organization_list_names_the_organization_and_keeps_its_count(call_later):
+def test_an_organizations_list_names_it_and_corrects_its_row_count(call_later):
     f = _list_frame(ghviewer.VIEW_ORG)
-    f._org = "w3c"
+    f._org, f._orgs = "w3c", [OrgEntry("w3c", False, 1108)]
     Frame._on_repo_list_loaded(f, 1, [STAR] * 3)
     assert f.statuses[-1][0] == "w3c Repositories — 3 repositories."
-    assert f._category_counts == {ghviewer.ORG_ENTRY_PREFIX + "w3c": 3}
+    assert f._orgs[0].repo_count == 3 and f._category_counts == {}
     assert Frame._view_label(f, ghviewer.VIEW_ORG, lower=True) == "w3c repositories"
 
 
@@ -1332,7 +1360,7 @@ def test_another_organization_starts_without_the_last_ones_filter():
 
 def test_a_count_no_longer_known_is_not_kept():
     f = _repo_frame()
-    Frame._on_repos_loaded(f, _listing(orgs=[OrgEntry("w3c", False, 9)], shared=40))
+    Frame._on_repos_loaded(f, _listing(orgs=ORGS, shared=40))
     assert f._category_counts[ghviewer.SHARED_ENTRY] == 40
-    Frame._on_repos_loaded(f, _listing(orgs=[OrgEntry("w3c", False, None)], shared=None))
-    assert f.repo_list.labels[6:8] == ["Shared With Me", "🏢 w3c"]
+    Frame._on_repos_loaded(f, _listing(orgs=ORGS, shared=None))
+    assert f.repo_list.labels[7] == "Shared With Me"

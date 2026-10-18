@@ -608,6 +608,7 @@ ID_VIEW_STARRED = wx.NewIdRef()
 ID_VIEW_WATCHED = wx.NewIdRef()
 ID_VIEW_SHARED = wx.NewIdRef()
 ID_VIEW_ORGS = wx.NewIdRef()
+ID_FAVORITE = wx.NewIdRef()
 ID_VIEW_NOTIFICATIONS = wx.NewIdRef()
 ID_MARK_READ = wx.NewIdRef()
 ID_MARK_ALL_READ = wx.NewIdRef()
@@ -747,6 +748,9 @@ COUNTED_ENTRIES = {
     STARRED_ENTRY: count_starred_repos,
     WATCHED_ENTRY: count_watched_repos,
 }
+
+# The Actions menu item for F. Context menus name what it will do instead.
+FAVORITE_LABEL = "Add or Remove Favorite (F)"
 
 USER_GUIDE_URL = "https://theideaplace.github.io/GHManage/"
 
@@ -1814,6 +1818,9 @@ class GhViewerFrame(wx.Frame):
         self._act_copy_ident = copy_menu.Append(ID_COPY_IDENT, "Copy Number\tCtrl+Shift+I")
         copy_menu.Append(ID_COPY_DETAILS, "Copy Details\tCtrl+Shift+D")
         actions_menu.AppendSubMenu(copy_menu, "Copy")
+        # F is the key, in the list and in the repository list. It acts on the
+        # repository when the repository list has focus, as Copy does.
+        actions_menu.Append(ID_FAVORITE, FAVORITE_LABEL)
         actions_menu.AppendSeparator()
         self._act_close = actions_menu.Append(ID_CLOSE_ITEM, "Close Issue/PR\tCtrl+W")
         self._act_reopen = actions_menu.Append(ID_REOPEN, "Reopen Issue/PR\tCtrl+Shift+W")
@@ -2003,6 +2010,7 @@ class GhViewerFrame(wx.Frame):
         self.Bind(wx.EVT_MENU, self.on_view_watched, id=ID_VIEW_WATCHED)
         self.Bind(wx.EVT_MENU, self.on_view_shared, id=ID_VIEW_SHARED)
         self.Bind(wx.EVT_MENU, self.on_view_orgs, id=ID_VIEW_ORGS)
+        self.Bind(wx.EVT_MENU, self.on_favorite, id=ID_FAVORITE)
         self.Bind(wx.EVT_MENU, self.on_go_to_event_repo, id=ID_GO_TO_EVENT_REPO)
         self.Bind(wx.EVT_MENU, lambda e: self._copy("link"), id=ID_COPY_LINK)
         self.Bind(wx.EVT_MENU, lambda e: self._copy("markdown"), id=ID_COPY_MARKDOWN)
@@ -2575,11 +2583,50 @@ class GhViewerFrame(wx.Frame):
         self._activate_repo_entry()
 
     def on_repo_key_down(self, event: wx.KeyEvent) -> None:
-        """Handle Enter key on repo list — load the selected repo."""
+        """Enter opens the selected entry; F favorites the selected repository."""
         if event.GetKeyCode() == wx.WXK_RETURN:
             self._activate_repo_entry()
             return  # swallow the key
+        if event.GetKeyCode() == ord("F") and not self._modifiers_down(event):
+            self._favorite_selected_repo()
+            return
         event.Skip()
+
+    def _selected_repo_entry(self) -> RepoEntry | None:
+        """The repository selected in the repository list, if it is one."""
+        idx = self.repo_list.GetSelection()
+        name = self.repo_list.GetClientData(idx) if idx != wx.NOT_FOUND else None
+        if not is_repo_entry(name):
+            return None
+        desc = next((r.get("description") or "" for r in self._all_repos
+                     if r.get("nameWithOwner") == name), "")
+        return RepoEntry(name, desc, f"https://github.com/{name}")
+
+    def _favorite_selected_repo(self) -> None:
+        """F in the repository list: favorite the repository, or unfavorite it."""
+        repo = self._selected_repo_entry()
+        if repo is None:
+            self._announce("Select a repository to favorite.")
+            return
+        entry = self._build_favorite_entry(repo)
+        self.favorites, was_added = toggle_favorite(entry, self.favorites)
+        if was_added:
+            self._announce(f"★ Added '{entry.title}' to favorites")
+        else:
+            self._announce(f"Removed '{entry.title}' from favorites")
+        self._refresh_repo_list_fav_count()
+        if self.view_mode == VIEW_FAVORITES:
+            self._load_favorites_view()
+        else:
+            self._redraw_favorite_marks()
+
+    def on_favorite(self, event: wx.CommandEvent) -> None:
+        """Actions ▸ Add or Remove Favorite: the repository when the
+        repository list has focus, else the row in the list."""
+        if self._pane_index(self._current_focus()) == 0:
+            self._favorite_selected_repo()
+        else:
+            self._toggle_favorite()
 
     def _activate_repo_entry(self) -> None:
         """Open whatever is selected in the repo list: a repo or a pseudo-entry."""
@@ -2667,8 +2714,12 @@ class GhViewerFrame(wx.Frame):
         """True if `token` is still the load whose results the list wants."""
         return token == self._fetch_token
 
-    def _load_favorites_view(self) -> None:
-        """Populate the list with all favorited items (mixed types, cross-repo)."""
+    def _load_favorites_view(self, focus=None) -> None:
+        """Populate the list with all favorited items (mixed types, cross-repo).
+
+        ``focus`` is a favorite to land on (Backspace from a repository
+        opened from here), found by its address since the list is reread.
+        """
         # Favorites load synchronously from disk, but still take a token — an
         # in-flight repo fetch must not land on top of them.
         self._begin_fetch()
@@ -2681,11 +2732,14 @@ class GhViewerFrame(wx.Frame):
         n = len(self.favorites)
         self._set_view_status(
             f"★ Favorites — {n} item{'s' if n != 1 else ''}.",
-            "F=unfavorite  Enter=open in browser  Ctrl+F=filter",
+            "F=unfavorite  Enter=open (a repository here, the rest in the browser)  "
+            "Ctrl+O=open on GitHub  Ctrl+F=filter",
         )
         self._update_title()
+        url = getattr(focus, "url", None)
+        row = next((i for i, f in enumerate(self._shown) if url and f.url == url), 0)
         if filtered:
-            wx.CallLater(100, self._focus_list)
+            wx.CallLater(100, self._focus_list, row)
 
     def _load_items(self) -> None:
         # Name the view as well as the repo: after a Ctrl+<n> switch this is the
@@ -3554,7 +3608,10 @@ class GhViewerFrame(wx.Frame):
         lines.append("")
         lines.append("─" * 60)
         lines.append("")
-        lines.append("Press Enter to open in browser.")
+        if fav.item_type == "repository":
+            lines.append("Press Enter to open it here in GHManage, Ctrl+O to open it on GitHub.")
+        else:
+            lines.append("Press Enter to open in browser.")
         lines.append("Press F to remove from favorites.")
         self.details_text.SetValue("\n".join(lines))
 
@@ -4152,8 +4209,12 @@ class GhViewerFrame(wx.Frame):
             webbrowser.open(item.url)
             self._announce(f"Opened {item.path} in browser")
             return
-        # In Favorites view, Enter opens in browser
+        # In Favorites view, Enter opens a repository here and the rest in
+        # the browser
         if self.view_mode == VIEW_FAVORITES and isinstance(item, FavoriteEntry):
+            if item.item_type == "repository" and item.repo:
+                self._open_repo_from_list(item.repo, item)
+                return
             if item.url:
                 webbrowser.open(item.url)
                 self._announce(f"Opened {item.title} in browser")
@@ -4261,7 +4322,24 @@ class GhViewerFrame(wx.Frame):
         entries += walk(self._actions_menu)
         while entries and entries[-1] == ("sep",):
             entries.pop()
-        return entries
+        # Say which way F goes for this row, or leave it off where there is
+        # nothing it could favorite.
+        if self.view_mode == VIEW_FAVORITES:
+            fav_label = "Remove from Favorites (F)"
+        elif item is None or isinstance(item, OrgEntry) or not getattr(item, "url", ""):
+            fav_label = None
+        elif self._favorite_prefix(item):
+            fav_label = "Remove from Favorites (F)"
+        else:
+            fav_label = "Add to Favorites (F)"
+        out = []
+        for entry in entries:
+            if entry[0] == "item" and entry[1] == ID_FAVORITE:
+                if fav_label:
+                    out.append(("item", ID_FAVORITE, fav_label))
+            else:
+                out.append(entry)
+        return out
 
     @staticmethod
     def _menu_from_entries(entries: list) -> wx.Menu:
@@ -4326,6 +4404,10 @@ class GhViewerFrame(wx.Frame):
                 ("item", ID_NEW_ISSUE, "New Issue…\tCtrl+N"),
                 ("item", ID_SEARCH_REPO, "Search This Repository…\tCtrl+Shift+S"),
                 ("item", ID_WATCH_SETTINGS, "Watch Settings…\tCtrl+Shift+U"),
+                ("item", ID_FAVORITE,
+                 "Remove from Favorites (F)" if is_favorite(f"https://github.com/{data}",
+                                                            self.favorites)
+                 else "Add to Favorites (F)"),
                 ("sep",),
                 ("sub", "Copy", [
                     ("item", ID_COPY_LINK, "Copy Link\tCtrl+Shift+C"),
@@ -4781,6 +4863,8 @@ class GhViewerFrame(wx.Frame):
             self._on_my_work_loaded(token, items, item)
         elif view in SEARCH_VIEWS:
             self._on_search_loaded(token, items, self._search_total, item)
+        elif view == VIEW_FAVORITES:
+            self._load_favorites_view(focus=item)
         elif view == VIEW_NOTIFICATIONS:
             if self._include_read != self._notif_loaded_include:
                 # Include Read was changed while you were away; the list you

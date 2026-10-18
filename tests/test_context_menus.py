@@ -13,7 +13,8 @@ else:
     pytest.importorskip("wx")
 
 import ghviewer  # noqa: E402
-from gh_data import Branch, Item  # noqa: E402
+from favorites import FavoriteEntry  # noqa: E402
+from gh_data import Branch, Item, OrgEntry  # noqa: E402
 
 Frame = ghviewer.GhViewerFrame
 
@@ -40,7 +41,8 @@ SEP = FakeItem(sep=True)
 
 
 def _frame(view, item, actions):
-    f = SimpleNamespace(view_mode=view, _actions_menu=actions, announced=[])
+    f = SimpleNamespace(view_mode=view, _actions_menu=actions, announced=[], favorites=[])
+    f._favorite_prefix = lambda it: Frame._favorite_prefix(f, it)
     f._update_actions_menu = lambda: None
     f._focused_item = lambda: item
     f._OPEN_LABELS = Frame._OPEN_LABELS
@@ -111,8 +113,8 @@ def test_the_real_actions_menu_offers_new_issue_in_a_repo():
 # ── The repository list ─────────────────────────────────────────────────
 
 
-def _repo_frame(pinned=()):
-    return SimpleNamespace(_pinned_repos=list(pinned))
+def _repo_frame(pinned=(), favorites=()):
+    return SimpleNamespace(_pinned_repos=list(pinned), favorites=list(favorites))
 
 
 def _ids(entries):
@@ -131,6 +133,35 @@ def test_a_repository_s_menu():
                    ghviewer.ID_SEARCH_REPO, ghviewer.ID_WATCH_SETTINGS, ghviewer.ID_COPY_LINK):
         assert wanted in ids
     assert ghviewer.ID_REMOVE_REPO not in ids      # one of your own: can't be removed
+
+
+FAV = FakeItem(ghviewer.ID_FAVORITE, ghviewer.FAVORITE_LABEL)
+
+
+@pytest.mark.parametrize("view, item, favorites, label", [
+    (ghviewer.VIEW_ISSUES, Item(1, "T", "OPEN", "u1", False), [], "Add to Favorites (F)"),
+    (ghviewer.VIEW_ISSUES, Item(1, "T", "OPEN", "u1", False),
+     [FavoriteEntry("o/r", "issue", "u1", "#1")], "Remove from Favorites (F)"),
+    (ghviewer.VIEW_FAVORITES, FavoriteEntry("o/r", "issue", "u1", "#1"), [],
+     "Remove from Favorites (F)"),
+    # Nothing to favorite: no entry at all
+    (ghviewer.VIEW_ORGS, OrgEntry("w3c"), [], None),
+])
+def test_the_favorite_entry_says_which_way_it_goes(view, item, favorites, label):
+    f = _frame(view, item, FakeMenu(FAV))
+    f.favorites = favorites
+    favs = [e for e in Frame._context_entries(f) if e[0] == "item" and e[1] == ghviewer.ID_FAVORITE]
+    assert favs == ([("item", ghviewer.ID_FAVORITE, label)] if label else [])
+
+
+@pytest.mark.parametrize("favorites, label", [
+    ([], "Add to Favorites (F)"),
+    ([FavoriteEntry("o/r", "repository", "https://github.com/o/r", "o/r")],
+     "Remove from Favorites (F)"),
+])
+def test_a_repository_s_menu_can_favorite_it(favorites, label):
+    entries = Frame._repo_context_entries(_repo_frame(favorites=favorites), "o/r")
+    assert ("item", ghviewer.ID_FAVORITE, label) in entries
 
 
 def test_a_pinned_repository_can_be_removed():

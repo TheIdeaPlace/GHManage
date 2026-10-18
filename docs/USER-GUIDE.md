@@ -259,7 +259,7 @@ Lists load 100 items to begin with. `Ctrl++` (**File → View More**) loads the 
 
 ## The Repository List
 
-The list on the left is where you choose what to look at. Arrow to an entry and press `Enter`, or double-click it. Typing a letter jumps to the next entry starting with it.
+The list on the left is where you choose what to look at. Arrow to an entry and press `Enter`, or double-click it. Typing a letter jumps to the next entry starting with it, except `F`, which adds the selected repository to favorites or removes it (see [Favorites](#favorites)).
 
 It is in this order:
 
@@ -763,7 +763,9 @@ These keep the repository you were in, so `Ctrl+1` takes you back to it.
 
 ## Favorites
 
-Favorites gather the things you come back to, from any repository, into one list. Press `F` on almost anything to add it: an issue or pull request, a branch, a commit, a tag, a release, a label, a workflow, a workflow run, a published page, a repository in Starred or Watched Repositories, or the subject of an Activity event. Press `F` again to remove it.
+Favorites gather the things you come back to, from any repository, into one list. Press `F` on almost anything to add it: an issue or pull request, a branch, a commit, a tag, a release, a label, a workflow, a workflow run, a published page, the subject of an Activity event, or a repository, whether in the repository list or in Starred, Watched, Shared With Me, an organization's repositories or search results. Press `F` again to remove it.
+
+The same command is **Actions → Add or Remove Favorite (F)**, and it is on the context menus (the Applications key or `Shift+F10`), where it says which it will do: "Add to Favorites" or "Remove from Favorites". With the repository list focused, it acts on the selected repository.
 
 The status bar confirms each change: "★ Added '#12 — Crash on startup' to favorites", or "Removed … from favorites". A favorited item has a ★ at the start of its row, so you hear it as you arrow past, and pressing `F` puts the ★ on or takes it off straight away.
 
@@ -775,9 +777,13 @@ Each row shows the kind of item, its repository, its title and a short descripti
 
 | Key | Action |
 |-----|--------|
-| `Enter` | Open the favorite on GitHub |
+| `Enter` | Open a repository here in GHManage, and anything else on GitHub |
+| `Backspace` | From a repository opened here, come back to Favorites, on the same row |
+| `Ctrl+O` | Open the favorite on GitHub |
 | `F` | Remove it from favorites |
 | `Ctrl+F` | Filter the list |
+
+A favorite repository is the quickest way back to one you use often, an organization's say: ★ Favorites, then `Enter`.
 
 Favorites are kept on your computer, in `favorites.json` in your settings folder, so they last between sessions and survive updates.
 
@@ -1089,8 +1095,15 @@ On a Mac, use `Cmd` in place of `Ctrl` for every shortcut that has one, `Option`
 
 | Key | Action |
 |-----|--------|
-| `Enter` | Open on GitHub |
+| `Enter` | Open a repository here, anything else on GitHub |
 | `F` | Remove from favorites |
+
+### In the repository list
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Open the selected entry |
+| `F` | Add the selected repository to favorites, or remove it |
 
 ### In the status bar
 

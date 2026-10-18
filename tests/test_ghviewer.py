@@ -1364,3 +1364,58 @@ def test_a_count_no_longer_known_is_not_kept():
     assert f._category_counts[ghviewer.SHARED_ENTRY] == 40
     Frame._on_repos_loaded(f, _listing(orgs=ORGS, shared=None))
     assert f.repo_list.labels[7] == "Shared With Me"
+
+
+# ── Favoriting repositories ─────────────────────────────────────────────
+
+
+def test_f_in_the_repository_list_favorites_the_repository(monkeypatch):
+    f = _repo_frame()
+    Frame._on_repos_loaded(f, [_row("me/a", "Mine")])
+    f.repo_list.SetSelection(7)   # me/a, after the seven fixed entries
+    f.favorites = []
+    f._build_favorite_entry = lambda item: Frame._build_favorite_entry(f, item)
+    f._selected_repo_entry = lambda: Frame._selected_repo_entry(f)
+    f._refresh_repo_list_fav_count = lambda: None
+    f._redraw_favorite_marks = lambda: None
+    monkeypatch.setattr(ghviewer, "toggle_favorite",
+                        lambda e, favs: ([e], True) if not favs else ([], False))
+    Frame._favorite_selected_repo(f)
+    [fav] = f.favorites
+    assert (fav.item_type, fav.repo, fav.url) == ("repository", "me/a", "https://github.com/me/a")
+    assert f.announced[-1] == "★ Added 'me/a' to favorites"
+    Frame._favorite_selected_repo(f)
+    assert f.favorites == [] and f.announced[-1] == "Removed 'me/a' from favorites"
+
+
+def test_f_on_a_category_entry_says_so():
+    f = _repo_frame()
+    Frame._on_repos_loaded(f, [_row("me/a")])
+    f.repo_list.SetSelection(1)   # Activity
+    f._selected_repo_entry = lambda: Frame._selected_repo_entry(f)
+    Frame._favorite_selected_repo(f)
+    assert f.announced[-1] == "Select a repository to favorite."
+
+
+def test_enter_on_a_favorite_repository_opens_it_here_and_backspace_returns():
+    fav = FavoriteEntry("nvaccess/nvda", "repository", "https://github.com/nvaccess/nvda",
+                        "nvaccess/nvda")
+    f = _repo_frame(view=ghviewer.VIEW_FAVORITES)
+    f.repo_list.Append("nvaccess/nvda", "nvaccess/nvda")
+    f.list_ctrl = FakeItemList(0)
+    f.favorites, f.git_items, f._activity_more, f.current_limit = [fav], [fav], False, 100
+    f._focused_item = lambda: fav
+    opened = []
+    f._select_repo = opened.append
+    Frame.on_item_activated(f, None)
+    assert opened == ["nvaccess/nvda"]
+    assert f._return_to[0] == ghviewer.VIEW_FAVORITES and f._return_to[3] is fav
+    # Backspace: Favorites again, on that favorite
+    loaded = []
+    f._switch_view = lambda view, load=True: None
+    f._restore_repo_selection = lambda prev: None
+    f._begin_fetch = lambda: 1
+    f._load_favorites_view = lambda focus=None: loaded.append(focus)
+    f._pending_target = None
+    Frame._return_to_list(f)
+    assert loaded == [fav]

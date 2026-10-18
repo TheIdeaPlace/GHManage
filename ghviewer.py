@@ -1798,7 +1798,7 @@ class GhViewerFrame(wx.Frame):
         file_menu.AppendSeparator()
         file_menu.Append(ID_SWITCH_ACCOUNT, "Switch GitHub Account…\tCtrl+Shift+K")
         file_menu.AppendSeparator()
-        file_menu.Append(ID_REFRESH, "Refresh\tCtrl+R")
+        file_menu.Append(ID_REFRESH, "Refresh (R)\tCtrl+R")
         file_menu.Append(ID_VIEW_MORE, "View More\tCtrl++")
         file_menu.AppendSeparator()
         file_menu.Append(ID_SEARCH, "Search GitHub…\tCtrl+Shift+F")
@@ -1838,10 +1838,11 @@ class GhViewerFrame(wx.Frame):
         # repository when the repository list has focus, as Copy does.
         actions_menu.Append(ID_FAVORITE, FAVORITE_LABEL)
         actions_menu.AppendSeparator()
-        self._act_close = actions_menu.Append(ID_CLOSE_ITEM, "Close Issue/PR\tCtrl+W")
-        self._act_reopen = actions_menu.Append(ID_REOPEN, "Reopen Issue/PR\tCtrl+Shift+W")
-        self._act_comment = actions_menu.Append(ID_COMMENT, "Add Comment…\tCtrl+M")
-        self._act_new_issue = actions_menu.Append(ID_NEW_ISSUE, "New Issue…\tCtrl+N")
+        # C, O, M and N are the keys in the issues list, like K, V and D below.
+        self._act_close = actions_menu.Append(ID_CLOSE_ITEM, "Close Issue/PR (C)\tCtrl+W")
+        self._act_reopen = actions_menu.Append(ID_REOPEN, "Reopen Issue/PR (O)\tCtrl+Shift+W")
+        self._act_comment = actions_menu.Append(ID_COMMENT, "Add Comment… (M)\tCtrl+M")
+        self._act_new_issue = actions_menu.Append(ID_NEW_ISSUE, "New Issue… (N)\tCtrl+N")
         # Pull requests. K, V and D are the keys in the issues list.
         pr_menu = wx.Menu()
         pr_menu.Append(ID_PR_CHECKS, "&Checks (K)")
@@ -1874,7 +1875,7 @@ class GhViewerFrame(wx.Frame):
         self._act_run_rerun = actions_menu.Append(ID_RUN_RERUN, "Rerun… (E)")
         self._act_run_cancel = actions_menu.Append(ID_RUN_CANCEL, "Cancel Run… (X)")
         self._act_open_site = actions_menu.Append(
-            ID_OPEN_PAGES_SITE, "Open Published Site"
+            ID_OPEN_PAGES_SITE, "Open Published Site (S)"
         )
         actions_menu.AppendSeparator()
         self._act_select_branch = actions_menu.Append(
@@ -1886,7 +1887,7 @@ class GhViewerFrame(wx.Frame):
         actions_menu.AppendSeparator()
         # G in Activity and Notifications; here so the command can be found.
         self._act_go_to_repo = actions_menu.Append(
-            ID_GO_TO_EVENT_REPO, "Go to Event's Repository\tCtrl+Shift+G"
+            ID_GO_TO_EVENT_REPO, "Go to Event's Repository (G)\tCtrl+Shift+G"
         )
         actions_menu.AppendSeparator()
         # Notifications. M, U and Delete are the keys in the list; the
@@ -1978,7 +1979,7 @@ class GhViewerFrame(wx.Frame):
 
         view_menu.AppendSeparator()
         self._show_read_item = view_menu.AppendCheckItem(
-            ID_SHOW_READ, "Include Read Notifications"
+            ID_SHOW_READ, "Include Read Notifications (I)"
         )
 
         menu_bar.Append(view_menu, "View")
@@ -2218,11 +2219,11 @@ class GhViewerFrame(wx.Frame):
         self._act_save_search.Enable(self.view_mode in SEARCH_VIEWS)
         self._act_go_to_repo.Enable(self.view_mode in GO_TO_REPO_VIEWS)
         self._act_go_to_repo.SetItemLabel(
-            "Go to Notification's Repository\tCtrl+Shift+G"
+            "Go to Notification's Repository (G)\tCtrl+Shift+G"
             if self.view_mode == VIEW_NOTIFICATIONS
-            else "Go to Event's Repository\tCtrl+Shift+G"
+            else "Go to Event's Repository (G)\tCtrl+Shift+G"
             if self.view_mode == VIEW_ACTIVITY
-            else "Go to Repository\tCtrl+Shift+G"
+            else "Go to Repository (G)\tCtrl+Shift+G"
         )
         notifications = self.view_mode == VIEW_NOTIFICATIONS
         for entry in (self._act_mark_read, self._act_unsubscribe, self._act_mark_all_read):

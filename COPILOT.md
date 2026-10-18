@@ -410,6 +410,7 @@ including the checks either side. The short version:
 - v0.9.0 — a major release: GHManage becomes a much fuller GitHub client. Notifications (Ctrl+Shift+N), My Work (Ctrl+Shift+M), Search GitHub (Ctrl+Shift+F) with saved searches; open any GitHub address (Ctrl+Shift+O); New Issue; Copy commands; PR checks/review/merge/draft; workflow run jobs, logs, what failed, rerun, cancel; watch settings; account switching; context menus everywhere; repository actions act on the repo in front of you
 - v0.9.1 — repository list includes organization repos (GraphQL, own and org listed separately); repo moved to TheIdeaPlace/GHManage
 - v0.9.2 — My Organizations entry (orgs with role and counts; Enter lists an org's repos) instead of org repos in the main list; Shared With Me; favorite repos from the repo list and open them here; no beep after list letter keys
+- v0.9.3 — Activity Enter opens issues/PRs, releases, commits and branches here (Backspace back); Search Operators help (F1 in the search dialog, search_help.py); Copy HTTPS/SSH clone URL; Go To submenu on repository context menus; View More on item context menus; list letters shown in menus
 
 ## Roadmap
 

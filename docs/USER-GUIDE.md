@@ -22,6 +22,7 @@ GHManage is a keyboard-driven desktop app for your GitHub repositories, built fo
 - [Searching GitHub](#searching-github)
 - [Activity](#activity)
 - [Starred and Watched Repositories](#starred-and-watched-repositories)
+- [Organizations and Shared With Me](#organizations-and-shared-with-me)
 - [Favorites](#favorites)
 - [Quick Filter](#quick-filter)
 - [Copying](#copying)
@@ -219,7 +220,7 @@ Each repository has several views. `Ctrl` and a number jumps straight to one fro
 
 **Starred Repositories** and **Watched Repositories** are on the same menu, after Activity.
 
-Favorites, Notifications, My Work, Activity, Starred Repositories, Watched Repositories and search results are not about one repository, so they work at any time. Every other view needs a repository: with none chosen, the status bar says "Select a repository first." and the view stays as it was.
+Favorites, Notifications, My Work, Activity, Starred Repositories, Watched Repositories, Shared With Me, an organization's repositories and search results are not about one repository, so they work at any time. Every other view needs a repository: with none chosen, the status bar says "Select a repository first." and the view stays as it was.
 
 Several views lead into others. `Enter` on a branch shows its commits, on a release its files, on a workflow run its artifacts, on a label the issues that carry it. `Backspace` steps back up to where you came from.
 
@@ -268,9 +269,11 @@ It is in this order:
 4. **Watched Repositories**: the repositories you watch, with how many.
 5. **Notifications**, with how many are unread, for example "Notifications (12 unread)". See [Notifications](#notifications).
 6. **My Work**: open issues and pull requests that need you, with how many once it has loaded. See [My Work](#my-work).
-7. **Your saved searches**, each marked with a magnifying glass, for example "🔍 NVDA braille bugs". See [Saved searches](#saved-searches).
-8. **Repositories you opened by address**, each marked with a pin, for example "📌 nvaccess/nvda — NVDA, the free and open source screen reader".
-9. **Your repositories, and your organizations'**, most recently pushed first, each followed by its description: up to 100 of your own and up to 100 from organizations you belong to. An organization repository is listed when you have more than read access to it, for example as a member of a team that can write to it. One you can only read through the organization's base permission isn't; open it by address to add it.
+7. **Shared With Me**: other people's repositories you have been made a collaborator on, with how many. It is only there when there is at least one. See [Organizations and Shared With Me](#organizations-and-shared-with-me).
+8. **Each organization you belong to**, marked with a building, with how many of its repositories you can see, for example "🏢 TheIdeaPlace (13)". The ones you are an owner of come first.
+9. **Your saved searches**, each marked with a magnifying glass, for example "🔍 NVDA braille bugs". See [Saved searches](#saved-searches).
+10. **Repositories you opened by address**, each marked with a pin, for example "📌 nvaccess/nvda — NVDA, the free and open source screen reader".
+11. **Your own repositories**, most recently pushed first, each followed by its description, up to 100.
 
 The first six are always there, so the same keystrokes from the top of the list always reach them. The first four are where they were before Notifications and My Work arrived. When the list first loads, the status bar says how many repositories it found: "Loaded 42 repositories. Select one to view issues and PRs."
 
@@ -302,7 +305,7 @@ A person's or organisation's address says so on the status bar; GHManage has no 
 
 **File → Remove from List…** removes the selected repository from the list. It applies to repositories you opened by address; the status bar confirms with "Removed owner/name from the pinned list." It does not delete anything on GitHub.
 
-Your own and your organizations' repositories are always listed, so asking to remove one says it "comes from your GitHub account and can't be removed from here". The six entries at the top are always there too. A saved search can be removed the same way.
+Your own repositories are always listed, so asking to remove one says it "comes from your GitHub account and can't be removed from here". The entries at the top, organizations included, are always there too. A saved search can be removed the same way.
 
 ### Forks
 
@@ -736,6 +739,18 @@ These lists keep other people's repositories out of the main repository list, wh
 
 ---
 
+## Organizations and Shared With Me
+
+Each organization you belong to has its own entry in the repository list, after My Work, for example "🏢 TheIdeaPlace (13)". The number is how many of its repositories you can see. Organizations you are an owner of come first, then the rest by name. `Enter` on one lists its repositories, most recently pushed first.
+
+An organization's repositories are kept out of the list of your own, so belonging to a big organization (W3C has over a thousand repositories) doesn't bury yours. To keep one you use often a keystroke away, favorite it with `F`.
+
+**Shared With Me** lists other people's repositories you have been made a collaborator on. It leaves out repositories owned by your organizations, which are already under those organizations' entries. It is only in the repository list when there is at least one.
+
+Both work like Starred and Watched: the same columns and details, and the same keys (`Enter`, `Backspace`, `Ctrl+O`, `F`, `Ctrl++`, `Ctrl+F` and `R`). They keep the repository you were in, so `Ctrl+1` takes you back to it.
+
+---
+
 ## Favorites
 
 Favorites gather the things you come back to, from any repository, into one list. Press `F` on almost anything to add it: an issue or pull request, a branch, a commit, a tag, a release, a label, a workflow, a workflow run, a published page, a repository in Starred or Watched Repositories, or the subject of an Activity event. Press `F` again to remove it.
@@ -1052,7 +1067,7 @@ On a Mac, use `Cmd` in place of `Ctrl` for every shortcut that has one, `Option`
 | `G` or `Ctrl+Shift+G` | Open the event's repository in GHManage |
 | `F` | Favorite what the event is about |
 
-### In Starred and Watched Repositories
+### In Starred, Watched, Shared With Me and an organization
 
 | Key | Action |
 |-----|--------|

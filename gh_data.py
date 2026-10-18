@@ -601,33 +601,58 @@ def detect_repo() -> Optional[str]:
         return None
 
 
-def list_repos(limit: int = 100) -> list[dict]:
-    """List the repositories you own and those of organizations you're in.
+@dataclass
+class OrgEntry:
+    """An organization you belong to, as an entry in the repository list."""
 
-    Not `gh repo list`: with no owner it lists only the repos your own
-    account owns, so moving a repo into an organization made it vanish from
-    the list. GraphQL's ownerAffiliations reaches both.
+    login: str
+    admin: bool = False               # you can administer it
+    repo_count: Optional[int] = None  # the repositories in it you can see
 
-    Up to ``limit`` of each, asked for separately, so that a busy
-    organization can't push your own repos off the list; then the two are
-    merged, most recently pushed first. Organization repos you can only read
-    (through the organization's base permission) aren't included: GitHub
-    counts those as neither yours nor your organization membership's.
+
+@dataclass
+class RepoListing:
+    """What the repository list is built from."""
+
+    repos: list[dict]                 # your own, most recently pushed first
+    orgs: list[OrgEntry] = field(default_factory=list)
+    # How many repositories others have shared with you, outside your
+    # organizations; None when there were too many to count in one page.
+    shared: Optional[int] = 0
+
+
+def list_repos(limit: int = 100) -> RepoListing:
+    """Your own repositories, your organizations, and what is shared with you.
+
+    One GraphQL query for all three, so the list waits no longer than it did
+    for your repositories alone. Not `gh repo list`, which can't say which
+    organizations you are in.
+
+    An organization's repositories aren't mixed in with yours: someone in a
+    big organization (W3C has over a thousand) would find their own repos
+    lost among them. Each organization becomes an entry of its own instead,
+    with its count, and its repositories are fetched when it is opened.
+
+    Shared counts the repositories you are a collaborator on, less those in
+    your organizations: you stay a collaborator on a repo you move into an
+    organization, and it is already under that organization's entry.
     """
     first = max(1, min(limit, 100))
-    fields = ("orderBy: {field: PUSHED_AT, direction: DESC}) "
-              "{ nodes { nameWithOwner description pushedAt } }")
     query = (
         "{ viewer { "
-        "own: repositories(first: %d, ownerAffiliations: [OWNER], %s "
-        "org: repositories(first: %d, ownerAffiliations: [ORGANIZATION_MEMBER], %s "
-        "} }" % (first, fields, first, fields)
+        "own: repositories(first: %d, ownerAffiliations: [OWNER], "
+        "orderBy: {field: PUSHED_AT, direction: DESC}) "
+        "{ nodes { nameWithOwner description pushedAt } } "
+        "shared: repositories(first: 100, ownerAffiliations: [COLLABORATOR]) "
+        "{ nodes { owner { login } } } "
+        "organizations(first: 100) "
+        "{ nodes { login viewerCanAdminister repositories { totalCount } } } "
+        "} }" % first
     )
     reply = _graphql(query)
     viewer = (reply.get("data") or {}).get("viewer") or {}
     own = (viewer.get("own") or {}).get("nodes")
-    org = (viewer.get("org") or {}).get("nodes")
-    if own is None and org is None:
+    if own is None:
         # A GraphQL error, or a plain REST one such as a 401 for a token
         # that has expired, which comes back with only a message.
         errors = reply.get("errors") or []
@@ -637,21 +662,39 @@ def list_repos(limit: int = 100) -> list[dict]:
         if str(reply.get("status")) == "401":
             message += ". Run gh auth login to sign in again."
         raise GhError(message)
-    repos: dict[str, dict] = {}
-    # An organization that blocks gh's access leaves nulls in its place.
-    for repo in (own or []) + (org or []):
-        if repo and repo.get("nameWithOwner"):
-            repos.setdefault(repo["nameWithOwner"], repo)
-    return sorted(repos.values(), key=lambda r: r.get("pushedAt") or "", reverse=True)
+    repos = [r for r in own if r and r.get("nameWithOwner")]
+    orgs: list[OrgEntry] = []
+    # An organization that blocks gh's access leaves a null in its place.
+    for node in (viewer.get("organizations") or {}).get("nodes") or []:
+        if not node or not node.get("login"):
+            continue
+        count = (node.get("repositories") or {}).get("totalCount")
+        orgs.append(OrgEntry(node["login"], bool(node.get("viewerCanAdminister")),
+                             count if isinstance(count, int) else None))
+    # The ones you run first, then by name.
+    orgs.sort(key=lambda o: (not o.admin, o.login.lower()))
+    shared_nodes = (viewer.get("shared") or {}).get("nodes")
+    if shared_nodes is None:
+        shared = 0  # couldn't be had; the entry is left out rather than wrong
+    elif len(shared_nodes) >= 100:
+        shared = None
+    else:
+        mine = {o.login.lower() for o in orgs}
+        shared = sum(1 for n in shared_nodes
+                     if n and ((n.get("owner") or {}).get("login") or "").lower() not in mine)
+    return RepoListing(repos, orgs, shared)
 
 
-def _api_pages(endpoint: str, limit: int) -> list[dict]:
+def _api_pages(endpoint: str, limit: int, keep=None) -> list[dict]:
     """Fetch up to ``limit`` entries of a paged REST list, 100 to a page.
 
     ``gh api --paginate`` would fetch every page there is, and someone with
     thousands of stars does not want to wait for all of them to see the first
     hundred. So pages are requested one at a time and the loop stops at the
     limit, or at a short page, which means there are no more.
+
+    ``keep``, when given, says which entries count towards the limit; the
+    rest are dropped, and further pages fetched to make up for them.
     """
     sep = "&" if "?" in endpoint else "?"
     per_page = max(1, min(limit, 100))
@@ -662,7 +705,7 @@ def _api_pages(endpoint: str, limit: int) -> list[dict]:
         rows = json.loads(raw) if raw.strip() else []
         if not isinstance(rows, list):
             break
-        out.extend(r for r in rows if isinstance(r, dict))
+        out.extend(r for r in rows if isinstance(r, dict) and (keep is None or keep(r)))
         if len(rows) < per_page:
             break
         page += 1
@@ -802,6 +845,30 @@ def fetch_watched_repos(limit: int = 100) -> list[RepoEntry]:
     return [
         _repo_entry(r) for r in _api_pages("user/subscriptions", limit)
         if r.get("full_name")
+    ]
+
+
+def fetch_org_repos(org: str, limit: int = 100) -> list[RepoEntry]:
+    """An organization's repositories you can see, most recently pushed first."""
+    return [
+        _repo_entry(r) for r in _api_pages(f"orgs/{org}/repos?sort=pushed", limit)
+        if r.get("full_name")
+    ]
+
+
+def fetch_shared_repos(limit: int = 100, orgs=()) -> list[RepoEntry]:
+    """Repositories others have made you a collaborator on, most recently
+    pushed first, less those owned by ``orgs`` (which have entries of their own).
+    """
+    skip = {o.lower() for o in orgs}
+
+    def keep(r: dict) -> bool:
+        owner = ((r.get("owner") or {}).get("login") or "").lower()
+        return bool(r.get("full_name")) and owner not in skip
+
+    return [
+        _repo_entry(r) for r in
+        _api_pages("user/repos?affiliation=collaborator&sort=pushed", limit, keep)
     ]
 
 

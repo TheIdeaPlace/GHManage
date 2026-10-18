@@ -638,6 +638,12 @@ The query is GitHub's own search language, exactly as on github.com, so every qu
 - `org:nvaccess braille in:title`
 - for repositories: `screen reader language:python stars:>50`, `topic:accessibility archived:false`
 
+### Search operators
+
+You don't have to remember the qualifiers. In the search dialog, press `F1` or choose **Search Operators…** for a table of them, each with what it means and an example. The table matches what you are searching for: issues and pull requests (reviews, checks, draft, branches, merged), or repositories (stars, language, topics, license). Type in **Filter** to narrow it, for example "review" or "date".
+
+`Enter`, or **Insert into Query**, puts the selected operator into your query where the cursor was. One that needs a value, such as `label:`, is left for you to type it; one that is complete, such as `is:open`, gets a space after it. **Open GitHub Search Documentation** opens GitHub's full reference in your browser.
+
 The results replace the list, best match first. Issue and pull request results read type, number, state, title, repository and when last updated; repository results read the same as Starred and Watched Repositories. The status bar says how many match: "Search — 512 issues and pull requests match repo:nvaccess/nvda braille is:open, showing 100."
 
 | Key | Action |

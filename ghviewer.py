@@ -21,6 +21,7 @@ import wx
 import updater
 from version import __version__ as APP_VERSION
 from pinned_repos import add_pinned, load_pinned, remove_pinned
+import search_help
 from favorites import FavoriteEntry, load_favorites, save_favorites, is_favorite, toggle_favorite
 from saved_searches import (
     KIND_ISSUES, KIND_REPOS, SavedSearch, add_saved_search, load_saved_searches,
@@ -1322,10 +1323,16 @@ class SearchDialog(wx.Dialog):
             "  screen reader language:python stars:>50   (repositories)"
         )
         outer.Add(wx.StaticText(self, label=help_text), 0, wx.ALL, 10)
+        # F1 here is this help, not the user guide: the window's menus don't
+        # reach into a dialog, and this is the help you want while typing.
+        self.operators_btn = wx.Button(self, label="Search &Operators… (F1)")
+        outer.Add(self.operators_btn, 0, wx.LEFT | wx.RIGHT, 10)
         outer.Add(self.CreateStdDialogButtonSizer(wx.OK | wx.CANCEL), 0, wx.ALIGN_RIGHT | wx.ALL, 10)
         self.SetSizerAndFit(outer)
         self.SetMinSize((520, -1))
         self.Bind(wx.EVT_BUTTON, self._on_ok, id=wx.ID_OK)
+        self.operators_btn.Bind(wx.EVT_BUTTON, lambda e: self._show_operators())
+        self.Bind(wx.EVT_CHAR_HOOK, self._on_char_hook)
         wx.CallAfter(self.query_ctrl.SetFocus)
         # The last search, selected so typing replaces it; or a start such as
         # "repo:owner/name ", with the cursor after it to go on typing.
@@ -1341,6 +1348,98 @@ class SearchDialog(wx.Dialog):
 
     def values(self) -> tuple[str, str]:
         return self.KINDS[self.kind_ctrl.GetSelection()][0], self.query_ctrl.GetValue().strip()
+
+    def _on_char_hook(self, event: wx.KeyEvent) -> None:
+        if event.GetKeyCode() == wx.WXK_F1 and not event.HasAnyModifiers():
+            self._show_operators()
+            return
+        event.Skip()
+
+    def _show_operators(self) -> None:
+        """The operators for what is being searched; the one chosen goes into
+        the query where the cursor was."""
+        kind = self.KINDS[self.kind_ctrl.GetSelection()][0]
+        at = self.query_ctrl.GetInsertionPoint()
+        dlg = SearchOperatorsDialog(self, kind)
+        try:
+            chosen = dlg.chosen if dlg.ShowModal() == wx.ID_OK else None
+        finally:
+            dlg.Destroy()
+        if chosen is not None:
+            text, at = search_help.insert_operator(self.query_ctrl.GetValue(), at, chosen)
+            self.query_ctrl.SetValue(text)
+            self.query_ctrl.SetInsertionPoint(at)
+        self.query_ctrl.SetFocus()
+
+
+class SearchOperatorsDialog(wx.Dialog):
+    """Search ▸ Search Operators (F1): GitHub's qualifiers for what is being
+    searched, as a table of operator, meaning and example, with a filter.
+    Enter puts the selected one into the query."""
+
+    def __init__(self, parent: wx.Window, kind: str) -> None:
+        what = "repositories" if kind == KIND_REPOS else "issues and pull requests"
+        super().__init__(parent, title=f"Search Operators for {what}",
+                         style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
+        self.kind = kind
+        self.chosen: search_help.Operator | None = None
+        self.operators = search_help.operators_for(kind)
+        self._shown: list = []
+        outer = wx.BoxSizer(wx.VERTICAL)
+
+        label = "&Filter"
+        outer.Add(wx.StaticText(self, label=label), 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
+        self.filter_ctrl = wx.TextCtrl(self)
+        self.filter_ctrl.SetName(label.replace("&", ""))
+        outer.Add(self.filter_ctrl, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
+
+        label = "&Operators"
+        outer.Add(wx.StaticText(self, label=label), 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
+        self.list = wx.ListCtrl(self, style=wx.LC_REPORT | wx.LC_SINGLE_SEL, size=(640, 300))
+        self.list.SetName(label.replace("&", ""))
+        for i, (heading, width) in enumerate((("Operator", 170), ("Meaning", 300), ("Example", 220))):
+            self.list.InsertColumn(i, heading, width=width)
+        outer.Add(self.list, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
+
+        outer.Add(wx.StaticText(self, label=search_help.GENERAL_NOTE), 0, wx.ALL, 10)
+
+        buttons = wx.BoxSizer(wx.HORIZONTAL)
+        insert = wx.Button(self, wx.ID_OK, "&Insert into Query")
+        insert.SetDefault()
+        docs = wx.Button(self, label="Open GitHub Search &Documentation")
+        close = wx.Button(self, wx.ID_CANCEL, "Close")
+        for b in (insert, docs, close):
+            buttons.Add(b, 0, wx.LEFT, 6)
+        outer.Add(buttons, 0, wx.ALIGN_RIGHT | wx.ALL, 10)
+        self.SetSizerAndFit(outer)
+
+        self.filter_ctrl.Bind(wx.EVT_TEXT, lambda e: self._fill())
+        self.list.Bind(wx.EVT_LIST_ITEM_ACTIVATED, lambda e: self._choose())
+        self.Bind(wx.EVT_BUTTON, lambda e: self._choose(), id=wx.ID_OK)
+        docs.Bind(wx.EVT_BUTTON, lambda e: webbrowser.open(search_help.DOCS[kind]))
+        self._fill()
+        wx.CallAfter(self.list.SetFocus)
+
+    def _fill(self) -> None:
+        self._shown = search_help.matching(self.operators, self.filter_ctrl.GetValue())
+        self.list.DeleteAllItems()
+        for i, o in enumerate(self._shown):
+            self.list.InsertItem(i, o.op)
+            self.list.SetItem(i, 1, o.meaning)
+            self.list.SetItem(i, 2, o.example)
+        if self._shown:
+            self.list.Select(0)
+            self.list.Focus(0)
+
+    def _choose(self) -> None:
+        if not self.IsModal():
+            return  # Enter on the list and the default button both ask
+        row = self.list.GetFirstSelected()
+        if row < 0 or row >= len(self._shown):
+            wx.Bell()
+            return
+        self.chosen = self._shown[row]
+        self.EndModal(wx.ID_OK)
 
 
 # ── Pull request dialogs ────────────────────────────────────────────────

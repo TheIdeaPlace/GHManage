@@ -2612,9 +2612,9 @@ class GhViewerFrame(wx.Frame):
         entry = self._build_favorite_entry(repo)
         self.favorites, was_added = toggle_favorite(entry, self.favorites)
         if was_added:
-            self._announce(f"★ Added '{entry.title}' to favorites")
+            self._announce("Added to favorites")
         else:
-            self._announce(f"Removed '{entry.title}' from favorites")
+            self._announce("Removed from favorites")
         self._refresh_repo_list_fav_count()
         if self.view_mode == VIEW_FAVORITES:
             self._load_favorites_view()
@@ -4903,7 +4903,7 @@ class GhViewerFrame(wx.Frame):
         if self.view_mode == VIEW_FAVORITES and isinstance(item, FavoriteEntry):
             self.favorites = [f for f in self.favorites if f.url != item.url]
             save_favorites(self.favorites)
-            self._announce(f"Removed '{item.title}' from favorites")
+            self._announce("Removed from favorites")
             self._load_favorites_view()
             self._refresh_repo_list_fav_count()
             return
@@ -4935,9 +4935,9 @@ class GhViewerFrame(wx.Frame):
 
         self.favorites, was_added = toggle_favorite(entry, self.favorites)
         if was_added:
-            self._announce(f"★ Added '{entry.title}' to favorites")
+            self._announce("Added to favorites")
         else:
-            self._announce(f"Removed '{entry.title}' from favorites")
+            self._announce("Removed from favorites")
         self._refresh_repo_list_fav_count()
         self._redraw_favorite_marks()
 

@@ -767,7 +767,7 @@ Favorites gather the things you come back to, from any repository, into one list
 
 The same command is **Actions → Add or Remove Favorite (F)**, and it is on the context menus (the Applications key or `Shift+F10`), where it says which it will do: "Add to Favorites" or "Remove from Favorites". With the repository list focused, it acts on the selected repository.
 
-The status bar confirms each change: "★ Added '#12 — Crash on startup' to favorites", or "Removed … from favorites". A favorited item has a ★ at the start of its row, so you hear it as you arrow past, and pressing `F` puts the ★ on or takes it off straight away.
+The status bar confirms each change: "Added to favorites" or "Removed from favorites". A favorited item has a ★ at the start of its row, so you hear it as you arrow past, and pressing `F` puts the ★ on or takes it off straight away.
 
 ### The Favorites view
 

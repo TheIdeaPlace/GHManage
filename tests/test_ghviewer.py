@@ -1383,9 +1383,9 @@ def test_f_in_the_repository_list_favorites_the_repository(monkeypatch):
     Frame._favorite_selected_repo(f)
     [fav] = f.favorites
     assert (fav.item_type, fav.repo, fav.url) == ("repository", "me/a", "https://github.com/me/a")
-    assert f.announced[-1] == "★ Added 'me/a' to favorites"
+    assert f.announced[-1] == "Added to favorites"
     Frame._favorite_selected_repo(f)
-    assert f.favorites == [] and f.announced[-1] == "Removed 'me/a' from favorites"
+    assert f.favorites == [] and f.announced[-1] == "Removed from favorites"
 
 
 def test_f_on_a_category_entry_says_so():

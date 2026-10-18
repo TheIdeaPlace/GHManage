@@ -38,6 +38,8 @@ class FakeMenu:
 
 
 SEP = FakeItem(sep=True)
+# The last entry wherever a list can load more (#52).
+MORE = ("item", ghviewer.ID_VIEW_MORE, "View More\tCtrl++")
 
 
 def _frame(view, item, actions):
@@ -68,6 +70,8 @@ def test_entries_mirror_the_enabled_actions():
         ("sub", "Copy", [("item", 3, "Copy Link")]),
         ("sep",),
         ("item", 6, "New Issue…"),
+        ("sep",),
+        MORE,
     ]
 
 
@@ -81,13 +85,13 @@ def test_enter_s_action_comes_first_where_it_is_not_the_browser():
 
 def test_no_open_entry_without_a_selection():
     f = _frame(ghviewer.VIEW_BRANCHES, None, FakeMenu(FakeItem(1, "Compare")))
-    assert Frame._context_entries(f) == [("item", 1, "Compare")]
+    assert Frame._context_entries(f) == [("item", 1, "Compare"), ("sep",), MORE]
 
 
 def test_an_empty_submenu_is_left_out():
     actions = FakeMenu(FakeItem(2, "Pull Request", sub=FakeMenu(FakeItem(3, "Merge", enabled=False))))
     f = _frame(ghviewer.VIEW_ISSUES, None, actions)
-    assert Frame._context_entries(f) == []
+    assert Frame._context_entries(f) == [MORE]
 
 
 def test_every_open_label_is_for_a_real_view():
@@ -199,7 +203,7 @@ def test_no_duplicate_of_enter_from_the_actions_menu():
                        FakeItem(9, "Open in Browser"))
     f = _frame(ghviewer.VIEW_WORKFLOWS, Workflow(1, "CI", "ci.yml", "active"), actions)
     labels = [e[2] for e in Frame._context_entries(f) if e[0] == "item"]
-    assert labels == ["Run on a Branch…\tEnter", "Open in Browser"]
+    assert labels == ["Run on a Branch…\tEnter", "Open in Browser", "View More\tCtrl++"]
 
 
 def test_an_expired_artifact_offers_no_download():
@@ -207,4 +211,10 @@ def test_an_expired_artifact_offers_no_download():
     actions = FakeMenu(FakeItem(ghviewer.ID_ACT_DOWNLOAD_ARTIFACT, "Download Artifact…"),
                        FakeItem(9, "Copy"))
     f = _frame(ghviewer.VIEW_ARTIFACTS, Artifact(1, "build", 10, True, "", 9), actions)
-    assert Frame._context_entries(f) == [("item", 9, "Copy")]
+    assert Frame._context_entries(f) == [("item", 9, "Copy"), ("sep",), MORE]
+
+
+@pytest.mark.parametrize("view", [ghviewer.VIEW_FAVORITES, ghviewer.VIEW_MY_WORK, ghviewer.VIEW_ORGS])
+def test_no_view_more_where_everything_is_already_loaded(view):
+    f = _frame(view, None, FakeMenu(FakeItem(1, "Copy")))
+    assert MORE not in Frame._context_entries(f)

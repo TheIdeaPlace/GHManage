@@ -710,6 +710,8 @@ SEARCH_VIEWS = (VIEW_SEARCH_ISSUES, VIEW_SEARCH_REPOS)
 # Lists across repositories where G opens the selected row's repository here.
 GO_TO_REPO_VIEWS = (VIEW_ACTIVITY, VIEW_NOTIFICATIONS, VIEW_MY_WORK, VIEW_SEARCH_ISSUES,
                     VIEW_SEARCH_REPOS)
+# Views that load everything at once, where View More has nothing to add.
+NO_MORE_VIEWS = (VIEW_FAVORITES, VIEW_MY_WORK, VIEW_ORGS)
 # Views listing repositories; Enter on one opens it here.
 REPO_LIST_VIEWS = (VIEW_STARRED, VIEW_WATCHED, VIEW_ORG, VIEW_SHARED)
 
@@ -4352,6 +4354,11 @@ class GhViewerFrame(wx.Frame):
         entries += walk(self._actions_menu)
         while entries and entries[-1] == ("sep",):
             entries.pop()
+        # View More lives on the File menu, so it was missing here, where
+        # people look for "what else can I do in this list" (#52).
+        if self.view_mode not in NO_MORE_VIEWS:
+            entries += ([("sep",)] if entries else []) + [
+                ("item", ID_VIEW_MORE, "View More	Ctrl++")]
         # Say which way F goes for this row, or leave it off where there is
         # nothing it could favorite.
         if self.view_mode == VIEW_FAVORITES:

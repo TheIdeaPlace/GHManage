@@ -1419,3 +1419,33 @@ def test_enter_on_a_favorite_repository_opens_it_here_and_backspace_returns():
     f._pending_target = None
     Frame._return_to_list(f)
     assert loaded == [fav]
+
+
+# ── No beep after a letter key that did something ──────────────────────
+
+
+class CharEvent(ghviewer.wx.KeyEvent):
+    def __init__(self):
+        super().__init__(ghviewer.wx.wxEVT_CHAR)
+        self.passed_on = False
+
+    def Skip(self, skip=True):
+        self.passed_on = True
+
+
+@pytest.mark.parametrize("claimed", [True, False])
+def test_the_character_after_a_claimed_key_goes_no_further(monkeypatch, claimed):
+    # On Windows the list's find-as-you-type beeps at a letter no row starts
+    # with, so F (and R, C…) beeped even though they worked
+    monkeypatch.setattr(Frame, "_on_list_key",
+                        lambda self, ev: None if claimed else ev.Skip())
+    f = _frame()
+    key = ghviewer.wx.ListEvent()
+    Frame.on_list_key_down(f, key)
+    char = CharEvent()
+    Frame.on_list_char(f, char)
+    assert char.passed_on is (not claimed)
+    # Only that one character: the next goes on as usual
+    later = CharEvent()
+    Frame.on_list_char(f, later)
+    assert later.passed_on

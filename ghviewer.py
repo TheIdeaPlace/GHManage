@@ -2339,6 +2339,7 @@ class GhViewerFrame(wx.Frame):
             # menu too. A right-click on a row raises this as well.
             self.list_ctrl.Bind(wx.EVT_CONTEXT_MENU, self.on_item_context_menu)
             self.Bind(wx.EVT_LIST_KEY_DOWN, self.on_list_key_down, self.list_ctrl)
+            self.list_ctrl.Bind(wx.EVT_CHAR, self.on_list_char)
         self.details_text.Bind(wx.EVT_CHAR_HOOK, self.on_details_key_down)
         # Frame-level, so Insert/Delete in the Labels view work wherever focus
         # is — including the details panel, which is where the text describing
@@ -4741,6 +4742,21 @@ class GhViewerFrame(wx.Frame):
         return wx.GetMouseState().HasAnyModifiers()
 
     def on_list_key_down(self, event: wx.KeyEvent) -> None:
+        GhViewerFrame._on_list_key(self, event)
+        # A key acted on here still reaches the list as a character, and on
+        # Windows the list looks for a row starting with it: F, R, C and the
+        # rest beeped wherever none did. Remember to swallow that character.
+        self._eat_list_char = not event.GetSkipped()
+
+    def on_list_char(self, event: wx.KeyEvent) -> None:
+        """The character after a key on_list_key_down acted on goes no
+        further; any other goes on to the list's find-as-you-type."""
+        if getattr(self, "_eat_list_char", False):
+            self._eat_list_char = False
+            return
+        event.Skip()
+
+    def _on_list_key(self, event: wx.KeyEvent) -> None:
         key = event.GetKeyCode()
         # The single-letter keys here are bare letters. With a modifier the
         # key belongs to something else — Ctrl+C is copy, not Close — so it is

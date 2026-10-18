@@ -1317,3 +1317,22 @@ def test_an_organization_list_names_the_organization_and_keeps_its_count(call_la
     assert f.statuses[-1][0] == "w3c Repositories — 3 repositories."
     assert f._category_counts == {ghviewer.ORG_ENTRY_PREFIX + "w3c": 3}
     assert Frame._view_label(f, ghviewer.VIEW_ORG, lower=True) == "w3c repositories"
+
+
+def test_another_organization_starts_without_the_last_ones_filter():
+    f = _frame(view_mode=ghviewer.VIEW_ORG, filter_text="wcag", _org="w3c")
+    f._select_category = lambda view: None
+    Frame._select_org(f, "TheIdeaPlace")
+    assert f.filter_text == "" and f._org == "TheIdeaPlace"
+    # The same one again keeps it
+    f.filter_text = "quill"
+    Frame._select_org(f, "TheIdeaPlace")
+    assert f.filter_text == "quill"
+
+
+def test_a_count_no_longer_known_is_not_kept():
+    f = _repo_frame()
+    Frame._on_repos_loaded(f, _listing(orgs=[OrgEntry("w3c", False, 9)], shared=40))
+    assert f._category_counts[ghviewer.SHARED_ENTRY] == 40
+    Frame._on_repos_loaded(f, _listing(orgs=[OrgEntry("w3c", False, None)], shared=None))
+    assert f.repo_list.labels[6:8] == ["Shared With Me", "🏢 w3c"]

@@ -506,3 +506,36 @@ def test_create_issue_without_an_address_is_an_error(fake_gh, monkeypatch):
     fake_gh.route("issue create", "something odd\n")
     with pytest.raises(gh_data.GhError):
         gh_data.create_issue("o/r", "T", "")
+
+
+def test_without_read_org_your_own_repos_still_list(monkeypatch):
+    # A token without read:org fails the whole query over `organizations`
+    queries = []
+    own = [{"nameWithOwner": "me/a"}]
+
+    def graphql(q):
+        queries.append(q)
+        if "organizations" in q:
+            return {"data": None, "errors": [{"type": "INSUFFICIENT_SCOPES",
+                                              "message": "needs read:org"}]}
+        return _repos_reply(own)
+    monkeypatch.setattr(gh_data, "_graphql", graphql)
+    listing = gh_data.list_repos()
+    assert listing.repos == own and listing.orgs == [] and listing.shared == 0
+    assert len(queries) == 2
+
+
+def test_a_full_page_of_only_your_organizations_is_nothing_shared(monkeypatch):
+    shared = [{"owner": {"login": "w3c"}}] * 100
+    monkeypatch.setattr(gh_data, "_graphql",
+                        lambda q: _repos_reply([], [_org("w3c")], shared))
+    assert gh_data.list_repos().shared == 0
+
+
+def test_shared_repos_stop_after_ten_pages(fake_gh):
+    # A collaborator on a thousand of their organization's repos isn't kept
+    # waiting for every page to find the few shared from outside
+    fake_gh.route("affiliation=collaborator",
+                  [{"full_name": f"w3c/r{i}", "owner": {"login": "w3c"}} for i in range(100)])
+    assert gh_data.fetch_shared_repos(100, ["w3c"]) == []
+    assert len(fake_gh.calls) == 11

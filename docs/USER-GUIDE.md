@@ -741,7 +741,7 @@ These lists keep other people's repositories out of the main repository list, wh
 
 ## Organizations and Shared With Me
 
-Each organization you belong to has its own entry in the repository list, after My Work, for example "🏢 TheIdeaPlace (13)". The number is how many of its repositories you can see. Organizations you are an owner of come first, then the rest by name. `Enter` on one lists its repositories, most recently pushed first.
+Each organization you belong to has its own entry in the repository list, after My Work, for example "🏢 TheIdeaPlace (13)". The number is how many of its repositories you can see. Organizations you are an owner of come first, then the rest by name. `Enter` on one lists its repositories, most recently pushed first. **View → View Mode → Organization Repositories…** does the same, asking which organization when you are in more than one; **Shared With Me** is there too.
 
 An organization's repositories are kept out of the list of your own, so belonging to a big organization (W3C has over a thousand repositories) doesn't bury yours. To keep one you use often a keystroke away, favorite it with `F`.
 

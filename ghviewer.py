@@ -600,6 +600,8 @@ ID_VIEW_PAGES = wx.NewIdRef()
 ID_VIEW_ACTIVITY = wx.NewIdRef()
 ID_VIEW_STARRED = wx.NewIdRef()
 ID_VIEW_WATCHED = wx.NewIdRef()
+ID_VIEW_SHARED = wx.NewIdRef()
+ID_VIEW_ORG = wx.NewIdRef()
 ID_VIEW_NOTIFICATIONS = wx.NewIdRef()
 ID_MARK_READ = wx.NewIdRef()
 ID_MARK_ALL_READ = wx.NewIdRef()
@@ -1890,6 +1892,10 @@ class GhViewerFrame(wx.Frame):
         show_menu.AppendRadioItem(ID_VIEW_ACTIVITY, "Activity\tCtrl+Shift+A")
         show_menu.AppendRadioItem(ID_VIEW_STARRED, "Starred Repositories")
         show_menu.AppendRadioItem(ID_VIEW_WATCHED, "Watched Repositories")
+        show_menu.AppendRadioItem(ID_VIEW_SHARED, "Shared With Me")
+        # Checked while an organization's repositories are showing; choosing
+        # it asks which organization when you are in more than one.
+        show_menu.AppendRadioItem(ID_VIEW_ORG, "Organization Repositories…")
         view_menu.AppendSubMenu(show_menu, "View Mode")
 
         view_menu.AppendSeparator()
@@ -1984,6 +1990,8 @@ class GhViewerFrame(wx.Frame):
         self.Bind(wx.EVT_MENU, lambda e: self._unsubscribe_notification(), id=ID_UNSUBSCRIBE)
         self.Bind(wx.EVT_MENU, self.on_view_starred, id=ID_VIEW_STARRED)
         self.Bind(wx.EVT_MENU, self.on_view_watched, id=ID_VIEW_WATCHED)
+        self.Bind(wx.EVT_MENU, self.on_view_shared, id=ID_VIEW_SHARED)
+        self.Bind(wx.EVT_MENU, self.on_view_org, id=ID_VIEW_ORG)
         self.Bind(wx.EVT_MENU, self.on_go_to_event_repo, id=ID_GO_TO_EVENT_REPO)
         self.Bind(wx.EVT_MENU, lambda e: self._copy("link"), id=ID_COPY_LINK)
         self.Bind(wx.EVT_MENU, lambda e: self._copy("markdown"), id=ID_COPY_MARKDOWN)
@@ -2128,6 +2136,8 @@ class GhViewerFrame(wx.Frame):
         menu_bar.Check(ID_SHOW_READ, self._include_read)
         menu_bar.Check(ID_VIEW_STARRED, self.view_mode == VIEW_STARRED)
         menu_bar.Check(ID_VIEW_WATCHED, self.view_mode == VIEW_WATCHED)
+        menu_bar.Check(ID_VIEW_SHARED, self.view_mode == VIEW_SHARED)
+        menu_bar.Check(ID_VIEW_ORG, self.view_mode == VIEW_ORG)
         # State filter
         menu_bar.Check(ID_STATE_OPEN, self.state_filter == "open")
         menu_bar.Check(ID_STATE_CLOSED, self.state_filter == "closed")
@@ -2448,11 +2458,14 @@ class GhViewerFrame(wx.Frame):
             self._orgs = listing.orgs
             # None is "more than a page", so there is something to show.
             self._show_shared = listing.shared != 0
-            for org in listing.orgs:
-                if org.repo_count is not None:
-                    self._category_counts[ORG_ENTRY_PREFIX + org.login] = org.repo_count
-            if listing.shared:
-                self._category_counts[SHARED_ENTRY] = listing.shared
+            counts = {ORG_ENTRY_PREFIX + o.login: o.repo_count for o in listing.orgs}
+            counts[SHARED_ENTRY] = listing.shared or None
+            for entry, n in counts.items():
+                # Unknown now means unknown: not the number from last time.
+                if n is None:
+                    self._category_counts.pop(entry, None)
+                else:
+                    self._category_counts[entry] = n
         self._all_repos = repos
         # Remember what was selected so the rebuild puts you back on it,
         # rather than at the top of the list while you are arrowing through.
@@ -2511,10 +2524,9 @@ class GhViewerFrame(wx.Frame):
 
     def _current_entry(self):
         """The repo-list entry for what the right-hand side shows, or None."""
-        if self.view_mode == VIEW_ORG:
-            return ORG_ENTRY_PREFIX + self._org
-        if self.view_mode in VIEW_ENTRIES:
-            return VIEW_ENTRIES[self.view_mode]
+        entry = self._view_entry(self.view_mode)
+        if entry:
+            return entry
         if self.view_mode in SEARCH_VIEWS:
             search = getattr(self, "_search", None)
             for saved in getattr(self, "saved_searches", []):
@@ -2623,13 +2635,11 @@ class GhViewerFrame(wx.Frame):
     def _select_org(self, login: str) -> None:
         """Switch to one organization's repositories. Like Starred, this keeps
         the repository you were in."""
+        if self.view_mode == VIEW_ORG and login != self._org:
+            # A filter typed for one organization means nothing in the next.
+            self.filter_text = ""
         self._org = login
-        if self.view_mode != VIEW_ORG:
-            self._switch_view(VIEW_ORG)
-        else:
-            # Another organization, or the same one again: from the top.
-            self.current_limit = self.page_size
-            self._load_items()
+        self._select_category(VIEW_ORG)
 
     # ── Item loading ───────────────────────────────────────────────────
 
@@ -5713,6 +5723,31 @@ class GhViewerFrame(wx.Frame):
 
     def on_view_watched(self, event: wx.CommandEvent) -> None:
         self._select_category(VIEW_WATCHED)
+
+    def on_view_shared(self, event: wx.CommandEvent) -> None:
+        self._select_category(VIEW_SHARED)
+
+    def on_view_org(self, event: wx.CommandEvent) -> None:
+        """View ▸ View Mode ▸ Organization Repositories: which one, if more
+        than one."""
+        logins = [o.login for o in self._orgs]
+        if not logins:
+            self._update_menu_checks()  # the radio item has checked itself
+            self._announce("You don't belong to any organizations.")
+            return
+        if len(logins) == 1:
+            self._select_org(logins[0])
+            return
+        dlg = wx.SingleChoiceDialog(self, "Show which organization's repositories?",
+                                    "Organization Repositories", logins)
+        if self._org in logins:
+            dlg.SetSelection(logins.index(self._org))
+        chosen = logins[dlg.GetSelection()] if dlg.ShowModal() == wx.ID_OK else None
+        dlg.Destroy()
+        if chosen:
+            self._select_org(chosen)
+        else:
+            self._update_menu_checks()
 
     # ── List display refresh ───────────────────────────────────────────
 

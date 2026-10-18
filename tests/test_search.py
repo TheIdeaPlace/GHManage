@@ -214,6 +214,7 @@ def test_run_search_again_in_the_same_view_reloads():
 def test_current_entry_is_the_saved_search_on_screen():
     f = _frame(search=(ss.KIND_ISSUES, "is:open label:bug"))
     f.saved_searches = [ss.SavedSearch("Bugs", "is:open label:bug")]
+    f._view_entry = lambda view: Frame._view_entry(f, view)
     assert Frame._current_entry(f) == ghviewer.SEARCH_ENTRY_PREFIX + "Bugs"
     f._search = (ss.KIND_ISSUES, "something else")
     assert Frame._current_entry(f) is None

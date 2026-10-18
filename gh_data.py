@@ -638,20 +638,27 @@ def list_repos(limit: int = 100) -> RepoListing:
     organization, and it is already under that organization's entry.
     """
     first = max(1, min(limit, 100))
-    query = (
-        "{ viewer { "
+    own_part = (
         "own: repositories(first: %d, ownerAffiliations: [OWNER], "
         "orderBy: {field: PUSHED_AT, direction: DESC}) "
-        "{ nodes { nameWithOwner description pushedAt } } "
+        "{ nodes { nameWithOwner description pushedAt } } " % first
+    )
+    extras = (
         "shared: repositories(first: 100, ownerAffiliations: [COLLABORATOR]) "
         "{ nodes { owner { login } } } "
         "organizations(first: 100) "
         "{ nodes { login viewerCanAdminister repositories { totalCount } } } "
-        "} }" % first
     )
-    reply = _graphql(query)
+    reply = _graphql("{ viewer { " + own_part + extras + "} }")
     viewer = (reply.get("data") or {}).get("viewer") or {}
     own = (viewer.get("own") or {}).get("nodes")
+    if own is None:
+        # A token without read:org (a GH_TOKEN with only `repo`, say) fails
+        # the whole query over `organizations`, not just that part. Your own
+        # repos don't need it, so ask again for them alone.
+        reply = _graphql("{ viewer { " + own_part + "} }")
+        viewer = (reply.get("data") or {}).get("viewer") or {}
+        own = (viewer.get("own") or {}).get("nodes")
     if own is None:
         # A GraphQL error, or a plain REST one such as a 401 for a token
         # that has expired, which comes back with only a message.
@@ -676,16 +683,20 @@ def list_repos(limit: int = 100) -> RepoListing:
     shared_nodes = (viewer.get("shared") or {}).get("nodes")
     if shared_nodes is None:
         shared = 0  # couldn't be had; the entry is left out rather than wrong
-    elif len(shared_nodes) >= 100:
-        shared = None
     else:
         mine = {o.login.lower() for o in orgs}
         shared = sum(1 for n in shared_nodes
                      if n and ((n.get("owner") or {}).get("login") or "").lower() not in mine)
+        # A full page with some outside your organizations may have more
+        # after it, so no count. A full page of only your organizations'
+        # (someone added to a hundred of W3C's) is taken to have none: an
+        # entry that opens on nothing is worse than one left out.
+        if shared and len(shared_nodes) >= 100:
+            shared = None
     return RepoListing(repos, orgs, shared)
 
 
-def _api_pages(endpoint: str, limit: int, keep=None) -> list[dict]:
+def _api_pages(endpoint: str, limit: int, keep=None, max_pages=None) -> list[dict]:
     """Fetch up to ``limit`` entries of a paged REST list, 100 to a page.
 
     ``gh api --paginate`` would fetch every page there is, and someone with
@@ -694,7 +705,8 @@ def _api_pages(endpoint: str, limit: int, keep=None) -> list[dict]:
     limit, or at a short page, which means there are no more.
 
     ``keep``, when given, says which entries count towards the limit; the
-    rest are dropped, and further pages fetched to make up for them.
+    rest are dropped, and further pages fetched to make up for them, up to
+    ``max_pages`` in all.
     """
     sep = "&" if "?" in endpoint else "?"
     per_page = max(1, min(limit, 100))
@@ -706,7 +718,7 @@ def _api_pages(endpoint: str, limit: int, keep=None) -> list[dict]:
         if not isinstance(rows, list):
             break
         out.extend(r for r in rows if isinstance(r, dict) and (keep is None or keep(r)))
-        if len(rows) < per_page:
+        if len(rows) < per_page or (max_pages and page >= max_pages):
             break
         page += 1
     return out[:limit]
@@ -866,9 +878,14 @@ def fetch_shared_repos(limit: int = 100, orgs=()) -> list[RepoEntry]:
         owner = ((r.get("owner") or {}).get("login") or "").lower()
         return bool(r.get("full_name")) and owner not in skip
 
+    # Each page beyond the first is a round trip, and someone who is a
+    # collaborator on a thousand of their organization's repos would wait
+    # for all of them to find the few others shared. Ten pages more than
+    # the list asks for is plenty.
     return [
         _repo_entry(r) for r in
-        _api_pages("user/repos?affiliation=collaborator&sort=pushed", limit, keep)
+        _api_pages("user/repos?affiliation=collaborator&sort=pushed", limit, keep,
+                   max_pages=10 + limit // 100)
     ]
 
 

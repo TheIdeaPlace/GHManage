@@ -4,6 +4,10 @@ Pinned repos are stored as a JSON file in the user's per-app data directory
 (`%APPDATA%\\ghmanage\\pinned_repos.json` on Windows) so they survive across
 sessions. Each entry is just ``OWNER/NAME``; the description is fetched live
 when the repo list is built.
+
+Hidden repos live beside them in ``hidden_repos.json``: repositories from your
+GitHub account that you have removed from the list. GitHub still lists them,
+so they are kept out of the list here rather than deleted anywhere.
 """
 
 from __future__ import annotations
@@ -25,9 +29,17 @@ def _pinned_file() -> Path:
     return _app_data_dir() / "pinned_repos.json"
 
 
+def _hidden_file() -> Path:
+    return _app_data_dir() / "hidden_repos.json"
+
+
 def load_pinned() -> list[str]:
     """Load the list of pinned repo names (OWNER/NAME). Returns [] if missing/invalid."""
-    f = _pinned_file()
+    return _load_names(_pinned_file())
+
+
+def _load_names(f: Path) -> list[str]:
+    """A JSON list of repo names, or [] when the file is missing or unreadable."""
     if not f.exists():
         return []
     try:
@@ -41,7 +53,10 @@ def load_pinned() -> list[str]:
 
 def save_pinned(repos: list[str]) -> None:
     """Persist the list of pinned repo names."""
-    f = _pinned_file()
+    _save_names(_pinned_file(), repos)
+
+
+def _save_names(f: Path, repos: list[str]) -> None:
     f.write_text(json.dumps(repos, indent=2), encoding="utf-8")
 
 
@@ -61,3 +76,24 @@ def remove_pinned(repo: str) -> list[str]:
     save_pinned(repos)
     return repos
 
+
+def load_hidden() -> list[str]:
+    """The repos removed from the list (OWNER/NAME). [] if missing/invalid."""
+    return _load_names(_hidden_file())
+
+
+def hide_repo(repo: str) -> list[str]:
+    """Keep a repo out of the list (dedup, case-insensitive). Returns the new list."""
+    repos = load_hidden()
+    if repo.lower() not in (r.lower() for r in repos):
+        repos.append(repo)
+        _save_names(_hidden_file(), repos)
+    return repos
+
+
+def unhide_repos(names: list[str]) -> list[str]:
+    """Put repos back in the list (case-insensitive). Returns the new hidden list."""
+    gone = {n.lower() for n in names}
+    repos = [r for r in load_hidden() if r.lower() not in gone]
+    _save_names(_hidden_file(), repos)
+    return repos

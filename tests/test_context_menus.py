@@ -136,7 +136,8 @@ def test_a_repository_s_menu():
     for wanted in (ghviewer.ID_REPO_OPEN, ghviewer.ID_REPO_BROWSER, ghviewer.ID_NEW_ISSUE,
                    ghviewer.ID_SEARCH_REPO, ghviewer.ID_WATCH_SETTINGS, ghviewer.ID_COPY_LINK):
         assert wanted in ids
-    assert ghviewer.ID_REMOVE_REPO not in ids      # one of your own: can't be removed
+    # One of your own too: removing it hides it (#2).
+    assert ghviewer.ID_REMOVE_REPO in ids
 
 
 FAV = FakeItem(ghviewer.ID_FAVORITE, ghviewer.FAVORITE_LABEL)
@@ -174,7 +175,7 @@ def test_a_pinned_repository_can_be_removed():
 
 def test_a_saved_search_s_menu():
     entries = Frame._repo_context_entries(_repo_frame(), ghviewer.SEARCH_ENTRY_PREFIX + "Bugs")
-    assert [e[2] for e in entries] == ["Run Search\tEnter", "Remove Saved Search"]
+    assert [e[2] for e in entries] == ["Run Search\tEnter", "Remove Saved Search…\tDelete"]
 
 
 def test_a_category_just_opens():

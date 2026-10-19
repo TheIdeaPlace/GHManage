@@ -345,11 +345,11 @@ class FakeListBox:
 def _repo_frame(pinned=(), repo=None, view=ghviewer.VIEW_ISSUES, focus=None, loaded_once=False):
     f = _frame(
         repo=repo, view_mode=view, repo_list=FakeListBox(),
-        _pinned_repos=list(pinned), _all_repos=[],
+        _pinned_repos=list(pinned), _hidden_repos=[], _all_repos=[], _repos_known=True, _repos_failed=False,
         _repo_token=0, _repos_loaded_once=loaded_once, _category_counts={},
     )
     for name in ("_restore_repo_selection", "_category_label", "_refresh_category_labels",
-                 "_set_repo_list_label", "_current_entry"):
+                 "_set_repo_list_label", "_current_entry", "_select_repo_row"):
         setattr(f, name, getattr(Frame, name).__get__(f))
     f._current_focus = lambda: focus
     return f
@@ -463,7 +463,6 @@ def test_a_later_load_keeps_focus_in_the_repo_list():
 
 
 @pytest.mark.parametrize("name, spoken", [
-    ("me/a", "me/a comes from your GitHub account"),
     (ghviewer.ACTIVITY_ENTRY, "That entry is always in the list."),
     (ghviewer.STARRED_ENTRY, "That entry is always in the list."),
     (ghviewer.FAVORITES_ENTRY, "That entry is always in the list."),
@@ -475,6 +474,183 @@ def test_remove_from_list_explains_what_it_cannot_remove(name, spoken):
     f.repo_list.SetSelection(0)
     Frame.on_remove_repo(f, None)
     assert f.announced[-1].startswith(spoken)
+
+
+def _remove(f, name):
+    f._refresh_repo_list = lambda: Frame._on_repos_loaded(f, f._all_repos)
+    f.repo_list.Clear()
+    Frame._on_repos_loaded(f, f._all_repos)
+    f.repo_list.SetSelection([d for _, d in f.repo_list.rows].index(name))
+    Frame.on_remove_repo(f, None)
+
+
+def test_removing_one_of_your_own_hides_it_and_says_how_to_get_it_back():
+    # #2: it used to say it couldn't be removed, and only on the status bar.
+    import pinned_repos
+    f = _repo_frame()
+    f._all_repos = [_row("me/a"), _row("me/b")]
+    _remove(f, "me/a")
+    assert "me/a" not in [d for _, d in f.repo_list.rows]
+    assert "me/b" in [d for _, d in f.repo_list.rows]
+    assert f._hidden_repos == ["me/a"] == pinned_repos.load_hidden()
+    assert f.announced[-1] == ("Removed me/a from the list. "
+                               "File, Hidden Repositories brings it back.")
+
+
+def test_a_hidden_repo_stays_out_of_later_loads_and_is_counted():
+    f = _repo_frame()
+    f._hidden_repos = ["ME/A"]  # case doesn't matter
+    Frame._on_repos_loaded(f, [_row("me/a"), _row("me/b")])
+    assert "me/a" not in [d for _, d in f.repo_list.rows]
+    assert f.announced[-1].startswith("Loaded 1 repositories (1 hidden).")
+
+
+def test_removing_a_pinned_repo_that_is_also_yours_takes_it_out_entirely():
+    # Unpinning alone left it in the list, under your own repos.
+    f = _repo_frame(pinned=["me/a"])
+    f._all_repos = [_row("me/a")]
+    _remove(f, "me/a")
+    assert "me/a" not in [d for _, d in f.repo_list.rows]
+    assert f._pinned_repos == [] and f._hidden_repos == ["me/a"]
+
+
+def test_removing_a_pinned_repo_from_elsewhere_just_unpins_it():
+    f = _repo_frame(pinned=["o/other"])
+    f._all_repos = [_row("me/a")]
+    _remove(f, "o/other")
+    assert "o/other" not in [d for _, d in f.repo_list.rows]
+    assert f._hidden_repos == []
+    assert f.announced[-1] == "Removed o/other from the list."
+
+
+def test_delete_in_the_repo_list_removes():
+    f = _repo_frame()
+    removed = []
+    f.on_remove_repo = removed.append
+    f._modifiers_down = lambda e: False
+    event = SimpleNamespace(GetKeyCode=lambda: ghviewer.wx.WXK_DELETE, Skip=lambda: None)
+    Frame.on_repo_key_down(f, event)
+    assert removed == [None]
+
+
+def test_hidden_repositories_with_none_hidden_says_so():
+    f = _repo_frame()
+    Frame.on_hidden_repos(f, None)
+    assert f.announced[-1] == "No repositories are hidden."
+
+
+def test_unhiding_puts_it_back(monkeypatch):
+    import pinned_repos
+    f = _repo_frame()
+    f._all_repos = [_row("me/a"), _row("me/b")]
+    _remove(f, "me/a")
+    _remove(f, "me/b")
+    f._unhide = lambda names: Frame._unhide(f, names)
+
+    class Dlg:
+        """Show Again on me/a, then Close."""
+        def __init__(self, parent, names, show_again):
+            assert names == ["me/a", "me/b"]
+            self.show_again = show_again
+        def ShowModal(self):
+            self.show_again("me/a")
+            return ghviewer.wx.ID_CANCEL
+        def Destroy(self): pass
+    monkeypatch.setattr(ghviewer, "HiddenReposDialog", Dlg)
+    Frame.on_hidden_repos(f, None)
+    assert "me/a" in [d for _, d in f.repo_list.rows]
+    assert "me/b" not in [d for _, d in f.repo_list.rows]
+    assert pinned_repos.load_hidden() == ["me/b"]
+    assert f.announced[-1] == "Showing 1 repository again."
+
+
+def test_closing_hidden_repositories_without_choosing_says_nothing(monkeypatch):
+    f = _repo_frame()
+    f._hidden_repos = ["me/a"]
+
+    class Dlg:
+        def __init__(self, *a): pass
+        def ShowModal(self): return ghviewer.wx.ID_CANCEL
+        def Destroy(self): pass
+    monkeypatch.setattr(ghviewer, "HiddenReposDialog", Dlg)
+    before = list(f.announced)
+    Frame.on_hidden_repos(f, None)
+    assert f.announced == before and f._hidden_repos == ["me/a"]
+
+
+def test_after_a_removal_you_are_on_the_row_that_took_its_place():
+    # Review of #2: the rebuild used to leave nothing selected, or jump to
+    # the repository open on the right.
+    f = _repo_frame(repo="me/c")
+    f._all_repos = [_row("me/a"), _row("me/b"), _row("me/c")]
+    _remove(f, "me/b")
+    assert f.repo_list.GetClientData(f.repo_list.GetSelection()) == "me/c"
+    _remove(f, "me/c")   # the last one: you land on the new last
+    assert f.repo_list.GetClientData(f.repo_list.GetSelection()) == "me/a"
+
+
+def test_removing_waits_for_the_list_to_load():
+    f = _repo_frame(pinned=["me/a"])
+    f._repos_known = False
+    f._all_repos = []
+    f._refresh_repo_list = lambda: None
+    Frame._on_repos_loaded(f, [])
+    f.repo_list.SetSelection([d for _, d in f.repo_list.rows].index("me/a"))
+    Frame.on_remove_repo(f, None)
+    assert f._pinned_repos == ["me/a"]
+    assert f.announced[-1].startswith("The repository list is still loading.")
+
+
+def test_removing_after_the_list_failed_to_load_says_so():
+    f = _repo_frame(pinned=["me/a"])
+    f._repos_known = False
+    f._refresh_repo_list = lambda: None
+    Frame._on_repos_error(f, "boom")
+    Frame._on_repos_loaded(f, [])
+    f.repo_list.SetSelection([d for _, d in f.repo_list.rows].index("me/a"))
+    reloads = []
+    f._load_repos = lambda: reloads.append(1)
+    Frame.on_remove_repo(f, None)
+    assert f._pinned_repos == ["me/a"] and reloads == [1]
+    assert "couldn't be loaded" in f.announced[-1]
+
+
+def test_a_pin_in_other_case_is_one_row_and_one_removal():
+    f = _repo_frame(pinned=["Me/A"])
+    f._all_repos = [_row("me/a")]
+    Frame._on_repos_loaded(f, f._all_repos)
+    assert [d for _, d in f.repo_list.rows].count("Me/A") == 1
+    assert "me/a" not in [d for _, d in f.repo_list.rows]
+    _remove(f, "Me/A")
+    assert not any(isinstance(d, str) and d.lower() == "me/a" for _, d in f.repo_list.rows)
+    assert f._pinned_repos == [] and f._hidden_repos == ["Me/A"]
+
+
+@pytest.mark.parametrize("answer, removed", [(ghviewer.wx.YES, True), (ghviewer.wx.NO, False)])
+def test_removing_a_saved_search_asks_first(monkeypatch, answer, removed):
+    import saved_searches
+    saved_searches.add_saved_search(
+        saved_searches.SavedSearch("Bugs", "is:open label:bug"))
+    f = _repo_frame()
+    f.saved_searches = saved_searches.load_saved_searches()
+    asked = []
+    monkeypatch.setattr(ghviewer.wx, "MessageBox", lambda *a: asked.append(a[0]) or answer)
+    _remove(f, ghviewer.SEARCH_ENTRY_PREFIX + "Bugs")
+    assert asked and "can't be brought back" in asked[0]
+    assert (saved_searches.load_saved_searches() == []) == removed
+
+
+def test_opening_a_hidden_repo_by_address_brings_it_back():
+    import pinned_repos
+    pinned_repos.hide_repo("me/a")
+    f = _repo_frame()
+    f._hidden_repos = ["me/a"]
+    f._all_repos = [_row("me/a")]
+    f._refresh_repo_list = lambda: Frame._on_repos_loaded(f, f._all_repos)
+    f._select_repo = lambda repo, view=None: None
+    Frame._open_address(f, "https://github.com/ME/A")
+    assert pinned_repos.load_hidden() == [] and f._hidden_repos == []
+    assert any(d.lower() == "me/a" for _, d in f.repo_list.rows if isinstance(d, str))
 
 
 def test_user_guide_opens_in_the_browser(monkeypatch):

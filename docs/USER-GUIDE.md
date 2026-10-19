@@ -248,12 +248,18 @@ Lists load 100 items to begin with. `Ctrl++` (**File → View More**) loads the 
 
 | Menu | What is on it |
 |------|---------------|
-| **File** | Open Repository or Address, Remove from List, Switch GitHub Account, Refresh, Search GitHub, View More, Go To Issue, Quick Filter, Next and Previous Comment, Quit |
+| **File** | Open Repository or Address, Remove from List, Hidden Repositories, Switch GitHub Account, Refresh, Search GitHub, View More, Go To Issue, Quick Filter, Next and Previous Comment, Quit |
 | **Actions** | Everything that acts on the item you are on. See [The Actions Menu](#the-actions-menu). |
 | **View** | View Mode, List Mode, Sort Order, Columns, State, Filter |
-| **Help** | User Guide, Check for Updates, About GHManage |
+| **Help** | User Guide, Keyboard Shortcuts, Command Palette, Check for Updates, About GHManage |
 
 **Help → User Guide** (`F1`, or `fn+F1` on a Mac) opens this guide in your web browser.
+
+### Keyboard Shortcuts and the Command Palette
+
+**Help → Keyboard Shortcuts** (`Ctrl+F1`) lists every key in GHManage in a table of key, command and where it works: the single-letter keys in the lists as well as every menu shortcut. Type in **Filter** to narrow it, for example "delete" or "ctrl+shift"; the list's name says how many match, for example "Shortcuts, 4 matching". `Escape` closes it.
+
+**Help → Command Palette…** (`Ctrl+Shift+P`) finds a command by name and runs it, so you don't need to know which menu it is on or what its shortcut is. Type a few letters of the command, for example "branches" or "copy link", then `Down Arrow` to move into the list, and `Enter` to run the one you are on. `Enter` in the box runs the first match, and `Up Arrow` on the first command goes back to the box. The list's name says how many match. The command runs as if you had chosen it from its menu, on whatever you were on before you opened the palette. It lists only the commands that apply where you are, each with its shortcut and the menu it is on, so it also teaches you the shortcut for next time.
 
 ---
 
@@ -303,9 +309,15 @@ A person's or organisation's address says so on the status bar; GHManage has no 
 
 ### Removing a repository from the list
 
-**File → Remove from List…** removes the selected repository from the list. It applies to repositories you opened by address; the status bar confirms with "Removed owner/name from the pinned list." It does not delete anything on GitHub.
+`Delete` in the repository list, or **File → Remove from List**, takes the selected repository out of the list. It never deletes anything on GitHub. The status bar confirms it, for example "Removed owner/name from the list."
 
-Your own repositories are always listed, so asking to remove one says it "comes from your GitHub account and can't be removed from here". The entries at the top, organizations included, are always there too. A saved search can be removed the same way.
+That works for every repository in the list: ones you opened by address, and your own. GitHub still lists your own repositories each time the list loads, so GHManage keeps a note of the ones you removed and leaves them out. When some are left out, the status bar says how many when the list loads, for example "Loaded 20 repositories (3 hidden)."
+
+After a removal you are on the row that took its place, so you can go on down the list.
+
+To put one back, choose **File → Hidden Repositories…**. It lists the repositories you have removed: move to one and press `Enter` (the **Show Again** button) to put it back in the list. The window stays open for the next one, and closes on its own when none are left; `Escape` closes it. Opening a hidden repository by its address with **File → Open Repository or Address…** brings it back too.
+
+The entries at the top, organizations included, are always there. A saved search is removed the same way, but it can't be brought back, so GHManage asks first.
 
 ### Forks
 
@@ -664,7 +676,7 @@ An issue or pull request in a fork opens on GitHub rather than here: GHManage sh
 
 ### Saved searches
 
-**Actions → Save Search…** (`Ctrl+S`, `Cmd+S` on a Mac) asks for a name and adds the search to the repository list, after My Work, marked with 🔍. `Enter` there runs it again, for fresh results. Saving under a name you have used replaces that search. **File → Remove from List…** with a saved search selected removes it.
+**Actions → Save Search…** (`Ctrl+S`, `Cmd+S` on a Mac) asks for a name and adds the search to the repository list, after My Work, marked with 🔍. `Enter` there runs it again, for fresh results. Saving under a name you have used replaces that search. **File → Remove from List** (`Delete`) with a saved search selected removes it.
 
 Saved searches are kept on this computer, beside your favorites.
 
@@ -960,7 +972,7 @@ The **Applications** key, `Shift+F10`, or a right-click opens a context menu (on
 
 In the item list it starts with what `Enter` does in that view, for example **Show Commits** on a branch or **Open Here** on a search result, and then offers everything the Actions menu offers in that view, with Copy and Pull Request as submenus. It is built from the Actions menu each time, so the two always agree. It ends with **View More** (`Ctrl++`) in every list that loads in pages. On a repository in Starred, Watched, Shared With Me, an organization's repositories or repository search results, it also has **Go To** (see below), and `Backspace` from where it takes you comes back to that row.
 
-In the repository list, a repository's menu has **Open**, **Open on GitHub**, **Go To**, **New Issue…**, **Search This Repository…** (a search starting `repo:owner/name`), **Watch Settings…**, **Add to Favorites** or **Remove from Favorites**, Copy, and **Remove from List…** for a repository you opened by address. **Go To** opens the repository straight on one of its views: Issues & PRs, Branches, Commits, Tags, Releases, Workflows, Workflow Runs, Labels or GitHub Pages. Copy includes **Copy HTTPS Clone URL** and **Copy SSH Clone URL**, the addresses `git clone` takes. These are the same commands as on the Actions menu, for the repository selected. A saved search's menu has **Run Search** and **Remove Saved Search**; Favorites and the other entries at the top have **Open**.
+In the repository list, a repository's menu has **Open**, **Open on GitHub**, **Go To**, **New Issue…**, **Search This Repository…** (a search starting `repo:owner/name`), **Watch Settings…**, **Add to Favorites** or **Remove from Favorites**, Copy, and **Remove from List**. **Go To** opens the repository straight on one of its views: Issues & PRs, Branches, Commits, Tags, Releases, Workflows, Workflow Runs, Labels or GitHub Pages. Copy includes **Copy HTTPS Clone URL** and **Copy SSH Clone URL**, the addresses `git clone` takes. These are the same commands as on the Actions menu, for the repository selected. A saved search's menu has **Run Search** and **Remove Saved Search**; Favorites and the other entries at the top have **Open**.
 
 ---
 
@@ -975,6 +987,8 @@ On a Mac, use `Cmd` in place of `Ctrl` for every shortcut that has one, `Option`
 | `F6` / `Shift+F6` | Next / previous pane: repository list, item list, details panel, status bar |
 | `Tab` / `Shift+Tab` | Move between the repository list, item list and details panel |
 | `F1` | Open this guide in your browser |
+| `Ctrl+F1` | Keyboard shortcuts: this list, in GHManage |
+| `Ctrl+Shift+P` | Command palette: find a command and run it |
 | `Ctrl+1` … `Ctrl+0` | Switch view; see [Views](#views) |
 | `Ctrl+Shift+N` | Notifications |
 | `Ctrl+Shift+M` | My Work |
@@ -1115,6 +1129,7 @@ On a Mac, use `Cmd` in place of `Ctrl` for every shortcut that has one, `Option`
 |-----|--------|
 | `Enter` | Open the selected entry |
 | `F` | Add the selected repository to favorites, or remove it |
+| `Delete` | Remove the selected repository or saved search from the list |
 
 ### In the status bar
 

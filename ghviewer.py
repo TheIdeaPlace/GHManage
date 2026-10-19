@@ -1237,21 +1237,18 @@ class NewLabelDialog(wx.Dialog):
 
         fields = wx.BoxSizer(wx.VERTICAL)
 
-        def add_field(label: str, hint: str = "") -> wx.TextCtrl:
+        def add_field(label: str) -> wx.TextCtrl:
             text = wx.StaticText(self, label=label)
             fields.Add(text, 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
             ctrl = wx.TextCtrl(self)
             ctrl.SetName(label)
-            if hint:
-                ctrl.SetHint(hint)
             fields.Add(ctrl, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
             return ctrl
 
         self.name_ctrl = add_field("Name (required)")
         self.desc_ctrl = add_field("Description")
         self.color_ctrl = add_field(
-            "Colour, 6-digit hex (optional — GitHub picks one if blank)",
-            "e.g. d73a4a",
+            "Colour, 6-digit hex such as d73a4a (optional — GitHub picks one if blank)",
         )
 
         outer.Add(fields, 1, wx.EXPAND)
@@ -1323,8 +1320,8 @@ class SearchDialog(wx.Dialog):
         outer.Add(self.kind_ctrl, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
 
         # A short label: it is said every time you land on the field. The
-        # examples are in the help below and under F1. No hint text either,
-        # which screen readers read out as though it were already typed.
+        # examples are in the help below and under F1. No hint text either:
+        # it too was read every time you landed on the field.
         label = "&Search"
         outer.Add(wx.StaticText(self, label=label), 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
         self.query_ctrl = wx.TextCtrl(self, value=query)
@@ -1419,7 +1416,7 @@ class SearchOperatorsDialog(wx.Dialog):
         outer.Add(wx.StaticText(self, label=search_help.GENERAL_NOTE), 0, wx.ALL, 10)
 
         buttons = wx.BoxSizer(wx.HORIZONTAL)
-        insert = wx.Button(self, wx.ID_OK, "&Insert into Query")
+        insert = wx.Button(self, wx.ID_OK, "&Insert into Search")
         insert.SetDefault()
         docs = wx.Button(self, label="Open GitHub Search &Documentation")
         close = wx.Button(self, wx.ID_CANCEL, "Close")

@@ -26,7 +26,7 @@ MENU_SEP = " > "
 class Command:
     name: str          # "Refresh (R)", as on the menu without its mnemonic
     keys: str = ""     # "Ctrl+R", or "" when it has no shortcut
-    where: str = ""    # "File", "Actions ▸ Copy", or for a list key "Issues list"
+    where: str = ""    # "File", "Actions > Copy", or for a list key "Issues list"
     id: int = 0        # the menu id the palette posts; 0 for a list key
     checked: bool = False  # a check or radio item that is on
 

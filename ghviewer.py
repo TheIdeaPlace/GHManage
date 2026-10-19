@@ -1529,11 +1529,12 @@ class CommandListDialog(wx.Dialog):
         self.filter_ctrl.Bind(wx.EVT_KEY_DOWN, self._on_filter_key)
         self.list.Bind(wx.EVT_KEY_DOWN, self._on_list_key)
         if palette:
-            self.filter_ctrl.Bind(wx.EVT_TEXT_ENTER, lambda e: self._choose())
+            # The first match, whichever row the list is on: that is what
+            # the summary says Enter runs.
+            self.filter_ctrl.Bind(wx.EVT_TEXT_ENTER, lambda e: self._choose(first=True))
             self.list.Bind(wx.EVT_LIST_ITEM_ACTIVATED, lambda e: self._choose())
             self.Bind(wx.EVT_BUTTON, lambda e: self._choose(), id=wx.ID_OK)
         self._fill()
-        self.Bind(wx.EVT_WINDOW_DESTROY, self._on_destroy)
         wx.CallAfter((self.filter_ctrl if palette else self.list).SetFocus)
 
     def _on_text(self) -> None:
@@ -1546,19 +1547,31 @@ class CommandListDialog(wx.Dialog):
 
     NOTIFY_DELAY_MS = 350
 
+    def _summary_text(self) -> str:
+        """Nothing until something is typed: on opening, the dialog would
+        otherwise read it twice, and "Enter runs" would name whatever
+        happens to be first."""
+        if not self.filter_ctrl.GetValue().strip():
+            return ""
+        return commands.summary(self._shown, self.palette)
+
     def _notify(self) -> None:
-        """Tell the screen reader the filter's description has changed. NVDA
-        reads a change to the focused control's description; it is only
-        sent while the filter has focus, where it is about what you typed."""
-        if self._described is None or wx.Window.FindFocus() is not self.filter_ctrl:
+        """Typing has paused: show what the filter found, and tell the screen
+        reader the filter's description has changed. NVDA reads a change to
+        the focused control's description. It is only sent while the filter
+        has focus, where it is about what you typed."""
+        if not self.filter_ctrl:
+            return  # typed, then Enter before the pause: the dialog is gone
+        found = self._summary_text()
+        # Here rather than on every key: a changing label can be read out.
+        self.summary.SetLabel(found)
+        if self._described is None:
+            return
+        self._described.description = found
+        if wx.Window.FindFocus() is not self.filter_ctrl:
             return
         wx.Accessible.NotifyEvent(wx.ACC_EVENT_OBJECT_DESCRIPTIONCHANGE,
                                   self.filter_ctrl, wx.OBJID_CLIENT, wx.ACC_SELF)
-
-    def _on_destroy(self, event) -> None:
-        if event.GetEventObject() is self and self._notify_timer is not None:
-            self._notify_timer.Stop()
-        event.Skip()
 
     def _on_filter_key(self, event: wx.KeyEvent) -> None:
         """Down from the filter goes into the list, onto its first row."""
@@ -1585,10 +1598,6 @@ class CommandListDialog(wx.Dialog):
         label = f"{self._what}, {n} matching" if n else f"{self._what}, none matching"
         self.list_label.SetLabel("&" + label)
         self.list.SetName(label)
-        found = commands.summary(self._shown, self.palette)
-        self.summary.SetLabel(found)
-        if self._described is not None:
-            self._described.description = found
         self.list.DeleteAllItems()
         for i, c in enumerate(self._shown):
             for col, cell in enumerate(self.cells(c)):
@@ -1600,10 +1609,10 @@ class CommandListDialog(wx.Dialog):
             self.list.Select(0)
             self.list.Focus(0)
 
-    def _choose(self) -> None:
+    def _choose(self, first: bool = False) -> None:
         if not self.IsModal():
             return  # Enter on the list and the default button both ask
-        row = self.list.GetFirstSelected()
+        row = 0 if first else self.list.GetFirstSelected()
         if row < 0 or row >= len(self._shown):
             wx.Bell()
             return

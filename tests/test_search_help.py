@@ -1,4 +1,4 @@
-"""The Search dialog's operator help (#45)."""
+"""The Search dialog's qualifier help (#45)."""
 
 from __future__ import annotations
 
@@ -9,31 +9,31 @@ from saved_searches import KIND_ISSUES, KIND_REPOS
 
 
 @pytest.mark.parametrize("kind", [KIND_ISSUES, KIND_REPOS])
-def test_every_operator_has_a_meaning_and_an_example_that_uses_it(kind):
-    ops = search_help.operators_for(kind)
+def test_every_qualifier_has_a_meaning_and_an_example_that_uses_it(kind):
+    ops = search_help.qualifiers_for(kind)
     assert ops and len({o.op for o in ops}) == len(ops)
     for o in ops:
         assert o.meaning
         assert o.op.lstrip("-").rstrip(":") in o.example
 
 
-def test_each_kind_has_its_own_operators_and_documentation():
-    issue_ops = {o.op for o in search_help.operators_for(KIND_ISSUES)}
-    repo_ops = {o.op for o in search_help.operators_for(KIND_REPOS)}
+def test_each_kind_has_its_own_qualifiers_and_documentation():
+    issue_ops = {o.op for o in search_help.qualifiers_for(KIND_ISSUES)}
+    repo_ops = {o.op for o in search_help.qualifiers_for(KIND_REPOS)}
     assert "review-requested:" in issue_ops and "review-requested:" not in repo_ops
     assert "stars:" in repo_ops and "stars:" not in issue_ops
     assert search_help.DOCS[KIND_ISSUES] != search_help.DOCS[KIND_REPOS]
 
 
-def test_filter_matches_operator_meaning_or_example():
-    ops = search_help.operators_for(KIND_ISSUES)
+def test_filter_matches_qualifier_meaning_or_example():
+    ops = search_help.qualifiers_for(KIND_ISSUES)
     assert [o.op for o in search_help.matching(ops, "REVIEW")][:1] == ["review-requested:"]
     assert any(o.op == "-label:" for o in search_help.matching(ops, "excludes"))
     assert search_help.matching(ops, "  ") == ops
 
 
-LABEL = search_help.Operator("label:", "Has a label", "label:bug")
-OPEN = search_help.Operator("is:open", "Open", "is:open")
+LABEL = search_help.Qualifier("label:", "Has a label", "label:bug")
+OPEN = search_help.Qualifier("is:open", "Open", "is:open")
 
 
 @pytest.mark.parametrize("query, at, op, expected, cursor", [
@@ -47,5 +47,38 @@ OPEN = search_help.Operator("is:open", "Open", "is:open")
     # Inside a word: after the word, not into it
     ("braille", 4, OPEN, "braille is:open ", 16),
 ])
-def test_insert_operator_at_the_cursor(query, at, op, expected, cursor):
-    assert search_help.insert_operator(query, at, op) == (expected, cursor)
+def test_insert_qualifier_at_the_cursor(query, at, op, expected, cursor):
+    assert search_help.insert_qualifier(query, at, op) == (expected, cursor)
+
+
+def test_f1_in_the_search_dialog_is_help_not_qualifiers(monkeypatch):
+    # F1 is help everywhere; the qualifiers are Alt+Q (Insert Qualifier…).
+    import os
+    from types import SimpleNamespace
+    if not os.environ.get("CI"):
+        pytest.importorskip("wx")
+    import ghviewer
+    opened, shown = [], []
+    monkeypatch.setattr(ghviewer.webbrowser, "open", lambda url: opened.append(url) or True)
+    d = SimpleNamespace(_show_qualifiers=lambda: shown.append(1))
+    event = SimpleNamespace(GetKeyCode=lambda: ghviewer.wx.WXK_F1,
+                            HasAnyModifiers=lambda: False, Skip=lambda: None)
+    ghviewer.SearchDialog._on_char_hook(d, event)
+    assert opened == [ghviewer.SEARCH_HELP_URL] and shown == []
+
+
+def test_search_help_url_is_the_page_the_guide_build_makes():
+    # The site has a page per "## " section; a fragment on the index page
+    # lands on the contents. Renaming the section must break this test.
+    import importlib.util
+    from pathlib import Path
+    import ghviewer
+    root = Path(__file__).resolve().parent.parent
+    spec = importlib.util.spec_from_file_location("build_user_guide", root / "scripts" / "build_user_guide.py")
+    bug = importlib.util.module_from_spec(spec)
+    import sys
+    sys.modules.setdefault("build_user_guide", bug)  # dataclasses look the module up
+    spec.loader.exec_module(bug)
+    guide = (root / "docs" / "USER-GUIDE.md").read_text(encoding="utf-8")
+    assert "\n## Searching GitHub\n" in guide.replace("\r\n", "\n")
+    assert ghviewer.SEARCH_HELP_URL == ghviewer.USER_GUIDE_URL + bug.page_slug("Searching GitHub") + ".html"

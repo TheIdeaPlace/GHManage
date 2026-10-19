@@ -411,6 +411,7 @@ including the checks either side. The short version:
 - v0.9.1 — repository list includes organization repos (GraphQL, own and org listed separately); repo moved to TheIdeaPlace/GHManage
 - v0.9.2 — My Organizations entry (orgs with role and counts; Enter lists an org's repos) instead of org repos in the main list; Shared With Me; favorite repos from the repo list and open them here; no beep after list letter keys
 - v0.9.3 — Activity Enter opens issues/PRs, releases, commits and branches here (Backspace back); Search Operators help (F1 in the search dialog, search_help.py); Copy HTTPS/SSH clone URL; Go To submenu on repository context menus; View More on item context menus; list letters shown in menus
+- v0.9.4 (unreleased) — Delete removes any repo from the list (hidden_repos.json; File ▸ Hidden Repositories); Help ▸ Keyboard Shortcuts (Ctrl+F1) and Command Palette (Ctrl+Shift+P), commands.py; palette filter summary as the edit's accessible description; search dialog: "Search" box, Search Qualifiers on Alt+Q (Insert Qualifier…), F1 opens the guide's searching page
 
 ## Roadmap
 

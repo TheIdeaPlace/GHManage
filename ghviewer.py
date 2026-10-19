@@ -1457,6 +1457,21 @@ class SearchOperatorsDialog(wx.Dialog):
         self.EndModal(wx.ID_OK)
 
 
+class _DescribedAccessible(getattr(wx, "Accessible", object)):
+    """Gives a control an accessible description that can change, for the
+    screen reader to read when told it has (see CommandListDialog._notify).
+    Everything else is left to the control's own accessibility."""
+
+    def __init__(self, window: wx.Window) -> None:
+        super().__init__(window)
+        self.description = ""
+
+    def GetDescription(self, childId):
+        if childId == 0 and self.description:
+            return (wx.ACC_OK, self.description)
+        return (wx.ACC_NOT_IMPLEMENTED, "")
+
+
 class CommandListDialog(wx.Dialog):
     """A filterable table of commands: Help ▸ Keyboard Shortcuts (#3), and
     the command palette (#27), where Enter runs the chosen command.
@@ -1481,6 +1496,16 @@ class CommandListDialog(wx.Dialog):
         self.filter_ctrl = wx.TextCtrl(self, style=wx.TE_PROCESS_ENTER)
         self.filter_ctrl.SetName(label.replace("&", ""))
         outer.Add(self.filter_ctrl, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
+        # What the filter has found: on screen under it, and as the filter's
+        # accessible description, which the screen reader reads when you
+        # land on it and again after each pause in typing.
+        self.summary = wx.StaticText(self, label="")
+        outer.Add(self.summary, 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
+        self._described = None
+        if hasattr(wx, "Accessible"):  # Windows; VoiceOver waits for #54
+            self._described = _DescribedAccessible(self.filter_ctrl)
+            self.filter_ctrl.SetAccessible(self._described)
+        self._notify_timer: wx.CallLater | None = None
 
         self._what = "Commands" if palette else "Shortcuts"
         self.list_label = wx.StaticText(self, label=f"&{self._what}")
@@ -1500,15 +1525,53 @@ class CommandListDialog(wx.Dialog):
         outer.Add(buttons, 0, wx.ALIGN_RIGHT | wx.ALL, 10)
         self.SetSizerAndFit(outer)
 
-        self.filter_ctrl.Bind(wx.EVT_TEXT, lambda e: self._fill())
+        self.filter_ctrl.Bind(wx.EVT_TEXT, lambda e: self._on_text())
         self.filter_ctrl.Bind(wx.EVT_KEY_DOWN, self._on_filter_key)
         self.list.Bind(wx.EVT_KEY_DOWN, self._on_list_key)
         if palette:
-            self.filter_ctrl.Bind(wx.EVT_TEXT_ENTER, lambda e: self._choose())
+            # The first match, whichever row the list is on: that is what
+            # the summary says Enter runs.
+            self.filter_ctrl.Bind(wx.EVT_TEXT_ENTER, lambda e: self._choose(first=True))
             self.list.Bind(wx.EVT_LIST_ITEM_ACTIVATED, lambda e: self._choose())
             self.Bind(wx.EVT_BUTTON, lambda e: self._choose(), id=wx.ID_OK)
         self._fill()
         wx.CallAfter((self.filter_ctrl if palette else self.list).SetFocus)
+
+    def _on_text(self) -> None:
+        self._fill()
+        # Said once typing pauses, not on every key, so it doesn't talk
+        # over the letters being echoed.
+        if self._notify_timer is not None:
+            self._notify_timer.Stop()
+        self._notify_timer = wx.CallLater(self.NOTIFY_DELAY_MS, self._notify)
+
+    NOTIFY_DELAY_MS = 350
+
+    def _summary_text(self) -> str:
+        """Nothing until something is typed: on opening, the dialog would
+        otherwise read it twice, and "Enter runs" would name whatever
+        happens to be first."""
+        if not self.filter_ctrl.GetValue().strip():
+            return ""
+        return commands.summary(self._shown, self.palette)
+
+    def _notify(self) -> None:
+        """Typing has paused: show what the filter found, and tell the screen
+        reader the filter's description has changed. NVDA reads a change to
+        the focused control's description. It is only sent while the filter
+        has focus, where it is about what you typed."""
+        if not self.filter_ctrl:
+            return  # typed, then Enter before the pause: the dialog is gone
+        found = self._summary_text()
+        # Here rather than on every key: a changing label can be read out.
+        self.summary.SetLabel(found)
+        if self._described is None:
+            return
+        self._described.description = found
+        if wx.Window.FindFocus() is not self.filter_ctrl:
+            return
+        wx.Accessible.NotifyEvent(wx.ACC_EVENT_OBJECT_DESCRIPTIONCHANGE,
+                                  self.filter_ctrl, wx.OBJID_CLIENT, wx.ACC_SELF)
 
     def _on_filter_key(self, event: wx.KeyEvent) -> None:
         """Down from the filter goes into the list, onto its first row."""
@@ -1546,10 +1609,10 @@ class CommandListDialog(wx.Dialog):
             self.list.Select(0)
             self.list.Focus(0)
 
-    def _choose(self) -> None:
+    def _choose(self, first: bool = False) -> None:
         if not self.IsModal():
             return  # Enter on the list and the default button both ask
-        row = self.list.GetFirstSelected()
+        row = 0 if first else self.list.GetFirstSelected()
         if row < 0 or row >= len(self._shown):
             wx.Bell()
             return
@@ -2454,7 +2517,7 @@ class GhViewerFrame(wx.Frame):
                     keys = keys.replace("Ctrl+", "Cmd+")
                 sub = mi.GetSubMenu()
                 if sub is not None:
-                    walk(sub, f"{where} ▸ {name}")
+                    walk(sub, f"{where}{commands.MENU_SEP}{name}")
                     continue
                 checked = mi.IsCheckable() and mi.IsChecked()
                 out.append(commands.Command(name, keys, where, mi.GetId(), checked))
@@ -4065,7 +4128,7 @@ class GhViewerFrame(wx.Frame):
             if getattr(self, "view_mode", None) == VIEW_ISSUES and item.state == "OPEN":
                 lines.append("Keys: K checks, V review, D "
                              + ("ready for review" if item.is_draft else "back to draft")
-                             + "; Actions ▸ Pull Request to merge.")
+                             + "; Actions > Pull Request to merge.")
         lines.append("")
         lines.append("─" * 60)
         lines.append("")

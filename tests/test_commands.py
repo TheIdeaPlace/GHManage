@@ -27,9 +27,9 @@ def test_split_label(label, expected):
 
 CMDS = [
     Command("Open in Browser", "Ctrl+O", "Actions"),
-    Command("Copy Link", "Ctrl+Shift+C", "Actions ▸ Copy"),
+    Command("Copy Link", "Ctrl+Shift+C", "Actions > Copy"),
     Command("Refresh (R)", "Ctrl+R", "File"),
-    Command("Issues & PRs", "Ctrl+1", "View ▸ View Mode", checked=True),
+    Command("Issues & PRs", "Ctrl+1", "View > View Mode", checked=True),
 ]
 
 
@@ -132,9 +132,9 @@ def test_menu_walk_gives_every_command_with_its_menu():
         Command("Refresh (R)", "Ctrl+R", "File", 1),
         Command("Quit", "Ctrl+Q", "File", 2),
         Command("Close Issue/PR (C)", "Ctrl+W", "Actions", 3),
-        Command("Copy Link", "Ctrl+Shift+C", "Actions ▸ Copy", 5),
-        Command("Issues & PRs", "Ctrl+1", "View ▸ View Mode", 7, checked=True),
-        Command("Branches", "Ctrl+2", "View ▸ View Mode", 8),
+        Command("Copy Link", "Ctrl+Shift+C", "Actions > Copy", 5),
+        Command("Issues & PRs", "Ctrl+1", "View > View Mode", 7, checked=True),
+        Command("Branches", "Ctrl+2", "View > View Mode", 8),
     ]
 
 
@@ -190,3 +190,103 @@ def test_the_palette_leaves_itself_out(monkeypatch):
     f._menu_commands = lambda enabled_only: Frame._menu_commands(f, enabled_only)
     Frame.on_command_palette(f, None)
     assert int(ghviewer.ID_COMMAND_PALETTE) not in [c.id for c in seen["rows"]]
+
+
+def test_the_menu_separator_is_plain_text():
+    # "▸" is read as "black right-pointing small triangle".
+    assert commands.MENU_SEP == " > "
+    src = (ROOT / "ghviewer.py").read_text(encoding="utf-8")
+    spoken = [line for line in src.splitlines()
+              if "▸" in line and '"""' not in line and not line.strip().startswith("#")
+              and re.search(r"[\"'][^\"']*▸", line)]
+    assert not spoken, spoken
+
+
+@pytest.mark.parametrize("shown, palette, said", [
+    ([], True, "No commands match."),
+    ([], False, "No shortcuts match."),
+    ([Command("Branches", "Ctrl+2")], True, "1 command. Enter runs Branches, Ctrl+2."),
+    ([Command("Merge…"), Command("Close")], True, "2 commands. Enter runs Merge."),
+    ([Command("R", "R")] * 3, False, "3 shortcuts."),
+])
+def test_summary_says_how_many_and_what_enter_runs(shown, palette, said):
+    assert commands.summary(shown, palette) == said
+
+
+# ── The dialog: what the summary says is what Enter runs ───────────────
+
+Dialog = ghviewer.CommandListDialog
+
+
+class FakeLabel:
+    def __init__(self): self.label = ""
+    def SetLabel(self, text): self.label = text
+
+
+def _dialog(text, shown, selected=0, focus_on_filter=True):
+    d = SimpleNamespace(palette=True, _shown=shown, summary=FakeLabel(), ended=None)
+    d.filter_ctrl = SimpleNamespace(GetValue=lambda: text)
+    d.list = SimpleNamespace(GetFirstSelected=lambda: selected)
+    d._described = SimpleNamespace(description="")
+    d.IsModal = lambda: True
+    d.EndModal = lambda code: setattr(d, "ended", code)
+    d._summary_text = lambda: Dialog._summary_text(d)
+    return d
+
+
+SHOWN = [Command("Copy Link", "Ctrl+Shift+C"), Command("Copy Title"), Command("Copy SHA")]
+
+
+def test_enter_in_the_box_runs_the_first_match_even_after_moving_in_the_list():
+    # Review: Shift+Tab back from row 3 left Enter running row 3 while the
+    # summary said "Enter runs Copy Link".
+    d = _dialog("copy", SHOWN, selected=2)
+    Dialog._choose(d, first=True)
+    assert d.chosen is SHOWN[0]
+    d = _dialog("copy", SHOWN, selected=2)
+    Dialog._choose(d)          # Enter on the list runs the row you are on
+    assert d.chosen is SHOWN[2]
+
+
+def test_enter_in_the_box_with_nothing_matching_runs_nothing(monkeypatch):
+    bells = []
+    monkeypatch.setattr(ghviewer.wx, "Bell", lambda: bells.append(1))
+    d = _dialog("zzz", [])
+    Dialog._choose(d, first=True)
+    assert d.ended is None and bells == [1]
+
+
+def test_nothing_is_summarised_until_something_is_typed():
+    assert Dialog._summary_text(_dialog("  ", SHOWN)) == ""
+    assert Dialog._summary_text(_dialog("copy", SHOWN)) == (
+        "3 commands. Enter runs Copy Link, Ctrl+Shift+C.")
+
+
+def test_a_pause_updates_the_label_and_description_and_tells_the_screen_reader(monkeypatch):
+    sent = []
+    monkeypatch.setattr(ghviewer.wx.Accessible, "NotifyEvent", lambda *a: sent.append(a))
+    d = _dialog("copy", SHOWN)
+    monkeypatch.setattr(ghviewer.wx.Window, "FindFocus", lambda: d.filter_ctrl)
+    Dialog._notify(d)
+    said = "3 commands. Enter runs Copy Link, Ctrl+Shift+C."
+    assert d.summary.label == said and d._described.description == said
+    assert len(sent) == 1 and sent[0][0] == ghviewer.wx.ACC_EVENT_OBJECT_DESCRIPTIONCHANGE
+
+
+def test_no_event_when_the_box_does_not_have_focus(monkeypatch):
+    sent = []
+    monkeypatch.setattr(ghviewer.wx.Accessible, "NotifyEvent", lambda *a: sent.append(a))
+    monkeypatch.setattr(ghviewer.wx.Window, "FindFocus", lambda: None)
+    d = _dialog("copy", SHOWN)
+    Dialog._notify(d)
+    assert sent == [] and d._described.description.startswith("3 commands")
+
+
+def test_a_pause_after_the_dialog_has_gone_does_nothing(monkeypatch):
+    # Typing then Enter inside the pause: the timer fires on a deleted box.
+    sent = []
+    monkeypatch.setattr(ghviewer.wx.Accessible, "NotifyEvent", lambda *a: sent.append(a))
+    d = _dialog("copy", SHOWN)
+    d.filter_ctrl = None   # a deleted wx window is falsy
+    Dialog._notify(d)
+    assert sent == [] and d.summary.label == ""

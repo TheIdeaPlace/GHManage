@@ -16,11 +16,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
+# Between a menu and its submenu in "where": "View > View Mode". Plain ">"
+# rather than a typographic arrow, which screen readers read out by its
+# Unicode name ("black right-pointing small triangle").
+MENU_SEP = " > "
+
+
 @dataclass(frozen=True)
 class Command:
     name: str          # "Refresh (R)", as on the menu without its mnemonic
     keys: str = ""     # "Ctrl+R", or "" when it has no shortcut
-    where: str = ""    # "File", "Actions ▸ Copy", or for a list key "Issues list"
+    where: str = ""    # "File", "Actions > Copy", or for a list key "Issues list"
     id: int = 0        # the menu id the palette posts; 0 for a list key
     checked: bool = False  # a check or radio item that is on
 
@@ -94,3 +100,17 @@ LIST_KEYS: list[Command] = [
 def shortcut_rows(menu_commands: list[Command]) -> list[Command]:
     """Every shortcut: the list keys, then each menu command that has one."""
     return LIST_KEYS + [c for c in menu_commands if c.keys]
+
+
+def summary(shown: list[Command], palette: bool) -> str:
+    """What the filter has found, said after each pause in typing: how many
+    match and, in the palette, what Enter would run."""
+    if not shown:
+        return "No commands match." if palette else "No shortcuts match."
+    n = len(shown)
+    if not palette:
+        return f"{n} shortcut{'s' if n != 1 else ''}."
+    first = shown[0]
+    name = first.name.rstrip("…")  # "Enter runs Merge.", not "Merge…."
+    runs = f"{name}, {first.keys}" if first.keys else name
+    return f"{n} command{'s' if n != 1 else ''}. Enter runs {runs}."

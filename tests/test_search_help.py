@@ -59,9 +59,26 @@ def test_f1_in_the_search_dialog_is_help_not_qualifiers(monkeypatch):
         pytest.importorskip("wx")
     import ghviewer
     opened, shown = [], []
-    monkeypatch.setattr(ghviewer.webbrowser, "open", lambda url: opened.append(url))
+    monkeypatch.setattr(ghviewer.webbrowser, "open", lambda url: opened.append(url) or True)
     d = SimpleNamespace(_show_qualifiers=lambda: shown.append(1))
     event = SimpleNamespace(GetKeyCode=lambda: ghviewer.wx.WXK_F1,
                             HasAnyModifiers=lambda: False, Skip=lambda: None)
     ghviewer.SearchDialog._on_char_hook(d, event)
-    assert opened == [ghviewer.USER_GUIDE_URL + "#searching-github"] and shown == []
+    assert opened == [ghviewer.SEARCH_HELP_URL] and shown == []
+
+
+def test_search_help_url_is_the_page_the_guide_build_makes():
+    # The site has a page per "## " section; a fragment on the index page
+    # lands on the contents. Renaming the section must break this test.
+    import importlib.util
+    from pathlib import Path
+    import ghviewer
+    root = Path(__file__).resolve().parent.parent
+    spec = importlib.util.spec_from_file_location("build_user_guide", root / "scripts" / "build_user_guide.py")
+    bug = importlib.util.module_from_spec(spec)
+    import sys
+    sys.modules.setdefault("build_user_guide", bug)  # dataclasses look the module up
+    spec.loader.exec_module(bug)
+    guide = (root / "docs" / "USER-GUIDE.md").read_text(encoding="utf-8")
+    assert "\n## Searching GitHub\n" in guide.replace("\r\n", "\n")
+    assert ghviewer.SEARCH_HELP_URL == ghviewer.USER_GUIDE_URL + bug.page_slug("Searching GitHub") + ".html"

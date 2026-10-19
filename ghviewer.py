@@ -802,6 +802,9 @@ COUNTED_ENTRIES = {
 FAVORITE_LABEL = "Add or Remove Favorite (F)"
 
 USER_GUIDE_URL = "https://theideaplace.github.io/GHManage/"
+# The guide's site has a page per section (scripts/build_user_guide.py,
+# page_slug); this one is the Searching GitHub section's.
+SEARCH_HELP_URL = USER_GUIDE_URL + "searching-github.html"
 
 # Drill-down views: pressing Backspace in the key view returns to its parent.
 # These are the views you reach by activating an item in another view
@@ -1320,7 +1323,7 @@ class SearchDialog(wx.Dialog):
         outer.Add(self.kind_ctrl, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
 
         # A short label: it is said every time you land on the field. The
-        # examples are in the help below and under F1. No hint text either:
+        # examples are in the help below and under Insert Qualifier (Alt+Q). No hint text either:
         # it too was read every time you landed on the field.
         label = "&Search"
         outer.Add(wx.StaticText(self, label=label), 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
@@ -1364,7 +1367,9 @@ class SearchDialog(wx.Dialog):
     def _on_char_hook(self, event: wx.KeyEvent) -> None:
         """F1 is help: the guide's section on searching."""
         if event.GetKeyCode() == wx.WXK_F1 and not event.HasAnyModifiers():
-            webbrowser.open(USER_GUIDE_URL + "#searching-github")
+            if not webbrowser.open(SEARCH_HELP_URL):
+                wx.MessageBox(f"Couldn't open a browser. Help on searching is at {SEARCH_HELP_URL}",
+                              "Search GitHub", wx.OK | wx.ICON_INFORMATION, self)
             return
         event.Skip()
 

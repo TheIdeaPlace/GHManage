@@ -1314,7 +1314,7 @@ class SearchDialog(wx.Dialog):
                          style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
         outer = wx.BoxSizer(wx.VERTICAL)
 
-        label = "&Search for"
+        label = "Search &for"
         outer.Add(wx.StaticText(self, label=label), 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
         self.kind_ctrl = wx.Choice(self, choices=[name for _, name in self.KINDS])
         self.kind_ctrl.SetName(label.replace("&", ""))
@@ -1322,13 +1322,13 @@ class SearchDialog(wx.Dialog):
         self.kind_ctrl.SetSelection(keys.index(kind) if kind in keys else 0)
         outer.Add(self.kind_ctrl, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
 
-        # The example is in the label itself, so a screen reader says it as
-        # it lands on the field; the longer help below is for reading on.
-        label = "&Query, with GitHub's qualifiers, such as is:open label:bug author:@me"
+        # A short label: it is said every time you land on the field. The
+        # examples are in the help below and under F1. No hint text either,
+        # which screen readers read out as though it were already typed.
+        label = "&Search"
         outer.Add(wx.StaticText(self, label=label), 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
         self.query_ctrl = wx.TextCtrl(self, value=query)
         self.query_ctrl.SetName(label.replace("&", ""))
-        self.query_ctrl.SetHint("is:open label:bug repo:owner/name")
         outer.Add(self.query_ctrl, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
 
         help_text = (

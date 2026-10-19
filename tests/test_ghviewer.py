@@ -345,7 +345,7 @@ class FakeListBox:
 def _repo_frame(pinned=(), repo=None, view=ghviewer.VIEW_ISSUES, focus=None, loaded_once=False):
     f = _frame(
         repo=repo, view_mode=view, repo_list=FakeListBox(),
-        _pinned_repos=list(pinned), _hidden_repos=[], _all_repos=[], _repos_known=True,
+        _pinned_repos=list(pinned), _hidden_repos=[], _all_repos=[], _repos_known=True, _repos_failed=False,
         _repo_token=0, _repos_loaded_once=loaded_once, _category_counts={},
     )
     for name in ("_restore_repo_selection", "_category_label", "_refresh_category_labels",
@@ -599,6 +599,20 @@ def test_removing_waits_for_the_list_to_load():
     Frame.on_remove_repo(f, None)
     assert f._pinned_repos == ["me/a"]
     assert f.announced[-1].startswith("The repository list is still loading.")
+
+
+def test_removing_after_the_list_failed_to_load_says_so():
+    f = _repo_frame(pinned=["me/a"])
+    f._repos_known = False
+    f._refresh_repo_list = lambda: None
+    Frame._on_repos_error(f, "boom")
+    Frame._on_repos_loaded(f, [])
+    f.repo_list.SetSelection([d for _, d in f.repo_list.rows].index("me/a"))
+    reloads = []
+    f._load_repos = lambda: reloads.append(1)
+    Frame.on_remove_repo(f, None)
+    assert f._pinned_repos == ["me/a"] and reloads == [1]
+    assert "couldn't be loaded" in f.announced[-1]
 
 
 def test_a_pin_in_other_case_is_one_row_and_one_removal():

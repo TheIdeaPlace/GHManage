@@ -1512,8 +1512,11 @@ class CommandListDialog(wx.Dialog):
 
     def _on_filter_key(self, event: wx.KeyEvent) -> None:
         """Down from the filter goes into the list, onto its first row."""
-        if event.GetKeyCode() == wx.WXK_DOWN and self._shown:
-            self.list.SetFocus()
+        if event.GetKeyCode() == wx.WXK_DOWN:
+            if self._shown:
+                self.list.SetFocus()
+            else:
+                wx.Bell()  # nothing matches; otherwise silent
             return
         event.Skip()
 
@@ -1563,6 +1566,7 @@ class HiddenReposDialog(wx.Dialog):
         super().__init__(parent, title="Hidden Repositories",
                          style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
         self.show_again = show_again  # name -> None
+        self._busy = False
         outer = wx.BoxSizer(wx.VERTICAL)
         label = "&Hidden repositories"
         outer.Add(wx.StaticText(self, label=label), 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
@@ -1583,6 +1587,12 @@ class HiddenReposDialog(wx.Dialog):
         wx.CallAfter(self.list.SetFocus)
 
     def _show(self) -> None:
+        # Enter can arrive as both the default button and the list's
+        # double-click on some platforms; one keypress, one repository.
+        if self._busy:
+            return
+        self._busy = True
+        wx.CallAfter(setattr, self, "_busy", False)
         row = self.list.GetSelection()
         if row == wx.NOT_FOUND:
             wx.Bell()
@@ -1813,6 +1823,7 @@ class GhViewerFrame(wx.Frame):
         # Repositories from your account you removed from the list (#2).
         self._hidden_repos: list[str] = load_hidden()
         self._repos_known: bool = False
+        self._repos_failed: bool = False
         self.favorites: list[FavoriteEntry] = load_favorites()
 
         # View settings
@@ -2772,6 +2783,9 @@ class GhViewerFrame(wx.Frame):
     # ── Repo loading ───────────────────────────────────────────────────
 
     def _load_repos(self) -> None:
+        # Another account's repositories, or none yet: see on_remove_repo.
+        self._repos_known = False
+        self._repos_failed = False
         self._repo_token += 1
         token = self._repo_token
         self._announce("Loading your repositories…")
@@ -2969,6 +2983,7 @@ class GhViewerFrame(wx.Frame):
             self.repo_list.SetSelection(wx.NOT_FOUND)
 
     def _on_repos_error(self, msg: str) -> None:
+        self._repos_failed = True
         self._announce(f"Error loading repos: {msg}")
 
     def on_repo_activated(self, event: wx.CommandEvent) -> None:
@@ -5786,7 +5801,15 @@ class GhViewerFrame(wx.Frame):
         if not self._repos_known:
             # Until your repositories are in, there's no telling whether this
             # one is yours, and unpinning one that is would not last.
-            self._announce("The repository list is still loading. Try again when it has loaded.")
+            if self._repos_failed:
+                # Nothing else reloads the list short of switching account,
+                # so try again now rather than send you looking.
+                self._load_repos()
+                self._announce("Your repositories couldn't be loaded, so nothing can be "
+                               "removed yet. Loading them again; try once they are in.")
+            else:
+                self._announce("The repository list is still loading. "
+                               "Try again when it has loaded.")
             return
         self._pinned_repos = remove_pinned(name)
         # One from your GitHub account would come straight back on the next

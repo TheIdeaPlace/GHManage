@@ -175,7 +175,7 @@ def test_a_pinned_repository_can_be_removed():
 
 def test_a_saved_search_s_menu():
     entries = Frame._repo_context_entries(_repo_frame(), ghviewer.SEARCH_ENTRY_PREFIX + "Bugs")
-    assert [e[2] for e in entries] == ["Run Search\tEnter", "Remove Saved Search"]
+    assert [e[2] for e in entries] == ["Run Search\tEnter", "Remove Saved Search…\tDelete"]
 
 
 def test_a_category_just_opens():

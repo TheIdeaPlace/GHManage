@@ -1482,10 +1482,10 @@ class CommandListDialog(wx.Dialog):
         self.filter_ctrl.SetName(label.replace("&", ""))
         outer.Add(self.filter_ctrl, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
 
-        label = "&Commands" if palette else "&Shortcuts"
-        outer.Add(wx.StaticText(self, label=label), 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
+        self._what = "Commands" if palette else "Shortcuts"
+        self.list_label = wx.StaticText(self, label=f"&{self._what}")
+        outer.Add(self.list_label, 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
         self.list = wx.ListCtrl(self, style=wx.LC_REPORT | wx.LC_SINGLE_SEL, size=(720, 380))
-        self.list.SetName(label.replace("&", ""))
         for i, (heading, width) in enumerate(headings):
             self.list.InsertColumn(i, heading, width=width)
         outer.Add(self.list, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
@@ -1502,6 +1502,7 @@ class CommandListDialog(wx.Dialog):
 
         self.filter_ctrl.Bind(wx.EVT_TEXT, lambda e: self._fill())
         self.filter_ctrl.Bind(wx.EVT_KEY_DOWN, self._on_filter_key)
+        self.list.Bind(wx.EVT_KEY_DOWN, self._on_list_key)
         if palette:
             self.filter_ctrl.Bind(wx.EVT_TEXT_ENTER, lambda e: self._choose())
             self.list.Bind(wx.EVT_LIST_ITEM_ACTIVATED, lambda e: self._choose())
@@ -1516,8 +1517,21 @@ class CommandListDialog(wx.Dialog):
             return
         event.Skip()
 
+    def _on_list_key(self, event: wx.KeyEvent) -> None:
+        """Up from the first row goes back to the filter."""
+        if event.GetKeyCode() == wx.WXK_UP and self.list.GetFirstSelected() <= 0:
+            self.filter_ctrl.SetFocus()
+            return
+        event.Skip()
+
     def _fill(self) -> None:
         self._shown = commands.matching(self.rows, self.filter_ctrl.GetValue())
+        # How many match, in the list's name too: typing in the filter is
+        # otherwise silent, and with none matching Down does nothing.
+        n = len(self._shown)
+        label = f"{self._what}, {n} matching" if n else f"{self._what}, none matching"
+        self.list_label.SetLabel("&" + label)
+        self.list.SetName(label)
         self.list.DeleteAllItems()
         for i, c in enumerate(self._shown):
             for col, cell in enumerate(self.cells(c)):
@@ -1538,6 +1552,48 @@ class CommandListDialog(wx.Dialog):
             return
         self.chosen = self._shown[row]
         self.EndModal(wx.ID_OK)
+
+
+class HiddenReposDialog(wx.Dialog):
+    """File ▸ Hidden Repositories: the repositories removed from the list.
+    Enter or Show Again puts the selected one back and stays open for the
+    next; it closes itself when none are left."""
+
+    def __init__(self, parent: wx.Window, names: list[str], show_again) -> None:
+        super().__init__(parent, title="Hidden Repositories",
+                         style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
+        self.show_again = show_again  # name -> None
+        outer = wx.BoxSizer(wx.VERTICAL)
+        label = "&Hidden repositories"
+        outer.Add(wx.StaticText(self, label=label), 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
+        self.list = wx.ListBox(self, choices=names, style=wx.LB_SINGLE, size=(420, 260))
+        self.list.SetName(label.replace("&", ""))
+        self.list.SetSelection(0)
+        outer.Add(self.list, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
+        buttons = wx.BoxSizer(wx.HORIZONTAL)
+        show = wx.Button(self, label="&Show Again")
+        show.SetDefault()
+        close = wx.Button(self, wx.ID_CANCEL, "Close")
+        for b in (show, close):
+            buttons.Add(b, 0, wx.LEFT, 6)
+        outer.Add(buttons, 0, wx.ALIGN_RIGHT | wx.ALL, 10)
+        self.SetSizerAndFit(outer)
+        show.Bind(wx.EVT_BUTTON, lambda e: self._show())
+        self.list.Bind(wx.EVT_LISTBOX_DCLICK, lambda e: self._show())
+        wx.CallAfter(self.list.SetFocus)
+
+    def _show(self) -> None:
+        row = self.list.GetSelection()
+        if row == wx.NOT_FOUND:
+            wx.Bell()
+            return
+        self.show_again(self.list.GetString(row))
+        self.list.Delete(row)
+        if not self.list.GetCount():
+            self.EndModal(wx.ID_OK)
+            return
+        self.list.SetSelection(min(row, self.list.GetCount() - 1))
+        self.list.SetFocus()
 
 
 # ── Pull request dialogs ────────────────────────────────────────────────
@@ -1756,6 +1812,7 @@ class GhViewerFrame(wx.Frame):
         self._pinned_repos: list[str] = load_pinned()
         # Repositories from your account you removed from the list (#2).
         self._hidden_repos: list[str] = load_hidden()
+        self._repos_known: bool = False
         self.favorites: list[FavoriteEntry] = load_favorites()
 
         # View settings
@@ -2382,6 +2439,8 @@ class GhViewerFrame(wx.Frame):
                 if enabled_only and not mi.IsEnabled():
                     continue
                 name, keys = commands.split_label(mi.GetItemLabel())
+                if sys.platform == "darwin":
+                    keys = keys.replace("Ctrl+", "Cmd+")
                 sub = mi.GetSubMenu()
                 if sub is not None:
                     walk(sub, f"{where} ▸ {name}")
@@ -2413,6 +2472,8 @@ class GhViewerFrame(wx.Frame):
             (("Command", 330), ("Shortcut", 150), ("Menu", 240)),
             lambda c: (c.name + (", checked" if c.checked else ""), c.keys, c.where),
             palette=True)
+        # Copy, Favorite, New Issue and others act on the pane with focus.
+        before = self._current_focus()
         try:
             chosen = dlg.chosen if dlg.ShowModal() == wx.ID_OK else None
         finally:
@@ -2421,12 +2482,13 @@ class GhViewerFrame(wx.Frame):
             # After the palette has gone, so a command that opens a dialog of
             # its own opens it over the main window, and focus is back where
             # the command expects it.
-            wx.CallAfter(self._run_menu_command, chosen.id)
+            wx.CallAfter(self._run_menu_command, chosen.id, before)
 
-    def _run_menu_command(self, command_id: int) -> None:
-        """Do what choosing the menu item does."""
+    def _run_menu_command(self, command_id: int, focus=None) -> None:
+        """Do what choosing the menu item does, from the pane that had focus."""
+        if focus:  # a destroyed window is falsy
+            focus.SetFocus()
         event = wx.CommandEvent(wx.wxEVT_MENU, command_id)
-        event.SetEventObject(self)
         self.GetEventHandler().ProcessEvent(event)
 
     def on_user_guide(self, event) -> None:
@@ -2789,6 +2851,9 @@ class GhViewerFrame(wx.Frame):
         if token is not None and token != self._repo_token:
             return
         if isinstance(repos, RepoListing):
+            # Your own repositories are known now, so removing one can tell
+            # whether it is yours (see on_remove_repo).
+            self._repos_known = True
             listing, repos = repos, repos.repos
             self._orgs = listing.orgs
             # None is "more than a page", so there is something to show.
@@ -2819,15 +2884,17 @@ class GhViewerFrame(wx.Frame):
             self.repo_list.Append(f"🔍 {saved.name}",
                                   clientData=SEARCH_ENTRY_PREFIX + saved.name)
         # Pinned (added-by-URL) repos next, marked with a pin
+        # Lower case: GitHub names aren't case-sensitive, and a pin typed as
+        # Owner/Repo is the same repository as owner/repo from your account.
         shown = set()
         for name in self._pinned_repos:
-            if name in shown:
+            if name.lower() in shown:
                 continue
-            shown.add(name)
+            shown.add(name.lower())
             # If it's also in the gh list, reuse its description
             desc = ""
             for r in repos:
-                if r.get("nameWithOwner", "") == name:
+                if r.get("nameWithOwner", "").lower() == name.lower():
                     desc = r.get("description") or ""
                     break
             label = f"📌 {name} — {desc}" if desc else f"📌 {name}"
@@ -2839,12 +2906,12 @@ class GhViewerFrame(wx.Frame):
         n_hidden = 0
         for repo in repos:
             name = repo.get("nameWithOwner", "")
-            if name in shown:
+            if name.lower() in shown:
                 continue
             if name.lower() in hidden:
                 n_hidden += 1
                 continue
-            shown.add(name)
+            shown.add(name.lower())
             desc = repo.get("description") or ""
             label = f"{name} — {desc}" if desc else name
             self.repo_list.Append(label, clientData=name)
@@ -4782,11 +4849,11 @@ class GhViewerFrame(wx.Frame):
                     ("item", ID_COPY_CLONE_SSH, "Copy SSH Clone URL"),
                 ]),
             ]
-            entries += [("sep",), ("item", ID_REMOVE_REPO, "Remove from List	Delete")]
+            entries += [("sep",), ("item", ID_REMOVE_REPO, "Remove from List\tDelete")]
             return entries
         if isinstance(data, str) and data.startswith(SEARCH_ENTRY_PREFIX):
             return [("item", ID_REPO_OPEN, "Run Search\tEnter"),
-                    ("item", ID_REMOVE_REPO, "Remove Saved Search")]
+                    ("item", ID_REMOVE_REPO, "Remove Saved Search…\tDelete")]
         if data:
             return [("item", ID_REPO_OPEN, "Open\tEnter")]
         return []
@@ -5691,7 +5758,8 @@ class GhViewerFrame(wx.Frame):
                 break
 
     def on_remove_repo(self, event: wx.CommandEvent) -> None:
-        """Remove the currently selected repo from the pinned list."""
+        """Delete or File ▸ Remove from List: take the selected repository or
+        saved search out of the list."""
         idx = self.repo_list.GetSelection()
         if idx == wx.NOT_FOUND:
             self._announce("Select a repository in the list first.")
@@ -5704,12 +5772,23 @@ class GhViewerFrame(wx.Frame):
             return
         if name.startswith(SEARCH_ENTRY_PREFIX):
             label = name[len(SEARCH_ENTRY_PREFIX):]
+            # Asked first: unlike a repository, a saved search can't be
+            # brought back, and Delete is one stray keypress.
+            if wx.MessageBox(f"Remove the saved search '{label}'?\n\n"
+                             "It can't be brought back.", "Remove Saved Search",
+                             wx.YES_NO | wx.ICON_QUESTION, self) != wx.YES:
+                return
             self.saved_searches = remove_saved_search(label)
             self._refresh_repo_list()
+            self._select_repo_row(idx)
             self._announce(f"Removed the saved search '{label}'.")
             return
-        if name in self._pinned_repos:
-            self._pinned_repos = remove_pinned(name)
+        if not self._repos_known:
+            # Until your repositories are in, there's no telling whether this
+            # one is yours, and unpinning one that is would not last.
+            self._announce("The repository list is still loading. Try again when it has loaded.")
+            return
+        self._pinned_repos = remove_pinned(name)
         # One from your GitHub account would come straight back on the next
         # load, so it is hidden instead. A pinned one that is also yours
         # needs both, or it would only lose its pin.
@@ -5718,11 +5797,19 @@ class GhViewerFrame(wx.Frame):
         if from_account:
             self._hidden_repos = hide_repo(name)
         self._refresh_repo_list()
+        self._select_repo_row(idx)
         if from_account:
             self._announce(f"Removed {name} from the list. "
                            "File, Hidden Repositories brings it back.")
         else:
             self._announce(f"Removed {name} from the list.")
+
+    def _select_repo_row(self, row: int) -> None:
+        """After a removal: the row that took the removed one's place, or the
+        last, so you are where you were rather than somewhere else."""
+        count = self.repo_list.GetCount()
+        if count:
+            self.repo_list.SetSelection(min(row, count - 1))
 
     def on_hidden_repos(self, event) -> None:
         """File ▸ Hidden Repositories: put removed repositories back."""
@@ -5730,21 +5817,20 @@ class GhViewerFrame(wx.Frame):
             self._announce("No repositories are hidden.")
             return
         names = sorted(self._hidden_repos, key=str.lower)
-        dlg = wx.MultiChoiceDialog(
-            self, "Check the repositories to show in the list again:",
-            "Hidden Repositories", names)
+        shown: list[str] = []
+
+        def show_again(name: str) -> None:
+            self._unhide([name])
+            shown.append(name)
+
+        dlg = HiddenReposDialog(self, names, show_again)
         try:
-            if dlg.ShowModal() != wx.ID_OK:
-                return
-            chosen = [names[i] for i in dlg.GetSelections()]
+            dlg.ShowModal()
         finally:
             dlg.Destroy()
-        if not chosen:
-            self._announce("Nothing chosen; the hidden repositories stay hidden.")
-            return
-        self._unhide(chosen)
-        n = len(chosen)
-        self._announce(f"Showing {n} {'repository' if n == 1 else 'repositories'} again.")
+        if shown:
+            n = len(shown)
+            self._announce(f"Showing {n} {'repository' if n == 1 else 'repositories'} again.")
 
     def _unhide(self, names: list[str]) -> None:
         self._hidden_repos = unhide_repos(names)

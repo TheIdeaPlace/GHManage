@@ -24,12 +24,6 @@ class Command:
     id: int = 0        # the menu id the palette posts; 0 for a list key
     checked: bool = False  # a check or radio item that is on
 
-    @property
-    def text(self) -> str:
-        """The command as the palette lists it: name, state, then shortcut."""
-        text = self.name + (", checked" if self.checked else "")
-        return f"{text} ({self.keys})" if self.keys else text
-
 
 def split_label(label: str) -> tuple[str, str]:
     """A menu label's name and shortcut: "&Refresh (R)\\tCtrl+R" is

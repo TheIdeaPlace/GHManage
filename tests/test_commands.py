@@ -49,11 +49,6 @@ def test_names_that_start_with_the_text_come_first():
     assert [c.name for c in commands.matching(rows, "re")] == ["Reopen", "Search This Repository"]
 
 
-def test_palette_text_says_checked_and_the_shortcut():
-    assert CMDS[3].text == "Issues & PRs, checked (Ctrl+1)"
-    assert Command("Merge…").text == "Merge…"
-
-
 def test_shortcut_rows_are_list_keys_then_menu_commands_with_keys():
     rows = commands.shortcut_rows([Command("Merge…", "", "Actions"), CMDS[0]])
     assert rows[:len(commands.LIST_KEYS)] == commands.LIST_KEYS
@@ -123,7 +118,7 @@ def _frame():
             FakeItem(7, "Issues && PRs\tCtrl+1", checkable=True, checked=True),
             FakeItem(8, "Branches\tCtrl+2", checkable=True))))),
     )
-    f = SimpleNamespace(updated=0)
+    f = SimpleNamespace(updated=0, _current_focus=lambda: None)
     f._update_actions_menu = lambda: setattr(f, "updated", f.updated + 1)
     f.GetMenuBar = lambda: bar
     return f
@@ -154,3 +149,44 @@ def test_real_menu_shortcuts_are_not_used_twice():
     accels = re.findall(r'\.Append\w*\(\s*\w+,\s*"[^"\n]*\\t([^"\n]+)"', src)
     dupes = {a for a in accels if accels.count(a) > 1}
     assert not dupes, dupes
+
+
+def test_a_palette_command_runs_from_the_pane_that_had_focus():
+    order = []
+    focus = SimpleNamespace(SetFocus=lambda: order.append("focus"))
+    handler = SimpleNamespace(ProcessEvent=lambda e: order.append(("run", e.GetId())))
+    f = SimpleNamespace(GetEventHandler=lambda: handler)
+    Frame._run_menu_command(f, int(ghviewer.ID_COPY_LINK), focus)
+    assert order == ["focus", ("run", int(ghviewer.ID_COPY_LINK))]
+
+
+def test_the_palette_runs_nothing_when_closed(monkeypatch):
+    class Dlg:
+        chosen = Command("Copy Link", "", "Actions", 5)
+        def __init__(self, *a, **k): pass
+        def ShowModal(self): return ghviewer.wx.ID_CANCEL
+        def Destroy(self): pass
+    later = []
+    monkeypatch.setattr(ghviewer, "CommandListDialog", Dlg)
+    monkeypatch.setattr(ghviewer.wx, "CallAfter", lambda *a: later.append(a))
+    f = _frame()
+    f._menu_commands = lambda enabled_only: Frame._menu_commands(f, enabled_only)
+    Frame.on_command_palette(f, None)
+    assert later == []
+
+
+def test_the_palette_leaves_itself_out(monkeypatch):
+    seen = {}
+
+    class Dlg:
+        chosen = None
+        def __init__(self, parent, title, rows, *a, **k): seen["rows"] = rows
+        def ShowModal(self): return ghviewer.wx.ID_CANCEL
+        def Destroy(self): pass
+    monkeypatch.setattr(ghviewer, "CommandListDialog", Dlg)
+    f = _frame()
+    f.GetMenuBar().menus.append(("Help", FakeMenu(
+        FakeItem(int(ghviewer.ID_COMMAND_PALETTE), "Command Palette…\tCtrl+Shift+P"))))
+    f._menu_commands = lambda enabled_only: Frame._menu_commands(f, enabled_only)
+    Frame.on_command_palette(f, None)
+    assert int(ghviewer.ID_COMMAND_PALETTE) not in [c.id for c in seen["rows"]]

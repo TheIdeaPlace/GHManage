@@ -53,7 +53,11 @@ def _load_names(f: Path) -> list[str]:
 
 def save_pinned(repos: list[str]) -> None:
     """Persist the list of pinned repo names."""
-    _pinned_file().write_text(json.dumps(repos, indent=2), encoding="utf-8")
+    _save_names(_pinned_file(), repos)
+
+
+def _save_names(f: Path, repos: list[str]) -> None:
+    f.write_text(json.dumps(repos, indent=2), encoding="utf-8")
 
 
 def add_pinned(repo: str) -> list[str]:
@@ -73,7 +77,6 @@ def remove_pinned(repo: str) -> list[str]:
     return repos
 
 
-
 def load_hidden() -> list[str]:
     """The repos removed from the list (OWNER/NAME). [] if missing/invalid."""
     return _load_names(_hidden_file())
@@ -84,7 +87,7 @@ def hide_repo(repo: str) -> list[str]:
     repos = load_hidden()
     if repo.lower() not in (r.lower() for r in repos):
         repos.append(repo)
-        _hidden_file().write_text(json.dumps(repos, indent=2), encoding="utf-8")
+        _save_names(_hidden_file(), repos)
     return repos
 
 
@@ -92,5 +95,5 @@ def unhide_repos(names: list[str]) -> list[str]:
     """Put repos back in the list (case-insensitive). Returns the new hidden list."""
     gone = {n.lower() for n in names}
     repos = [r for r in load_hidden() if r.lower() not in gone]
-    _hidden_file().write_text(json.dumps(repos, indent=2), encoding="utf-8")
+    _save_names(_hidden_file(), repos)
     return repos

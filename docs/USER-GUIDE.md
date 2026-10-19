@@ -257,9 +257,9 @@ Lists load 100 items to begin with. `Ctrl++` (**File → View More**) loads the 
 
 ### Keyboard Shortcuts and the Command Palette
 
-**Help → Keyboard Shortcuts** (`Ctrl+F1`) lists every key in GHManage in a table of key, command and where it works: the single-letter keys in the lists as well as every menu shortcut. Type in **Filter** to narrow it, for example "delete" or "ctrl+shift". `Escape` closes it.
+**Help → Keyboard Shortcuts** (`Ctrl+F1`) lists every key in GHManage in a table of key, command and where it works: the single-letter keys in the lists as well as every menu shortcut. Type in **Filter** to narrow it, for example "delete" or "ctrl+shift"; the list's name says how many match, for example "Shortcuts, 4 matching". `Escape` closes it.
 
-**Help → Command Palette…** (`Ctrl+Shift+P`) finds a command by name and runs it, so you don't need to know which menu it is on or what its shortcut is. Type a few letters of the command, for example "branches" or "copy link", then `Down Arrow` to move into the list, and `Enter` to run the one you are on. `Enter` in the box runs the first match. It lists only the commands that apply where you are, each with its shortcut and the menu it is on, so it also teaches you the shortcut for next time.
+**Help → Command Palette…** (`Ctrl+Shift+P`) finds a command by name and runs it, so you don't need to know which menu it is on or what its shortcut is. Type a few letters of the command, for example "branches" or "copy link", then `Down Arrow` to move into the list, and `Enter` to run the one you are on. `Enter` in the box runs the first match, and `Up Arrow` on the first command goes back to the box. The list's name says how many match. The command runs as if you had chosen it from its menu, on whatever you were on before you opened the palette. It lists only the commands that apply where you are, each with its shortcut and the menu it is on, so it also teaches you the shortcut for next time.
 
 ---
 
@@ -313,9 +313,11 @@ A person's or organisation's address says so on the status bar; GHManage has no 
 
 That works for every repository in the list: ones you opened by address, and your own. GitHub still lists your own repositories each time the list loads, so GHManage keeps a note of the ones you removed and leaves them out. When some are left out, the status bar says how many when the list loads, for example "Loaded 20 repositories (3 hidden)."
 
-To put one back, choose **File → Hidden Repositories…**. It lists the repositories you have removed; check the ones you want and press `Enter`. Opening a hidden repository by its address with **File → Open Repository or Address…** brings it back too.
+After a removal you are on the row that took its place, so you can go on down the list.
 
-The entries at the top, organizations included, are always there. A saved search is removed the same way, and is gone for good.
+To put one back, choose **File → Hidden Repositories…**. It lists the repositories you have removed: move to one and press `Enter` (the **Show Again** button) to put it back in the list. The window stays open for the next one, and closes on its own when none are left; `Escape` closes it. Opening a hidden repository by its address with **File → Open Repository or Address…** brings it back too.
+
+The entries at the top, organizations included, are always there. A saved search is removed the same way, but it can't be brought back, so GHManage asks first.
 
 ### Forks
 

@@ -93,3 +93,14 @@ def test_pinned_ignores_junk(app_data):
     (app_data / "pinned_repos.json").write_text("nope", encoding="utf-8")
     assert pinned_repos.load_pinned() == []
 
+
+
+def test_hidden_round_trip_case_insensitive(app_data):
+    assert pinned_repos.load_hidden() == []
+    assert pinned_repos.hide_repo("Me/A") == ["Me/A"]
+    assert pinned_repos.hide_repo("me/a") == ["Me/A"]
+    assert pinned_repos.hide_repo("me/b") == ["Me/A", "me/b"]
+    assert pinned_repos.unhide_repos(["ME/A", "not/there"]) == ["me/b"]
+    assert pinned_repos.load_hidden() == ["me/b"]
+    (app_data / "hidden_repos.json").write_text("nope", encoding="utf-8")
+    assert pinned_repos.load_hidden() == []

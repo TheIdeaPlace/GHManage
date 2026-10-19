@@ -136,7 +136,8 @@ def test_a_repository_s_menu():
     for wanted in (ghviewer.ID_REPO_OPEN, ghviewer.ID_REPO_BROWSER, ghviewer.ID_NEW_ISSUE,
                    ghviewer.ID_SEARCH_REPO, ghviewer.ID_WATCH_SETTINGS, ghviewer.ID_COPY_LINK):
         assert wanted in ids
-    assert ghviewer.ID_REMOVE_REPO not in ids      # one of your own: can't be removed
+    # One of your own too: removing it hides it (#2).
+    assert ghviewer.ID_REMOVE_REPO in ids
 
 
 FAV = FakeItem(ghviewer.ID_FAVORITE, ghviewer.FAVORITE_LABEL)

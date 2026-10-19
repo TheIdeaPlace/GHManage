@@ -1335,15 +1335,15 @@ class SearchDialog(wx.Dialog):
             "  screen reader language:python stars:>50   (repositories)"
         )
         outer.Add(wx.StaticText(self, label=help_text), 0, wx.ALL, 10)
-        # F1 here is this help, not the user guide: the window's menus don't
-        # reach into a dialog, and this is the help you want while typing.
-        self.operators_btn = wx.Button(self, label="Search &Operators… (F1)")
-        outer.Add(self.operators_btn, 0, wx.LEFT | wx.RIGHT, 10)
+        # Alt+Q, from its label. F1 is help, as everywhere: the guide's
+        # section on searching (see _on_char_hook).
+        self.qualifiers_btn = wx.Button(self, label="Insert &Qualifier…")
+        outer.Add(self.qualifiers_btn, 0, wx.LEFT | wx.RIGHT, 10)
         outer.Add(self.CreateStdDialogButtonSizer(wx.OK | wx.CANCEL), 0, wx.ALIGN_RIGHT | wx.ALL, 10)
         self.SetSizerAndFit(outer)
         self.SetMinSize((520, -1))
         self.Bind(wx.EVT_BUTTON, self._on_ok, id=wx.ID_OK)
-        self.operators_btn.Bind(wx.EVT_BUTTON, lambda e: self._show_operators())
+        self.qualifiers_btn.Bind(wx.EVT_BUTTON, lambda e: self._show_qualifiers())
         self.Bind(wx.EVT_CHAR_HOOK, self._on_char_hook)
         wx.CallAfter(self.query_ctrl.SetFocus)
         # The last search, selected so typing replaces it; or a start such as
@@ -1362,40 +1362,41 @@ class SearchDialog(wx.Dialog):
         return self.KINDS[self.kind_ctrl.GetSelection()][0], self.query_ctrl.GetValue().strip()
 
     def _on_char_hook(self, event: wx.KeyEvent) -> None:
+        """F1 is help: the guide's section on searching."""
         if event.GetKeyCode() == wx.WXK_F1 and not event.HasAnyModifiers():
-            self._show_operators()
+            webbrowser.open(USER_GUIDE_URL + "#searching-github")
             return
         event.Skip()
 
-    def _show_operators(self) -> None:
-        """The operators for what is being searched; the one chosen goes into
+    def _show_qualifiers(self) -> None:
+        """The qualifiers for what is being searched; the one chosen goes into
         the query where the cursor was."""
         kind = self.KINDS[self.kind_ctrl.GetSelection()][0]
         at = self.query_ctrl.GetInsertionPoint()
-        dlg = SearchOperatorsDialog(self, kind)
+        dlg = SearchQualifiersDialog(self, kind)
         try:
             chosen = dlg.chosen if dlg.ShowModal() == wx.ID_OK else None
         finally:
             dlg.Destroy()
         if chosen is not None:
-            text, at = search_help.insert_operator(self.query_ctrl.GetValue(), at, chosen)
+            text, at = search_help.insert_qualifier(self.query_ctrl.GetValue(), at, chosen)
             self.query_ctrl.SetValue(text)
             self.query_ctrl.SetInsertionPoint(at)
         self.query_ctrl.SetFocus()
 
 
-class SearchOperatorsDialog(wx.Dialog):
-    """Search ▸ Search Operators (F1): GitHub's qualifiers for what is being
-    searched, as a table of operator, meaning and example, with a filter.
+class SearchQualifiersDialog(wx.Dialog):
+    """Search ▸ Insert Qualifier (Alt+Q): GitHub's qualifiers for what is being
+    searched, as a table of qualifier, meaning and example, with a filter.
     Enter puts the selected one into the query."""
 
     def __init__(self, parent: wx.Window, kind: str) -> None:
         what = "repositories" if kind == KIND_REPOS else "issues and pull requests"
-        super().__init__(parent, title=f"Search Operators for {what}",
+        super().__init__(parent, title=f"Search Qualifiers for {what}",
                          style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
         self.kind = kind
-        self.chosen: search_help.Operator | None = None
-        self.operators = search_help.operators_for(kind)
+        self.chosen: search_help.Qualifier | None = None
+        self.qualifiers = search_help.qualifiers_for(kind)
         self._shown: list = []
         outer = wx.BoxSizer(wx.VERTICAL)
 
@@ -1405,11 +1406,11 @@ class SearchOperatorsDialog(wx.Dialog):
         self.filter_ctrl.SetName(label.replace("&", ""))
         outer.Add(self.filter_ctrl, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
 
-        label = "&Operators"
+        label = "&Qualifiers"
         outer.Add(wx.StaticText(self, label=label), 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
         self.list = wx.ListCtrl(self, style=wx.LC_REPORT | wx.LC_SINGLE_SEL, size=(640, 300))
         self.list.SetName(label.replace("&", ""))
-        for i, (heading, width) in enumerate((("Operator", 170), ("Meaning", 300), ("Example", 220))):
+        for i, (heading, width) in enumerate((("Qualifier", 170), ("Meaning", 300), ("Example", 220))):
             self.list.InsertColumn(i, heading, width=width)
         outer.Add(self.list, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
 
@@ -1433,7 +1434,7 @@ class SearchOperatorsDialog(wx.Dialog):
         wx.CallAfter(self.list.SetFocus)
 
     def _fill(self) -> None:
-        self._shown = search_help.matching(self.operators, self.filter_ctrl.GetValue())
+        self._shown = search_help.matching(self.qualifiers, self.filter_ctrl.GetValue())
         self.list.DeleteAllItems()
         for i, o in enumerate(self._shown):
             self.list.InsertItem(i, o.op)

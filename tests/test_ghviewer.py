@@ -1860,3 +1860,17 @@ def test_stale_all_branches_results_are_dropped():
     f = _loaded_frame(ghviewer.ALL_BRANCHES, unread=0)
     Frame._on_all_branch_commits_loaded(f, 0, [_commit(["main"])], 5)
     assert f.statuses == [] and f._branches_unread == 0
+
+
+def test_switch_view_brings_back_the_columns_last_chosen():
+    import settings
+    settings.save_columns(ghviewer.COMMIT_SET, ["message", "sha"])
+    f = _frame(view_mode=ghviewer.VIEW_ISSUES, repo="o/r", page_size=100, current_limit=100,
+               _return_to=None)
+    for name in ("_rebuild_columns", "_rebuild_columns_menu", "_update_menu_checks"):
+        setattr(f, name, lambda: None)
+    f._restore_repo_selection = lambda previous: None
+    Frame._switch_view(f, ghviewer.VIEW_COMMITS, load=False)
+    assert f.columns == ["message", "sha"]
+    Frame._switch_view(f, ghviewer.VIEW_TAGS, load=False)
+    assert f.columns == list(ghviewer.TAG_SET.defaults)

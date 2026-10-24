@@ -24,6 +24,7 @@ from pinned_repos import (
     add_pinned, hide_repo, load_hidden, load_pinned, remove_pinned, unhide_repos,
 )
 import commands
+import settings
 import search_help
 from favorites import FavoriteEntry, load_favorites, save_favorites, is_favorite, toggle_favorite
 from saved_searches import (
@@ -45,7 +46,6 @@ from gh_data import (
     RepoEntry,
     ALL_BRANCHES,
     ALL_BRANCHES_PER_BRANCH_MAX,
-    DEFAULT_COLUMNS,
     GhError,
     Item,
     SORT_ORDERS,
@@ -1885,9 +1885,10 @@ class GhViewerFrame(wx.Frame):
         self.favorites: list[FavoriteEntry] = load_favorites()
 
         # View settings
-        self.columns: list[str] = list(DEFAULT_COLUMNS)
+        # The columns and the list mode are as last chosen (settings.py).
+        self.columns: list[str] = settings.load_columns(ISSUE_SET)
         self.sort_order: str = SORT_ORDERS[0]
-        self.list_mode: str = "quick"  # "quick" or "full"
+        self.list_mode: str = settings.load_list_mode()  # "quick" or "full"
         self.state_filter: str = "open"  # "open", "closed", "all"
         self.tab_filter: str = "both"  # "issues", "prs", "both"
         self.page_size: int = 100      # how many items to fetch per page
@@ -2704,7 +2705,7 @@ class GhViewerFrame(wx.Frame):
             self._return_to = None
         self.filter_text = ""  # clear filter on view switch
         # Update columns for the new view
-        self.columns = list(_view_columns(mode).defaults)
+        self.columns = settings.load_columns(_view_columns(mode))
         self._rebuild_columns()
         self._rebuild_columns_menu()
         self._update_menu_checks()
@@ -6338,6 +6339,7 @@ class GhViewerFrame(wx.Frame):
 
     def on_quick_mode(self, event: wx.CommandEvent) -> None:
         self.list_mode = "quick"
+        settings.save_list_mode(self.list_mode)
         self._update_menu_checks()
         self._update_mode_status()
         self._announce("Quick mode: compact display")
@@ -6346,6 +6348,7 @@ class GhViewerFrame(wx.Frame):
 
     def on_full_mode(self, event: wx.CommandEvent) -> None:
         self.list_mode = "full"
+        settings.save_list_mode(self.list_mode)
         self._update_menu_checks()
         self._update_mode_status()
         self._announce("Full mode: field names included for screen reader")
@@ -6373,9 +6376,14 @@ class GhViewerFrame(wx.Frame):
         if not col:
             return
         if col in self.columns:
+            if len(self.columns) == 1:
+                self._update_menu_checks()
+                self._announce("At least one column has to be shown.")
+                return
             self.columns.remove(col)
         else:
             self.columns.append(col)
+        settings.save_columns(_view_columns(self.view_mode), self.columns)
         self._update_menu_checks()
         self._rebuild_columns()
         self._refresh_list_display()

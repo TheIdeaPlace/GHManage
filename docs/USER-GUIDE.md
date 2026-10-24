@@ -879,7 +879,7 @@ With focus in the repository list, Copy Link, Copy Markdown Link, Copy Title and
 - **Quick Mode (compact)** shows just the values: "208  PR  OPEN  Fix the braille cursor". It is the default and the fastest to arrow through.
 - **Full Mode (field names for screen reader)** puts each column's name before its value: "Number: 208, PR, OPEN, Title: Fix the braille cursor". Columns whose value already says what it is (Type, State, Status and Result) are left without a name, so you hear "OPEN" rather than "State: OPEN". In Full mode the status bar message also repeats the row as you move to it.
 
-The current mode is shown on the status bar, and the status bar says "Quick mode: compact display" or "Full mode: field names included for screen reader" when you switch.
+The current mode is shown on the status bar, and the status bar says "Quick mode: compact display" or "Full mode: field names included for screen reader" when you switch. The mode you choose is kept for next time.
 
 ### Sort order
 
@@ -912,7 +912,9 @@ The current mode is shown on the status bar, and the status bar says "Quick mode
 | Activity | Actor, Action, Repository, Title, Date | |
 | Every list of repositories: Starred, Watched, Shared With Me, an organization's, and repository search | Repository, Description, Language, Stars, Pushed | Owner |
 
-The pull-request columns (Changes, Files, Base branch, Head branch) are empty on issues. Columns go back to the view's defaults when you leave it.
+The pull-request columns (Changes, Files, Base branch, Head branch) are empty on issues.
+
+GHManage remembers the columns you choose for each kind of list, including after you close it. Every list of repositories shares one choice, since they all show the same columns. At least one column always stays on.
 
 ---
 

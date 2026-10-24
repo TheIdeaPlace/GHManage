@@ -1138,6 +1138,7 @@ COMMIT_DEFAULT_COLUMNS = ["sha", "message", "author", "date"]
 # branch name, so it can't be mistaken for one.
 ALL_BRANCHES = "*"
 _ALL_BRANCHES_MAX = 100       # branches read, the most recently committed to first
+_BRANCH_LIST_PAGES_MAX = 10   # pages of 100 branch names read to find those
 _BRANCHES_PER_QUERY = 20      # keeps each history query small enough for GitHub
 ALL_BRANCHES_PER_BRANCH_MAX = 100  # one page of GraphQL history holds no more
 
@@ -1234,7 +1235,8 @@ def fetch_all_branch_commits(repo: Optional[str], limit: int = 100) -> tuple[lis
 
     GitHub has no list of every commit in a repository, so this reads the
     newest commits (at most 100) of each of the 100 most recently
-    committed-to branches, plus the default branch, merges them and keeps
+    committed-to branches (of the first 1,000 by name, on a repository with
+    more), plus the default branch, merges them and keeps
     the newest ``limit``. A commit on several branches is one commit naming
     each of them — each it is among the newest commits of, which for an
     older commit need not be every branch that has it.
@@ -1248,20 +1250,37 @@ def fetch_all_branch_commits(repo: Optional[str], limit: int = 100) -> tuple[lis
     owner, name = repo.split("/", 1)
     # json.dumps gives a valid GraphQL string literal, quotes escaped
     where = f"owner: {json.dumps(owner)}, name: {json.dumps(name)}"
-    node = _graphql_repository(_graphql(
-        f"{{ repository({where}) {{ defaultBranchRef {{ name }} "
-        f'refs(refPrefix: "refs/heads/", first: {_ALL_BRANCHES_MAX}, '
-        "orderBy: {field: TAG_COMMIT_DATE, direction: DESC}) { nodes { name } } } }"
-    ))
-    names = [r["name"] for r in (node.get("refs") or {}).get("nodes") or []
-             if isinstance(r, dict) and r.get("name")]
+    # GitHub can't list branches by their latest commit (TAG_COMMIT_DATE
+    # leaves them in no useful order; the live checks showed it), so read
+    # each one's latest commit date and sort here.
+    tips: list[tuple[str, str]] = []
+    default = ""
+    after = ""
+    for _ in range(_BRANCH_LIST_PAGES_MAX):
+        node = _graphql_repository(_graphql(
+            f"{{ repository({where}) {{ defaultBranchRef {{ name }} "
+            f'refs(refPrefix: "refs/heads/", first: 100{after}) '
+            "{ pageInfo { hasNextPage endCursor } "
+            "nodes { name target { ... on Commit { committedDate } } } } } }"
+        ))
+        default = (node.get("defaultBranchRef") or {}).get("name") or default
+        refs = node.get("refs") or {}
+        for r in refs.get("nodes") or []:
+            if isinstance(r, dict) and r.get("name"):
+                tips.append((r["name"], (r.get("target") or {}).get("committedDate") or ""))
+        page = refs.get("pageInfo") or {}
+        if not page.get("hasNextPage") or not page.get("endCursor"):
+            break
+        after = f", after: {json.dumps(page['endCursor'])}"
+    tips.sort(key=lambda t: _utc_date(t[1]), reverse=True)
+    names = [n for n, _ in tips]
     # The default branch leads, even when it is too quiet to be among the
     # most recently committed to.
-    default = (node.get("defaultBranchRef") or {}).get("name") or ""
     if default:
         if default in names:
             names.remove(default)
         names = [default] + names[:_ALL_BRANCHES_MAX - 1]
+    names = names[:_ALL_BRANCHES_MAX]
     if not names:
         return [], 0
 

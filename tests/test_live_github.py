@@ -54,9 +54,10 @@ def test_one_branch_commits_name_the_default_branch():
     assert all(c.branches == [default] for c in commits)
 
 
-def test_branches_come_most_recently_committed_to_first():
-    """The refs query orders branches by TAG_COMMIT_DATE, which GitHub only
-    documents for tags. Check it really sorts branches newest first."""
+def test_tag_commit_date_does_not_order_branches():
+    """Why fetch_all_branch_commits sorts branches itself: ordering refs by
+    TAG_COMMIT_DATE, documented only for tags, leaves branches unsorted.
+    If this starts failing, GitHub sorts them now and the code could ask it."""
     owner, name = BUSY_REPO.split("/", 1)
     node = gh_data._graphql_repository(gh_data._graphql(
         f'{{ repository(owner: "{owner}", name: "{name}") {{ '
@@ -65,9 +66,17 @@ def test_branches_come_most_recently_committed_to_first():
         "{ nodes { name target { ... on Commit { committedDate } } } } } }"
     ))
     dates = [r["target"]["committedDate"] for r in node["refs"]["nodes"]]
-    print(f"\n{len(dates)} branches, newest {dates[:1]}, oldest {dates[-1:]}")
-    assert len(dates) > 1
-    assert dates == sorted(dates, reverse=True)
+    assert len(dates) > 1 and dates != sorted(dates, reverse=True)
+
+
+def test_all_branches_reaches_the_newest_work():
+    """The newest commit on any branch is at least as new as the default
+    branch's, and the list draws on recently active branches."""
+    commits, _ = gh_data.fetch_all_branch_commits(BUSY_REPO, limit=100)
+    newest_default = gh_data.fetch_commits(BUSY_REPO, limit=1)[0].date
+    assert commits[0].date >= newest_default
+    print(f"\nnewest anywhere {commits[0].date} on {commits[0].branches}, "
+          f"newest on the default branch {newest_default}")
 
 
 def test_all_branches_against_github():

@@ -148,16 +148,26 @@ def _node(sha, date, msg="m"):
 class FakeGraphql:
     """Stands in for ``_graphql``: the branch list, then each branch's history."""
 
-    def __init__(self, names, default, history, fail=()):
+    def __init__(self, names, default, history, fail=(), tips=None, page=100):
         self.names, self.default, self.history, self.fail = names, default, history, fail
+        self.tips = tips or {}       # branch -> its latest commit's date
+        self.page = page
         self.queries: list[str] = []
 
     def __call__(self, query):
         self.queries.append(query)
         if "refs(" in query:
+            import re
+            cursor = re.search(r'after: "(\d+)"', query)
+            start = int(cursor.group(1)) if cursor else 0
+            names = self.names[start:start + self.page]
+            more = start + self.page < len(self.names)
             return {"data": {"repository": {
                 "defaultBranchRef": {"name": self.default},
-                "refs": {"nodes": [{"name": n} for n in self.names]}}}}
+                "refs": {
+                    "pageInfo": {"hasNextPage": more, "endCursor": str(start + self.page)},
+                    "nodes": [{"name": n, "target": {"committedDate": self.tips.get(n, "")}}
+                              for n in names]}}}}
         repo = {}
         for i, name in enumerate(self._asked(query)):
             if name in self.fail:
@@ -510,3 +520,38 @@ def test_a_failed_default_branch_lookup_is_tried_again(fake_gh):
     assert gh_data.fetch_default_branch("o/r") == ""
     assert gh_data.fetch_default_branch("o/r") == ""
     assert len(fake_gh.called_with(".default_branch")) == 2
+
+
+def _asked_branches(fake):
+    return [b for q in fake.queries if "refs(" not in q for b in FakeGraphql._asked(q)]
+
+
+def test_all_branches_reads_the_most_recently_committed_to(monkeypatch):
+    names = [f"b{i:03d}" for i in range(250)]
+    # Newest last by name, so taking them in GitHub's order would miss them
+    tips = {n: f"2026-01-01T00:{i // 60:02d}:{i % 60:02d}Z" for i, n in enumerate(names)}
+    fake = FakeGraphql(names, "b000", {n: [] for n in names}, tips=tips)
+    monkeypatch.setattr(gh_data, "_graphql", fake)
+    gh_data.fetch_all_branch_commits("o/r")
+    assert sum("refs(" in q for q in fake.queries) == 3     # 250 names, 100 a page
+    asked = _asked_branches(fake)
+    assert asked[0] == "b000"                                 # the default, though oldest
+    assert asked[1:3] == ["b249", "b248"] and len(asked) == 100
+    assert "b150" not in asked
+
+
+def test_all_branches_sorts_tips_in_any_offset(monkeypatch):
+    tips = {"west": "2026-01-01T23:00:00-08:00",   # 07:00Z on the 2nd
+            "utc": "2026-01-02T06:00:00Z"}
+    fake = FakeGraphql(["utc", "west"], "", {"utc": [], "west": []}, tips=tips)
+    monkeypatch.setattr(gh_data, "_graphql", fake)
+    gh_data.fetch_all_branch_commits("o/r")
+    assert _asked_branches(fake) == ["west", "utc"]
+
+
+def test_all_branches_stops_listing_after_ten_pages(monkeypatch):
+    names = [f"b{i:04d}" for i in range(1500)]
+    fake = FakeGraphql(names, "", {}, page=100)
+    monkeypatch.setattr(gh_data, "_graphql", fake)
+    gh_data.fetch_all_branch_commits("o/r")
+    assert sum("refs(" in q for q in fake.queries) == 10

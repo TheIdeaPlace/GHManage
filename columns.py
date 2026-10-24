@@ -70,10 +70,20 @@ def cell_text(col: ColumnDef, value: str, speak_labels: bool) -> str:
     return value
 
 
+def names_cell(position: int) -> bool:
+    """Whether the cell at this position may carry its column's name. Never
+    the first: it is the row's name, read first, and typing a letter in a
+    list jumps by it — "Repository: ..." on every row would stop "g" finding
+    the repositories starting with g."""
+    return position > 0
+
+
 def row_text(values: Mapping[str, str], columns: Sequence[ColumnDef],
              speak_labels: bool = True, separator: str = ", ") -> str:
-    """A whole row as one line, in column order, empty cells left out."""
-    parts = [cell_text(c, values.get(c.id, "") or "", speak_labels) for c in columns]
+    """A whole row as one line, in column order, empty cells left out. The
+    first column is never named (see ``names_cell``)."""
+    parts = [cell_text(c, values.get(c.id, "") or "", speak_labels and names_cell(i))
+             for i, c in enumerate(columns)]
     parts = [p.strip() for p in parts if p and p.strip()]
     if not parts:
         return ""
@@ -98,3 +108,47 @@ def reconcile(saved, column_set: ColumnSet) -> list[str]:
         if isinstance(col_id, str) and col_id in known and col_id not in out:
             out.append(col_id)
     return out or list(column_set.defaults)
+
+
+class LayoutEditor:
+    """The columns a list shows, being changed: what a Columns dialog does,
+    without the dialog, so the rules are the same wherever it's drawn and can
+    be tested without windows. Each action returns False when there was
+    nothing it could do (already at the top, the last column), for the
+    dialog to say so."""
+
+    def __init__(self, column_set: ColumnSet, shown) -> None:
+        self.column_set = column_set
+        self.shown: list[str] = reconcile(shown, column_set)
+
+    def available(self) -> list[str]:
+        """The columns not shown, in the set's order."""
+        return [i for i in self.column_set.ids if i not in self.shown]
+
+    def add(self, available_index: int) -> bool:
+        """Show an available column, at the end of the row."""
+        rest = self.available()
+        if not 0 <= available_index < len(rest):
+            return False
+        self.shown.append(rest[available_index])
+        return True
+
+    def remove(self, index: int) -> bool:
+        """Stop showing a column. The last one always stays."""
+        if not 0 <= index < len(self.shown) or len(self.shown) == 1:
+            return False
+        del self.shown[index]
+        return True
+
+    def move(self, index: int, target: int) -> bool:
+        if not (0 <= index < len(self.shown) and 0 <= target < len(self.shown)) \
+                or index == target:
+            return False
+        self.shown.insert(target, self.shown.pop(index))
+        return True
+
+    def reset(self) -> None:
+        self.shown = list(self.column_set.defaults)
+
+    def changed_from(self, saved) -> bool:
+        return self.shown != reconcile(saved, self.column_set)

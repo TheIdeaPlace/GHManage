@@ -107,7 +107,7 @@ def test_row_text_names_fields_but_not_states_and_skips_blanks():
     item = Item(4, "Crash on start", "open", "u", is_pr=False, author="")
     cols = ["number", "state", "title", "author"]
     assert row_text(item.to_row(cols), ISSUE_SET.defs(cols)) == (
-        "Number: 4, OPEN, Title: Crash on start"
+        "4, OPEN, Title: Crash on start"
     )
 
 

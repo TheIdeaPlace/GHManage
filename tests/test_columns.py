@@ -34,7 +34,7 @@ def test_spoken_label_can_differ_from_heading():
 
 def test_row_reads_in_column_order_skipping_blanks():
     values = {"sha": "a1b2c3d", "state": "open", "title": ""}
-    assert row_text(values, [SHA, STATE_COL, TITLE]) == "Commit: a1b2c3d, open"
+    assert row_text(values, [SHA, STATE_COL, TITLE]) == "a1b2c3d, open"
     assert row_text(values, [STATE_COL, SHA]) == "open, Commit: a1b2c3d"
 
 
@@ -97,11 +97,13 @@ def test_full_mode_cells_use_headings_and_leave_states_bare():
 
     item = Item(4, "Crash", "open", "u", is_pr=True, additions=3, deletions=1)
     f = types.SimpleNamespace(view_mode=ghviewer.VIEW_ISSUES, list_mode="full",
-                              columns=["number", "state", "+/-"])
+                              columns=["state", "number", "+/-"])
     label = lambda col: ghviewer.GhViewerFrame._item_label(f, item, col)
     assert label("number") == "Number: 4"
     assert label("+/-") == "Changes: +3/-1"
     assert label("state") == item.state_display
+    f.columns = ["number", "state"]
+    assert label("number") == "4"  # the first column is never named
     f.list_mode = "quick"
     assert label("number") == "4"
 
@@ -127,6 +129,9 @@ def test_favorites_cells_and_full_mode_announcement():
     Frame = ghviewer.GhViewerFrame
     assert Frame._item_label(f, fav, "repo") == "Repository: o/r"
     assert Frame._item_label(f, fav, "type") == "issue"
+    f.columns = ["repo", "title"]
+    assert Frame._item_label(f, fav, "repo") == "o/r"
+    f.columns = list(ghviewer.FAVORITES_SET.defaults)
     Frame.on_item_selected(f, None)
     assert said == ["issue, Repository: o/r, Title: #4 — Crash, Subtitle: open"]
 

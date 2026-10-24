@@ -4,7 +4,8 @@ kind of list shows and the order they're read in.
 Kept in ``settings.json`` in the per-user app data folder
 (``%APPDATA%\\ghmanage`` on Windows). What is chosen is also kept in memory
 for the session, so a write that fails — the file held open for a moment by
-antivirus or a backup — never undoes a choice; the next save tries again.
+antivirus or a backup — never undoes a choice; the next save, or quitting,
+tries again.
 A file that can be read but not understood is set aside as
 ``settings.json.bak-<time>`` and the defaults used, so one bad write never
 stops the app starting. A file that can't be read just now is left alone.
@@ -47,11 +48,12 @@ def _read_disk() -> dict | None:
             return data
     except (json.JSONDecodeError, UnicodeDecodeError):
         pass
-    _set_aside(f)
-    return {}
+    # Rubbish that can't be moved aside just now is left for next time,
+    # rather than written over without a backup.
+    return {} if _set_aside(f) else None
 
 
-def _set_aside(f: Path) -> None:
+def _set_aside(f: Path) -> bool:
     stamp = time.strftime("%Y%m%d-%H%M%S")
     backup, n = f.with_name(f"{f.name}.bak-{stamp}"), 1
     while backup.exists():
@@ -59,8 +61,9 @@ def _set_aside(f: Path) -> None:
         backup = f.with_name(f"{f.name}.bak-{stamp}-{n}")
     try:
         f.replace(backup)
+        return True
     except OSError:
-        pass
+        return False
 
 
 def _merged(disk: dict) -> dict:
@@ -90,18 +93,26 @@ def _save() -> None:
     tmp = f.with_name(f.name + ".tmp")
     try:
         tmp.write_text(json.dumps(_merged(disk), indent=2), encoding="utf-8")
+        for tries_left in (2, 1, 0):
+            try:
+                os.replace(tmp, f)
+                return
+            except OSError:
+                if tries_left:
+                    time.sleep(0.05)  # antivirus or OneDrive holding it a moment
     except OSError:
-        return
-    for attempt in range(3):
-        try:
-            os.replace(tmp, f)
-            return
-        except OSError:
-            time.sleep(0.05)  # antivirus or OneDrive holding it for a moment
+        pass
     try:
         tmp.unlink()
     except OSError:
         pass
+
+
+def flush() -> None:
+    """Try once more to write this session's choices; for quitting, in case
+    the file was busy each time one was made."""
+    if _session:
+        _save()
 
 
 def load_list_mode() -> str:

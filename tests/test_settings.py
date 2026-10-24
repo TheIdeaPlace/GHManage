@@ -112,39 +112,6 @@ def test_reconcile_falls_back_to_defaults():
 # ── The main window ─────────────────────────────────────────────────────
 
 
-def _toggle_frame(columns):
-    import ghviewer
-
-    said = []
-    item_id = object()
-    f = types.SimpleNamespace(
-        view_mode=ghviewer.VIEW_COMMITS, columns=list(columns),
-        _col_menu_items={item_id: None}, _announce=said.append,
-        _update_menu_checks=lambda: None, _rebuild_columns=lambda: None,
-        _refresh_list_display=lambda: None)
-    event = types.SimpleNamespace(GetId=lambda: item_id)
-
-    def toggle(col):
-        f._col_menu_items[item_id] = col
-        ghviewer.GhViewerFrame.on_column_toggled(f, event)
-    return f, said, toggle
-
-
-def test_turning_a_column_on_or_off_is_remembered():
-    f, said, toggle = _toggle_frame(["sha", "message"])
-    toggle("author")
-    assert settings.load_columns(COMMIT_SET) == ["sha", "message", "author"]
-    toggle("sha")
-    assert settings.load_columns(COMMIT_SET) == ["message", "author"]
-
-
-def test_the_last_column_stays():
-    f, said, toggle = _toggle_frame(["message"])
-    toggle("message")
-    assert f.columns == ["message"]
-    assert said == ["At least one column has to be shown."]
-
-
 def test_list_mode_is_remembered():
     import ghviewer
 
@@ -155,3 +122,23 @@ def test_list_mode_is_remembered():
     assert settings.load_list_mode() == "full"
     ghviewer.GhViewerFrame.on_quick_mode(f, None)
     assert settings.load_list_mode() == "quick"
+
+
+def test_quitting_writes_what_a_busy_file_kept_back(monkeypatch):
+    real = settings.os.replace
+    monkeypatch.setattr(settings.os, "replace", lambda a, b: (_ for _ in ()).throw(OSError()))
+    monkeypatch.setattr(settings.time, "sleep", lambda s: None)
+    settings.save_list_mode("full")
+    assert not _file().exists()
+    monkeypatch.setattr(settings.os, "replace", real)
+    settings.flush()
+    settings._session.clear()
+    assert settings.load_list_mode() == "full"
+
+
+def test_rubbish_that_cannot_be_moved_aside_is_not_written_over(monkeypatch):
+    _file().write_text("{bad", encoding="utf-8")
+    monkeypatch.setattr(settings.Path, "replace", lambda self, target: (_ for _ in ()).throw(OSError()))
+    settings.save_list_mode("full")
+    assert _file().read_text(encoding="utf-8") == "{bad"
+    assert settings.load_list_mode() == "full"  # kept for the session

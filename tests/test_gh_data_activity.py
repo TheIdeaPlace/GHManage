@@ -91,7 +91,7 @@ def test_starred_repos_become_entries(fake_gh):
                    "stars": "1,234", "pushed": "2026-10-01", "owner": "a"}
     assert two.to_row(["description"]) == {"description": "Two"}
     cols = ["repo", "language"]
-    assert row_text(one.to_row(cols), REPO_SET.defs(cols)) == "Repository: a/one, Language: Python"
+    assert row_text(one.to_row(cols), REPO_SET.defs(cols)) == "a/one, Language: Python"
 
 
 def test_watched_repos_use_subscriptions(fake_gh):
@@ -480,7 +480,7 @@ def test_summary_and_rows():
     assert row["actor"] == "alice" and row["nope"] == ""
     assert re.fullmatch(r"2026-10-0[456] \d\d:\d\d", row["date"])
     cols = ["actor", "title"]
-    assert row_text(ev.to_row(cols), ACTIVITY_SET.defs(cols)) == "Actor: alice, Title: Bug"
+    assert row_text(ev.to_row(cols), ACTIVITY_SET.defs(cols)) == "alice, Title: Bug"
 
 
 @pytest.mark.parametrize("iso, shown", [

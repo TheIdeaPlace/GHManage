@@ -7,6 +7,8 @@ import re
 import pytest
 
 import gh_data
+from columns import row_text
+from gh_columns import ACTIVITY_SET, REPO_SET
 from gh_data import GhError, parse_event
 
 
@@ -88,7 +90,8 @@ def test_starred_repos_become_entries(fake_gh):
     assert row == {"repo": "a/one", "description": "archived; fork", "language": "Python",
                    "stars": "1,234", "pushed": "2026-10-01", "owner": "a"}
     assert two.to_row(["description"]) == {"description": "Two"}
-    assert one.to_accessible_string(["repo", "language"]) == "repo: a/one, language: Python"
+    cols = ["repo", "language"]
+    assert row_text(one.to_row(cols), REPO_SET.defs(cols)) == "Repository: a/one, Language: Python"
 
 
 def test_watched_repos_use_subscriptions(fake_gh):
@@ -476,7 +479,8 @@ def test_summary_and_rows():
     row = ev.to_row(["actor", "action", "repo", "title", "date", "nope"])
     assert row["actor"] == "alice" and row["nope"] == ""
     assert re.fullmatch(r"2026-10-0[456] \d\d:\d\d", row["date"])
-    assert ev.to_accessible_string(["actor", "title"]) == "actor: alice, title: Bug"
+    cols = ["actor", "title"]
+    assert row_text(ev.to_row(cols), ACTIVITY_SET.defs(cols)) == "Actor: alice, Title: Bug"
 
 
 @pytest.mark.parametrize("iso, shown", [

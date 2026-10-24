@@ -40,7 +40,7 @@ UI thread via `wx.CallAfter`. Never touch wx widgets from a worker thread.
 
 ### gh_data.py
 
-- `Item` — dataclass for issues/PRs. Has `to_row(columns)` and `to_accessible_string(columns)`.
+- `Item` — dataclass for issues/PRs. Has `to_row(columns)`, a dict of column id to value.
 - `_run_gh(args)` — runs `gh` subprocess, returns stdout, raises `GhError` on failure.
 - `fetch_issues(repo, state, limit)` / `fetch_prs(repo, state, limit)` — list issues/PRs.
 - `fetch_branches(repo, limit)` — list branches via REST API.
@@ -289,7 +289,13 @@ UI thread via `wx.CallAfter`. Never touch wx widgets from a worker thread.
   so Tab never lands on them.
 - **F6 loop** — `_cycle_pane` in `on_char_hook`: repo list → item list → details → status bar,
   wrapping; Shift+F6 reverses. A new pane goes in `_focus_panes`.
-- **Full mode** prefixes field names in list rows: `"number: 208, type: PR, state: OPEN"`.
+- **Full mode** prefixes field names in list rows: `"Number: 208, PR, OPEN, Title: ..."`.
+  Every column is described once in `gh_columns.py` (`ColumnDef`: heading, kind, width), and
+  each view's columns are a `ColumnSet` there. A new column needs a `CATALOG` entry with a
+  heading in plain words ("Commit", not "sha"). Make it `STATE` when its value says what it is
+  ("open", "success") so Full mode doesn't name it; Yes/No columns stay `TEXT`, since "Yes"
+  means nothing without its name. `columns.py` builds the cells and rows (`cell_text`,
+  `row_text`) and knows nothing about GitHub or wx, so it can move into app-kit.
 - **Keyboard first.** Every action has a keybinding. Never add a feature that requires mouse-only access.
 - **No patronizing hand-holding.** Don't add "Welcome!" dialogs or verbose tooltips. Power users want speed.
 - **Comment navigation** uses Alt+N/Alt+P with position tracking via `_comment_positions`.

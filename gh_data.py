@@ -161,12 +161,6 @@ class Item:
         }
         return {col: mapping.get(col, "") for col in columns}
 
-    def to_accessible_string(self, columns: list[str]) -> str:
-        """Return a screen-reader-friendly string with field names included."""
-        row = self.to_row(columns)
-        parts = [f"{col}: {val}" for col, val in row.items() if val]
-        return ", ".join(parts)
-
 
 # ── Column definitions ─────────────────────────────────────────────────
 
@@ -437,11 +431,6 @@ class Label:
         }
         return {col: mapping.get(col, "") for col in columns}
 
-    def to_accessible_string(self, columns: list[str]) -> str:
-        row = self.to_row(columns)
-        parts = [f"{col}: {val}" for col, val in row.items() if val]
-        return ", ".join(parts)
-
 
 LABEL_COLUMNS = ["label", "description", "color", "default"]
 LABEL_DEFAULT_COLUMNS = ["label", "description", "color"]
@@ -626,10 +615,6 @@ class OrgEntry:
         mapping = {"organization": self.login, "role": self.role, "repositories": count}
         return {col: mapping.get(col, "") for col in columns}
 
-    def to_accessible_string(self, columns: list[str]) -> str:
-        row = self.to_row(columns)
-        return ", ".join(f"{col}: {val}" for col, val in row.items() if val)
-
 
 @dataclass
 class RepoListing:
@@ -805,10 +790,6 @@ class RepoEntry:
             "owner": self.owner,
         }
         return {col: mapping.get(col, "") for col in columns}
-
-    def to_accessible_string(self, columns: list[str]) -> str:
-        row = self.to_row(columns)
-        return ", ".join(f"{col}: {val}" for col, val in row.items() if val)
 
 
 def _repo_entry(raw: dict) -> RepoEntry:
@@ -1034,11 +1015,6 @@ class Branch:
         }
         return {col: mapping.get(col, "") for col in columns}
 
-    def to_accessible_string(self, columns: list[str]) -> str:
-        row = self.to_row(columns)
-        parts = [f"{col}: {val}" for col, val in row.items() if val]
-        return ", ".join(parts)
-
 
 BRANCH_COLUMNS = ["branch", "last commit", "author", "date", "protected", "ahead", "behind"]
 BRANCH_DEFAULT_COLUMNS = ["branch", "last commit", "author", "date"]
@@ -1124,11 +1100,6 @@ class Commit:
             "+/-": f"+{self.additions}/-{self.deletions}" if self.additions or self.deletions else "",
         }
         return {col: mapping.get(col, "") for col in columns}
-
-    def to_accessible_string(self, columns: list[str]) -> str:
-        row = self.to_row(columns)
-        parts = [f"{col}: {val}" for col, val in row.items() if val]
-        return ", ".join(parts)
 
 
 COMMIT_COLUMNS = ["sha", "message", "author", "date", "branch", "files", "+/-"]
@@ -1381,11 +1352,6 @@ class Tag:
         }
         return {col: mapping.get(col, "") for col in columns}
 
-    def to_accessible_string(self, columns: list[str]) -> str:
-        row = self.to_row(columns)
-        parts = [f"{col}: {val}" for col, val in row.items() if val]
-        return ", ".join(parts)
-
 
 TAG_COLUMNS = ["tag", "commit"]
 TAG_DEFAULT_COLUMNS = ["tag", "commit"]
@@ -1450,11 +1416,6 @@ class ReleaseAsset:
         }
         return {col: mapping.get(col, "") for col in columns}
 
-    def to_accessible_string(self, columns: list[str]) -> str:
-        row = self.to_row(columns)
-        parts = [f"{col}: {val}" for col, val in row.items() if val]
-        return ", ".join(parts)
-
 
 ASSET_COLUMNS = ["name", "downloads", "size", "date", "#"]
 ASSET_DEFAULT_COLUMNS = ["name", "downloads", "size", "date"]
@@ -1489,11 +1450,6 @@ class Release:
             "assets": str(len(self.assets)),
         }
         return {col: mapping.get(col, "") for col in columns}
-
-    def to_accessible_string(self, columns: list[str]) -> str:
-        row = self.to_row(columns)
-        parts = [f"{col}: {val}" for col, val in row.items() if val]
-        return ", ".join(parts)
 
 
 RELEASE_COLUMNS = ["tag", "name", "date", "downloads", "assets", "draft", "prerelease"]
@@ -1603,11 +1559,6 @@ class WorkflowRun:
         }
         return {col: mapping.get(col, "") for col in columns}
 
-    def to_accessible_string(self, columns: list[str]) -> str:
-        row = self.to_row(columns)
-        parts = [f"{col}: {val}" for col, val in row.items() if val]
-        return ", ".join(parts)
-
 
 WORKFLOW_COLUMNS = ["name", "status", "result", "branch", "event", "date", "#"]
 WORKFLOW_DEFAULT_COLUMNS = ["name", "status", "result", "branch", "date"]
@@ -1674,11 +1625,6 @@ class Artifact:
             "#": str(self.id),
         }
         return {col: mapping.get(col, "") for col in columns}
-
-    def to_accessible_string(self, columns: list[str]) -> str:
-        row = self.to_row(columns)
-        parts = [f"{col}: {val}" for col, val in row.items() if val]
-        return ", ".join(parts)
 
 
 ARTIFACT_COLUMNS = ["name", "size", "expired", "date", "#"]
@@ -1747,11 +1693,6 @@ class Workflow:
             "#": str(self.id),
         }
         return {col: mapping.get(col, "") for col in columns}
-
-    def to_accessible_string(self, columns: list[str]) -> str:
-        row = self.to_row(columns)
-        parts = [f"{col}: {val}" for col, val in row.items() if val]
-        return ", ".join(parts)
 
 
 WORKFLOW_DEF_COLUMNS = ["name", "state", "path", "#"]
@@ -2115,11 +2056,6 @@ class PagesBuild:
         }
         return {col: mapping.get(col, "") for col in columns}
 
-    def to_accessible_string(self, columns: list[str]) -> str:
-        row = self.to_row(columns)
-        parts = [f"{col}: {val}" for col, val in row.items() if val]
-        return ", ".join(parts)
-
 
 PAGES_COLUMNS = ["status", "commit", "pusher", "date", "duration", "kind", "error", "#"]
 PAGES_DEFAULT_COLUMNS = ["status", "commit", "pusher", "date", "duration"]
@@ -2256,11 +2192,6 @@ class PagesFile:
             "size": self.size_human(),
         }
         return {col: mapping.get(col, "") for col in columns}
-
-    def to_accessible_string(self, columns: list[str]) -> str:
-        row = self.to_row(columns)
-        parts = [f"{col}: {val}" for col, val in row.items() if val]
-        return ", ".join(parts)
 
 
 PAGEFILE_COLUMNS = ["page", "url", "size"]
@@ -2455,10 +2386,6 @@ class ActivityEvent:
             "date": _local_time(self.created_at),
         }
         return {col: mapping.get(col, "") for col in columns}
-
-    def to_accessible_string(self, columns: list[str]) -> str:
-        row = self.to_row(columns)
-        return ", ".join(f"{col}: {val}" for col, val in row.items() if val)
 
 
 def _ref_name(ref: str) -> str:
@@ -2917,10 +2844,6 @@ class Notification:
             "updated": _local_time(self.updated_at),
         }
         return {col: mapping.get(col, "") for col in columns}
-
-    def to_accessible_string(self, columns: list[str]) -> str:
-        row = self.to_row(columns)
-        return ", ".join(f"{col}: {val}" for col, val in row.items() if val)
 
 
 def _notification_url(subject_type: str, api_url: str, repo: str) -> tuple[str, int, bool]:
@@ -3386,10 +3309,6 @@ class WorkflowJob:
             "failed step": failed[0].name if failed else "",
         }
         return {col: mapping.get(col, "") for col in columns}
-
-    def to_accessible_string(self, columns: list[str]) -> str:
-        row = self.to_row(columns)
-        return ", ".join(f"{col}: {val}" for col, val in row.items() if val)
 
 
 def _repo_args(repo: Optional[str]) -> list[str]:

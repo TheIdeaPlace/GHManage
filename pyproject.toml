@@ -27,7 +27,8 @@ dev = [
 ghviewer = "ghviewer:main"
 
 [tool.setuptools]
-py-modules = ["ghviewer", "gh_data", "updater", "version", "favorites", "pinned_repos", "saved_searches"]
+py-modules = ["ghviewer", "gh_data", "updater", "version", "favorites", "pinned_repos", "saved_searches",
+              "commands", "search_help", "columns", "gh_columns"]
 
 [tool.setuptools.dynamic]
 version = { attr = "version.__version__" }

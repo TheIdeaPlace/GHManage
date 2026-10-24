@@ -1466,7 +1466,7 @@ def test_organizations_list_names_role_and_count(call_later):
     Frame._on_orgs_loaded(f, 1, list(ORGS))
     assert f.statuses[-1][0] == "My Organizations — 2 organizations, the ones you own first."
     assert f._category_counts == {ghviewer.MY_ORGS_ENTRY: 2}
-    assert ORGS[0].to_row(ghviewer.ORG_COLUMNS) == {
+    assert ORGS[0].to_row(ghviewer.ORG_SET.ids) == {
         "organization": "mine", "role": "owner", "repositories": "13"}
     assert ORGS[1].to_row(["role", "repositories"]) == {"role": "member", "repositories": "1,108"}
 

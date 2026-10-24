@@ -31,46 +31,24 @@ from saved_searches import (
     remove_saved_search,
 )
 
+from columns import ColumnSet, cell_text, row_text
+from gh_columns import (
+    ACTIVITY_SET, ARTIFACT_SET, ASSET_SET, BRANCH_SET, COMMIT_SET, FAVORITES_SET,
+    ISSUE_SET, JOB_SET, LABEL_SET, MY_WORK_SET, NOTIFICATION_SET, ORG_SET,
+    PAGEFILE_SET, PAGES_SET, RELEASE_SET, REPO_SET, SEARCH_ITEM_SET, TAG_SET,
+    WORKFLOW_RUN_SET, WORKFLOW_SET,
+)
 from gh_data import (
-    ACTIVITY_COLUMNS,
-    ACTIVITY_DEFAULT_COLUMNS,
     ACTIVITY_MAX,
-    ALL_COLUMNS,
     ActivityEvent,
-    NOTIFICATION_COLUMNS,
-    NOTIFICATION_DEFAULT_COLUMNS,
     Notification,
-    REPO_COLUMNS,
-    REPO_DEFAULT_COLUMNS,
     RepoEntry,
-    BRANCH_COLUMNS,
-    BRANCH_DEFAULT_COLUMNS,
     ALL_BRANCHES,
     ALL_BRANCHES_PER_BRANCH_MAX,
-    COMMIT_COLUMNS,
-    COMMIT_DEFAULT_COLUMNS,
     DEFAULT_COLUMNS,
     GhError,
     Item,
-    LABEL_COLUMNS,
-    LABEL_DEFAULT_COLUMNS,
-    RELEASE_COLUMNS,
-    RELEASE_DEFAULT_COLUMNS,
     SORT_ORDERS,
-    TAG_COLUMNS,
-    TAG_DEFAULT_COLUMNS,
-    WORKFLOW_COLUMNS,
-    WORKFLOW_DEFAULT_COLUMNS,
-    WORKFLOW_DEF_COLUMNS,
-    WORKFLOW_DEF_DEFAULT_COLUMNS,
-    ARTIFACT_COLUMNS,
-    ARTIFACT_DEFAULT_COLUMNS,
-    ASSET_COLUMNS,
-    ASSET_DEFAULT_COLUMNS,
-    PAGES_COLUMNS,
-    PAGES_DEFAULT_COLUMNS,
-    PAGEFILE_COLUMNS,
-    PAGEFILE_DEFAULT_COLUMNS,
     Artifact,
     Branch,
     Commit,
@@ -97,8 +75,6 @@ from gh_data import (
     review_pr,
     set_pr_ready,
     update_pr_branch,
-    JOB_COLUMNS,
-    JOB_DEFAULT_COLUMNS,
     WorkflowJob,
     cancel_workflow_run,
     fetch_failed_log,
@@ -107,10 +83,6 @@ from gh_data import (
     fetch_run_jobs,
     fetch_workflow_run,
     rerun_workflow_run,
-    MY_WORK_COLUMNS,
-    MY_WORK_DEFAULT_COLUMNS,
-    SEARCH_ITEM_COLUMNS,
-    SEARCH_ITEM_DEFAULT_COLUMNS,
     SEARCH_MAX,
     fetch_my_work,
     search_issues,
@@ -168,8 +140,6 @@ from gh_data import (
     fetch_shared_repos,
     OrgEntry,
     RepoListing,
-    ORG_COLUMNS,
-    ORG_DEFAULT_COLUMNS,
     open_in_browser,
     parent_repo,
     reopen_item,
@@ -830,37 +800,47 @@ PARENT_VIEW = {
     VIEW_ORG: VIEW_ORGS,
 }
 
-# Columns for the favorites view (mixed item types)
-FAVORITES_COLUMNS = ["type", "repo", "title", "subtitle"]
-FAVORITES_DEFAULT_COLUMNS = ["type", "repo", "title", "subtitle"]
-
-# Column defaults per view mode
+# The columns each view can show (gh_columns). Views listing the same kind
+# of thing share a set: every list of repositories has the same columns.
 VIEW_COLUMNS = {
-    VIEW_ISSUES: (DEFAULT_COLUMNS, ALL_COLUMNS),
-    VIEW_BRANCHES: (BRANCH_DEFAULT_COLUMNS, BRANCH_COLUMNS),
-    VIEW_COMMITS: (COMMIT_DEFAULT_COLUMNS, COMMIT_COLUMNS),
-    VIEW_TAGS: (TAG_DEFAULT_COLUMNS, TAG_COLUMNS),
-    VIEW_RELEASES: (RELEASE_DEFAULT_COLUMNS, RELEASE_COLUMNS),
-    VIEW_WORKFLOWS: (WORKFLOW_DEF_DEFAULT_COLUMNS, WORKFLOW_DEF_COLUMNS),
-    VIEW_WORKFLOW: (WORKFLOW_DEFAULT_COLUMNS, WORKFLOW_COLUMNS),
-    VIEW_ARTIFACTS: (ARTIFACT_DEFAULT_COLUMNS, ARTIFACT_COLUMNS),
-    VIEW_JOBS: (JOB_DEFAULT_COLUMNS, JOB_COLUMNS),
-    VIEW_ASSETS: (ASSET_DEFAULT_COLUMNS, ASSET_COLUMNS),
-    VIEW_LABELS: (LABEL_DEFAULT_COLUMNS, LABEL_COLUMNS),
-    VIEW_FAVORITES: (FAVORITES_DEFAULT_COLUMNS, FAVORITES_COLUMNS),
-    VIEW_PAGES: (PAGES_DEFAULT_COLUMNS, PAGES_COLUMNS),
-    VIEW_PAGEFILES: (PAGEFILE_DEFAULT_COLUMNS, PAGEFILE_COLUMNS),
-    VIEW_ACTIVITY: (ACTIVITY_DEFAULT_COLUMNS, ACTIVITY_COLUMNS),
-    VIEW_STARRED: (REPO_DEFAULT_COLUMNS, REPO_COLUMNS),
-    VIEW_WATCHED: (REPO_DEFAULT_COLUMNS, REPO_COLUMNS),
-    VIEW_NOTIFICATIONS: (NOTIFICATION_DEFAULT_COLUMNS, NOTIFICATION_COLUMNS),
-    VIEW_MY_WORK: (MY_WORK_DEFAULT_COLUMNS, MY_WORK_COLUMNS),
-    VIEW_SEARCH_ISSUES: (SEARCH_ITEM_DEFAULT_COLUMNS, SEARCH_ITEM_COLUMNS),
-    VIEW_SEARCH_REPOS: (REPO_DEFAULT_COLUMNS, REPO_COLUMNS),
-    VIEW_ORGS: (ORG_DEFAULT_COLUMNS, ORG_COLUMNS),
-    VIEW_ORG: (REPO_DEFAULT_COLUMNS, REPO_COLUMNS),
-    VIEW_SHARED: (REPO_DEFAULT_COLUMNS, REPO_COLUMNS),
+    VIEW_ISSUES: ISSUE_SET,
+    VIEW_BRANCHES: BRANCH_SET,
+    VIEW_COMMITS: COMMIT_SET,
+    VIEW_TAGS: TAG_SET,
+    VIEW_RELEASES: RELEASE_SET,
+    VIEW_WORKFLOWS: WORKFLOW_SET,
+    VIEW_WORKFLOW: WORKFLOW_RUN_SET,
+    VIEW_ARTIFACTS: ARTIFACT_SET,
+    VIEW_JOBS: JOB_SET,
+    VIEW_ASSETS: ASSET_SET,
+    VIEW_LABELS: LABEL_SET,
+    VIEW_FAVORITES: FAVORITES_SET,
+    VIEW_PAGES: PAGES_SET,
+    VIEW_PAGEFILES: PAGEFILE_SET,
+    VIEW_ACTIVITY: ACTIVITY_SET,
+    VIEW_STARRED: REPO_SET,
+    VIEW_WATCHED: REPO_SET,
+    VIEW_NOTIFICATIONS: NOTIFICATION_SET,
+    VIEW_MY_WORK: MY_WORK_SET,
+    VIEW_SEARCH_ISSUES: SEARCH_ITEM_SET,
+    VIEW_SEARCH_REPOS: REPO_SET,
+    VIEW_ORGS: ORG_SET,
+    VIEW_ORG: REPO_SET,
+    VIEW_SHARED: REPO_SET,
 }
+
+
+def _view_columns(view_mode: str) -> ColumnSet:
+    """The columns a view can show."""
+    return VIEW_COLUMNS.get(view_mode, ISSUE_SET)
+
+
+def _row_values(item, columns: list[str]) -> dict[str, str]:
+    """Each column's value for an item, by column id."""
+    if isinstance(item, FavoriteEntry):
+        return {"type": item.item_type, "repo": item.repo,
+                "title": item.title, "subtitle": item.subtitle}
+    return item.to_row(columns)
 
 
 def is_repo_entry(data) -> bool:
@@ -2119,45 +2099,8 @@ class GhViewerFrame(wx.Frame):
         """Rebuild the ListCtrl columns from self.columns."""
         self.list_ctrl.DeleteAllItems()
         self.list_ctrl.DeleteAllColumns()
-        widths = {
-            # Issues/PRs
-            "number": 60, "type": 60, "state": 70, "title": 400,
-            "author": 120, "created": 100, "updated": 100, "labels": 150,
-            "assignees": 120, "comments": 70, "draft": 50, "review": 100,
-            "+/-": 90, "files": 50, "base": 100, "head": 100,
-            # Branches
-            "branch": 150, "last commit": 400, "date": 100, "protected": 70,
-            "ahead": 60, "behind": 60,
-            # Commits
-            "sha": 80, "message": 400,
-            # Tags
-            "tag": 150, "commit": 80,
-            # Releases
-            "tag": 100, "name": 250, "draft": 50, "prerelease": 70,
-            # Workflow (runs + definitions) + artifacts
-            "name": 150, "status": 100, "result": 100, "event": 100, "#": 50,
-            "state": 90, "path": 320, "size": 90, "expired": 70,
-            # Labels
-            "label": 180, "description": 340, "color": 80, "default": 70,
-            # Favorites
-            "repo": 180, "subtitle": 250,
-        }
-        if self.view_mode == VIEW_ACTIVITY:
-            # Same column names as other views, different contents: the date
-            # carries a time, and the title shares the row with an action.
-            widths.update({"actor": 130, "action": 240, "title": 300, "date": 130})
-        elif self.view_mode == VIEW_NOTIFICATIONS:
-            widths.update({"status": 70, "reason": 130, "type": 80, "title": 420,
-                           "repo": 220, "updated": 130})
-        elif self.view_mode in (VIEW_MY_WORK, VIEW_SEARCH_ISSUES):
-            widths.update({"why": 130, "repo": 200, "title": 380})
-        elif self.view_mode == VIEW_ORGS:
-            widths.update({"organization": 240, "role": 100, "repositories": 110})
-        elif self.view_mode in REPO_LIST_VIEWS or self.view_mode == VIEW_SEARCH_REPOS:
-            widths.update({"repo": 240, "description": 380, "language": 100,
-                           "stars": 80, "pushed": 100, "owner": 140})
-        for i, col in enumerate(self.columns):
-            self.list_ctrl.InsertColumn(i, col, width=widths.get(col, 100))
+        for i, col in enumerate(_view_columns(self.view_mode).defs(self.columns)):
+            self.list_ctrl.InsertColumn(i, col.heading, width=col.width)
 
     # ── Menu ────────────────────────────────────────────────────────────
 
@@ -2719,11 +2662,10 @@ class GhViewerFrame(wx.Frame):
             self._col_menu.DestroyItem(self._col_menu.FindItemById(item_id))
         self._col_menu_items = {}
         # Get available columns for current view
-        _, all_cols = VIEW_COLUMNS.get(self.view_mode, (DEFAULT_COLUMNS, ALL_COLUMNS))
-        for col in all_cols:
+        for col in _view_columns(self.view_mode).columns:
             item_id = wx.NewIdRef()
-            self._col_menu_items[item_id] = col
-            self._col_menu.AppendCheckItem(item_id, col)
+            self._col_menu_items[item_id] = col.id
+            self._col_menu.AppendCheckItem(item_id, col.heading)
             self.Bind(wx.EVT_MENU, self.on_column_toggled, id=item_id)
 
     def _switch_view(self, mode: str, load: bool = True) -> None:
@@ -2762,8 +2704,7 @@ class GhViewerFrame(wx.Frame):
             self._return_to = None
         self.filter_text = ""  # clear filter on view switch
         # Update columns for the new view
-        default_cols, _ = VIEW_COLUMNS.get(mode, (DEFAULT_COLUMNS, ALL_COLUMNS))
-        self.columns = list(default_cols)
+        self.columns = list(_view_columns(mode).defaults)
         self._rebuild_columns()
         self._rebuild_columns_menu()
         self._update_menu_checks()
@@ -3405,10 +3346,9 @@ class GhViewerFrame(wx.Frame):
 
     def _item_label(self, item, col: str) -> str:
         """Get the display value for a single column, with mode-aware formatting."""
-        val = item.to_row(self.columns).get(col, "")
-        if self.list_mode == "full":
-            return f"{col}: {val}" if val else ""
-        return val
+        val = _row_values(item, self.columns).get(col, "")
+        column = _view_columns(self.view_mode).column(col)
+        return cell_text(column, val, self.list_mode == "full")
 
     def _favorite_prefix(self, item) -> str:
         """Return '★ ' if the item is in favorites, else empty string."""
@@ -3515,28 +3455,12 @@ class GhViewerFrame(wx.Frame):
         self._shown = filtered
         for i, item in enumerate(filtered):
             prefix = self._favorite_prefix(item) if use_favorite_prefix else ""
-            if isinstance(item, FavoriteEntry):
-                row = {
-                    "type": item.item_type,
-                    "repo": item.repo,
-                    "title": item.title,
-                    "subtitle": item.subtitle,
-                }
-                for j, col in enumerate(self.columns):
-                    label = row.get(col, "")
-                    if self.list_mode == "full":
-                        label = f"{col}: {label}" if label else ""
-                    if j == 0:
-                        self.list_ctrl.InsertItem(i, prefix + label)
-                    else:
-                        self.list_ctrl.SetItem(i, j, label)
-            else:
-                for j, col in enumerate(self.columns):
-                    label = self._item_label(item, col)
-                    if j == 0:
-                        self.list_ctrl.InsertItem(i, prefix + label)
-                    else:
-                        self.list_ctrl.SetItem(i, j, label)
+            for j, col in enumerate(self.columns):
+                label = self._item_label(item, col)
+                if j == 0:
+                    self.list_ctrl.InsertItem(i, prefix + label)
+                else:
+                    self.list_ctrl.SetItem(i, j, label)
         self._update_filter_status()
         return filtered
 
@@ -4683,13 +4607,8 @@ class GhViewerFrame(wx.Frame):
         if self.list_mode == "full":
             item = self._focused_item()
             if item:
-                if isinstance(item, FavoriteEntry):
-                    self._announce(
-                        f"type: {item.item_type}, repo: {item.repo}, "
-                        f"title: {item.title}, subtitle: {item.subtitle}"
-                    )
-                else:
-                    self._announce(item.to_accessible_string(self.columns))
+                self._announce(row_text(_row_values(item, self.columns),
+                                        _view_columns(self.view_mode).defs(self.columns)))
 
     def on_item_activated(self, event) -> None:  # wx.ListEvent / DataViewEvent
         """Double-click or Enter — context-dependent action."""

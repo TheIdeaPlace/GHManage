@@ -7,6 +7,8 @@ import json
 import pytest
 
 import gh_data
+from columns import row_text
+from gh_columns import ISSUE_SET
 from gh_data import GhError, Item
 
 
@@ -101,10 +103,11 @@ def test_item_to_row_blanks_pr_columns_for_issues():
                    "base": "", "nonsense": ""}
 
 
-def test_accessible_string_names_fields_and_skips_blanks():
+def test_row_text_names_fields_but_not_states_and_skips_blanks():
     item = Item(4, "Crash on start", "open", "u", is_pr=False, author="")
-    assert item.to_accessible_string(["number", "title", "author"]) == (
-        "number: 4, title: Crash on start"
+    cols = ["number", "state", "title", "author"]
+    assert row_text(item.to_row(cols), ISSUE_SET.defs(cols)) == (
+        "Number: 4, OPEN, Title: Crash on start"
     )
 
 

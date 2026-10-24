@@ -467,7 +467,7 @@ Each commit shows its short SHA, message, author and date; **View → Columns** 
 
 ### Releases
 
-**Releases** (`Ctrl+5`) lists releases with their tag, name, date and **downloads**: how many times the files attached to each were downloaded, added together. **View → Columns** adds the number of files and whether a release is a draft or a prerelease.
+**Releases** (`Ctrl+5`) lists releases with their tag, name, date and **downloads**: how many times the files attached to each were downloaded, added together. **View → Columns** adds the number of files and whether a release is a draft or a pre-release.
 
 The status bar totals the downloads of every release currently loaded, for example "owner/name — 30 releases. 12,408 downloads across them." `Ctrl++` loads more releases, and the total grows with them.
 
@@ -877,7 +877,7 @@ With focus in the repository list, Copy Link, Copy Markdown Link, Copy Title and
 **View → List Mode** decides how much each row says:
 
 - **Quick Mode (compact)** shows just the values: "208  PR  OPEN  Fix the braille cursor". It is the default and the fastest to arrow through.
-- **Full Mode (field names for screen reader)** puts each column's name before its value: "number: 208, type: PR, state: OPEN, title: Fix the braille cursor". In Full mode the status bar message also repeats the row as you move to it.
+- **Full Mode (field names for screen reader)** puts each column's name before its value: "Number: 208, PR, OPEN, Title: Fix the braille cursor". Columns whose value already says what it is (Type, State, Status and Result) are left without a name, so you hear "OPEN" rather than "State: OPEN". In Full mode the status bar message also repeats the row as you move to it.
 
 The current mode is shown on the status bar, and the status bar says "Quick mode: compact display" or "Full mode: field names included for screen reader" when you switch.
 
@@ -891,28 +891,28 @@ The current mode is shown on the status bar, and the status bar says "Quick mode
 
 | View | Shown by default | Also available |
 |------|------------------|----------------|
-| Issues & PRs | number, type, state, title | author, created, updated, labels, assignees, comments, draft, review, +/-, files, base, head |
-| Branches | branch, last commit, author, date | protected, ahead, behind |
-| Commits | sha, message, author, date | files, +/- |
-| Tags | tag, commit | |
-| Releases | tag, name, date, downloads | assets, draft, prerelease |
-| Release files | name, downloads, size, date | # |
-| Workflows | name, state, path | # |
-| Workflow Runs | name, status, result, branch, date | event, # |
-| A run's jobs | name, status, result, duration, failed step | |
-| Artifacts | name, size, expired, date | # |
-| Labels | label, description, color | default |
-| GitHub Pages | status, commit, pusher, date, duration | kind, error, # |
-| Published Pages | page, url | size |
-| Favorites | type, repo, title, subtitle | |
-| Notifications | reason, type, title, repo, updated, status | |
-| My Work | why, type, number, title, repo, updated | author, labels |
-| Search results: issues and pull requests | type, number, state, title, repo, updated | author, labels, comments |
-| Search results: repositories | repo, description, language, stars, pushed | owner |
-| Activity | actor, action, repo, title, date | |
-| Starred and Watched Repositories | repo, description, language, stars, pushed | owner |
+| Issues & PRs | Number, Type, State, Title | Author, Created, Updated, Labels, Assignees, Comments, Draft, Review, Changes, Files, Base branch, Head branch |
+| Branches | Branch, Last commit, Author, Date | Protected, Ahead, Behind |
+| Commits | Commit, Message, Author, Date | Branches, Files, Changes |
+| Tags | Tag, Commit | |
+| Releases | Tag, Name, Date, Downloads | Assets, Draft, Pre-release |
+| Release files | Name, Downloads, Size, Date | ID |
+| Workflows | Name, State, Path | ID |
+| Workflow Runs | Name, Status, Result, Branch, Date | Event, Run |
+| A run's jobs | Name, Status, Result, Duration, Failed step | |
+| Artifacts | Name, Size, Expired, Date | ID |
+| Labels | Label, Description, Color | Default |
+| GitHub Pages | Status, Commit, Pushed by, Date, Duration | Kind, Error, ID |
+| Published Pages | Page, Address | Size |
+| Favorites | Type, Repository, Title, Subtitle | |
+| Notifications | Reason, Type, Title, Repository, Updated, Status | |
+| My Work | Why, Type, Number, Title, Repository, Updated | Author, Labels |
+| Search results: issues and pull requests | Type, Number, State, Title, Repository, Updated | Author, Labels, Comments |
+| My Organizations | Organization, Role, Repositories | |
+| Activity | Actor, Action, Repository, Title, Date | |
+| Every list of repositories: Starred, Watched, Shared With Me, an organization's, and repository search | Repository, Description, Language, Stars, Pushed | Owner |
 
-The pull-request columns (+/-, files, base, head) are empty on issues. Columns go back to the view's defaults when you leave it.
+The pull-request columns (Changes, Files, Base branch, Head branch) are empty on issues. Columns go back to the view's defaults when you leave it.
 
 ---
 

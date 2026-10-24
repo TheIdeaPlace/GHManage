@@ -887,7 +887,7 @@ The current mode is shown on the status bar, and the status bar says "Quick mode
 
 ### Columns
 
-A screen reader reads a row's columns from left to right, so the order of the columns is the order you hear them. **View → Columns…** lets you decide that order, which columns are shown and whether their names are read, for every kind of list in one place. Each view has its own columns, and its own defaults.
+A screen reader reads a row's columns from left to right, so the order of the columns is the order you hear them. **View → Columns…** lets you decide that order, which columns are shown and whether their names are read, for every kind of list in one place. Each kind of list has its own columns, and its own defaults.
 
 - **List to change** starts on the list you're in. Choose another to change its columns too.
 - **Available columns** are the ones not shown. `Enter` or **Add** puts the selected one at the end of the row.

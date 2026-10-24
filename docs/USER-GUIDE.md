@@ -250,7 +250,7 @@ Lists load 100 items to begin with. `Ctrl++` (**File → View More**) loads the 
 |------|---------------|
 | **File** | Open Repository or Address, Remove from List, Hidden Repositories, Switch GitHub Account, Refresh, Search GitHub, View More, Go To Issue, Quick Filter, Next and Previous Comment, Quit |
 | **Actions** | Everything that acts on the item you are on. See [The Actions Menu](#the-actions-menu). |
-| **View** | View Mode, List Mode, Sort Order, Columns, Choose Columns, State, Filter |
+| **View** | View Mode, List Mode, Sort Order, Columns, State, Filter |
 | **Help** | User Guide, Keyboard Shortcuts, Command Palette, Check for Updates, About GHManage |
 
 **Help → User Guide** (`F1`, or `fn+F1` on a Mac) opens this guide in your web browser.
@@ -329,7 +329,7 @@ GitHub turns issues off on a fork by default, and the issues and pull requests t
 
 **Issues & PRs** (`Ctrl+1`) lists a repository's issues and pull requests together, newest first, like an inbox. It is what you see when you open a repository.
 
-Each row shows the number, whether it is an issue or a PR, its state (OPEN, CLOSED or MERGED) and its title. Other columns are available under **View → Columns**; see [List Mode, Sorting and Columns](#list-mode-sorting-and-columns). The status bar counts what loaded: "owner/name — 23 issues, 7 PRs (open). Showing up to 100 newest."
+Each row shows the number, whether it is an issue or a PR, its state (OPEN, CLOSED or MERGED) and its title. Other columns are available under **View → Columns…**; see [List Mode, Sorting and Columns](#list-mode-sorting-and-columns). The status bar counts what loaded: "owner/name — 23 issues, 7 PRs (open). Showing up to 100 newest."
 
 The details panel shows the item in full: state, author, dates, address, labels, assignees and comment count; for a pull request whether it is a draft, whether it is merged, its review status, its branches and the size of its changes; then the description and every comment. `Alt+N` and `Alt+P` move between the comments. See [The Details Panel and Comment Navigation](#the-details-panel-and-comment-navigation).
 
@@ -433,7 +433,7 @@ On a fork, labels come from the upstream repository, the same one the issues com
 
 ### Branches
 
-**Branches** (`Ctrl+2`) lists each branch with its last commit, who made it and when. **View → Columns** adds whether the branch is protected and how far it is ahead of and behind the default branch.
+**Branches** (`Ctrl+2`) lists each branch with its last commit, who made it and when. **View → Columns…** adds whether the branch is protected and how far it is ahead of and behind the default branch.
 
 | Key | Action |
 |-----|--------|
@@ -455,7 +455,7 @@ To switch branch without going back, use **Actions → Select Branch…** (`Ctrl
 
 **All branches**, first in that list, shows recent commits from every branch together, newest first. A commit on several branches appears once, naming each of them. **View More** (`Ctrl++`) adds older commits, up to the newest 100 of each of the default branch and the 99 most recently changed branches (on a repository with more than 1,000 branches, of the first 1,000 by name); that makes it a view of recent work across branches rather than of older history, for which you pick one branch. For an older commit, the branches named are the ones it is still among the newest commits of, which may not be every branch that has it. If some branches couldn't be read, the status bar says how many.
 
-Each commit shows its short SHA, message, author and date; **View → Columns** adds the branch (on All branches, the first few branches it is on and how many more), how many files changed and the lines added and removed. The details panel has the full SHA, the branch or every branch it is on, the whole message, and the files changed when GitHub reports them. `Enter` on a commit opens it on GitHub.
+Each commit shows its short SHA, message, author and date; **View → Columns…** adds the branch (on All branches, the first few branches it is on and how many more), how many files changed and the lines added and removed. The details panel has the full SHA, the branch or every branch it is on, the whole message, and the files changed when GitHub reports them. `Enter` on a commit opens it on GitHub.
 
 ---
 
@@ -467,7 +467,7 @@ Each commit shows its short SHA, message, author and date; **View → Columns** 
 
 ### Releases
 
-**Releases** (`Ctrl+5`) lists releases with their tag, name, date and **downloads**: how many times the files attached to each were downloaded, added together. **View → Columns** adds the number of files and whether a release is a draft or a pre-release.
+**Releases** (`Ctrl+5`) lists releases with their tag, name, date and **downloads**: how many times the files attached to each were downloaded, added together. **View → Columns…** adds the number of files and whether a release is a draft or a pre-release.
 
 The status bar totals the downloads of every release currently loaded, for example "owner/name — 30 releases. 12,408 downloads across them." `Ctrl++` loads more releases, and the total grows with them.
 
@@ -502,7 +502,7 @@ A workflow can only be run by hand if its file has an `on: workflow_dispatch` tr
 
 ### Workflow runs
 
-**Workflow Runs** (`Ctrl+7`) lists recent runs: the workflow's name, its status (queued, in progress or completed), its result, the branch and the date. **View → Columns** adds the event that started it and the run number.
+**Workflow Runs** (`Ctrl+7`) lists recent runs: the workflow's name, its status (queued, in progress or completed), its result, the branch and the date. **View → Columns…** adds the event that started it and the run number.
 
 | Key | Action |
 |-----|--------|
@@ -737,7 +737,7 @@ The quick filter (`Ctrl+F`) works here as in every other view.
 
 GitHub watches your own repositories for you automatically, so they appear in Watched Repositories as well as other people's.
 
-Each row shows the repository's name, description, main language, stars, and when it was last pushed to. A repository that is archived, a fork or private says so at the start of its description. The details panel adds its address, forks and open issues. **View → Columns** can also show the owner.
+Each row shows the repository's name, description, main language, stars, and when it was last pushed to. A repository that is archived, a fork or private says so at the start of its description. The details panel adds its address, forks and open issues. **View → Columns…** can also show the owner.
 
 | Key | Action |
 |-----|--------|
@@ -887,11 +887,7 @@ The current mode is shown on the status bar, and the status bar says "Quick mode
 
 ### Columns
 
-**View → Columns** lists the columns the current view can show, each with a checkmark when it is on. Choose one to turn it on or off; a column turned on goes at the end. Each view has its own columns, and its own defaults.
-
-#### Choose Columns
-
-A screen reader reads a row's columns from left to right, so the order of the columns is the order you hear them. **View → Choose Columns…** lets you decide that order, which columns are shown and whether their names are read, for every kind of list in one place:
+A screen reader reads a row's columns from left to right, so the order of the columns is the order you hear them. **View → Columns…** lets you decide that order, which columns are shown and whether their names are read, for every kind of list in one place. Each view has its own columns, and its own defaults.
 
 - **List to change** starts on the list you're in. Choose another to change its columns too.
 - **Available columns** are the ones not shown. `Enter` or **Add** puts the selected one at the end of the row.

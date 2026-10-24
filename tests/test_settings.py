@@ -112,39 +112,6 @@ def test_reconcile_falls_back_to_defaults():
 # ── The main window ─────────────────────────────────────────────────────
 
 
-def _toggle_frame(columns):
-    import ghviewer
-
-    said = []
-    item_id = object()
-    f = types.SimpleNamespace(
-        view_mode=ghviewer.VIEW_COMMITS, columns=list(columns),
-        _col_menu_items={item_id: None}, _announce=said.append,
-        _update_menu_checks=lambda: None, _rebuild_columns=lambda: None,
-        _refresh_list_display=lambda focus=None: None, _focused_item=lambda: None)
-    event = types.SimpleNamespace(GetId=lambda: item_id)
-
-    def toggle(col):
-        f._col_menu_items[item_id] = col
-        ghviewer.GhViewerFrame.on_column_toggled(f, event)
-    return f, said, toggle
-
-
-def test_turning_a_column_on_or_off_is_remembered():
-    f, said, toggle = _toggle_frame(["sha", "message"])
-    toggle("author")
-    assert settings.load_columns(COMMIT_SET) == ["sha", "message", "author"]
-    toggle("sha")
-    assert settings.load_columns(COMMIT_SET) == ["message", "author"]
-
-
-def test_the_last_column_stays():
-    f, said, toggle = _toggle_frame(["message"])
-    toggle("message")
-    assert f.columns == ["message"]
-    assert said == ["At least one column has to be shown."]
-
-
 def test_list_mode_is_remembered():
     import ghviewer
 

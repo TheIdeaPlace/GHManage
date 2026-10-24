@@ -42,7 +42,7 @@ User Guide (`F1`) opens it from the app. This README is a summary.
   - **View Mode** — switch between Issues & PRs, Branches, Commits, Tags, Releases, Workflows, Workflow Runs, Labels, GitHub Pages, Notifications, Activity, Starred Repositories and Watched Repositories
   - **Quick / Full list mode** — Quick shows compact rows; Full includes field names (e.g. "208, PR, OPEN, Title: …") for screen readers
   - **Sort order** — by number, title, created date, updated date, or comments
-  - **Column selection** — toggle columns on/off (columns change per view mode)
+  - **Columns…** — choose which columns each list shows, the order they're read in, and whether their names are spoken; remembered between sessions
   - **State filter** — open, closed, or all (issues/PRs view)
   - **Show filter** — issues only, PRs only, or both (issues/PRs view)
 - **Actions menu** — one home for everything that acts on what the list is

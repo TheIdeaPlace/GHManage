@@ -1,4 +1,4 @@
-"""Choose Columns: the rules (columns.LayoutEditor) and what OK does
+"""View > Columns: the rules (columns.LayoutEditor) and what OK does
 (GhViewerFrame._apply_column_choices), without windows."""
 
 from __future__ import annotations

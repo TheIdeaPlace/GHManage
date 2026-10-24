@@ -1666,7 +1666,7 @@ class HiddenReposDialog(wx.Dialog):
 
 
 class ColumnsDialog(wx.Dialog):
-    """View ▸ Choose Columns: which columns each kind of list shows, the
+    """View ▸ Columns: which columns each kind of list shows, the
     order a screen reader reads them in, and whether their names are read
     too. Modelled on The Chat Place's Session List Columns and QuickMail's
     Message List Fields: the columns not shown, the ones shown in reading
@@ -1685,7 +1685,7 @@ class ColumnsDialog(wx.Dialog):
                  sample: dict[str, str] | None) -> None:
         """``layouts``: each set's columns as they are now. ``sample``: the
         values of a row in the current list, for the preview, or None."""
-        super().__init__(parent, title="Choose Columns",
+        super().__init__(parent, title="Columns",
                          style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
         self._sets = column_sets
         self._layouts = layouts
@@ -1835,7 +1835,7 @@ class ColumnsDialog(wx.Dialog):
         index = self.shown.GetSelection()
         self.shown.SetFocus()
         if len(self._editor.shown) == 1:
-            wx.MessageBox("At least one column has to be shown.", "Choose Columns",
+            wx.MessageBox("At least one column has to be shown.", "Columns",
                           wx.OK | wx.ICON_INFORMATION, self)
             return
         if not self._editor.remove(index):
@@ -2502,11 +2502,7 @@ class GhViewerFrame(wx.Frame):
         view_menu.AppendSeparator()
 
         # Columns submenu (rebuilt when view mode changes)
-        self._col_menu = wx.Menu()
-        self._col_menu_items = {}
-        self._rebuild_columns_menu()
-        view_menu.AppendSubMenu(self._col_menu, "Columns")
-        view_menu.Append(ID_CHOOSE_COLUMNS, "C&hoose Columns…")
+        view_menu.Append(ID_CHOOSE_COLUMNS, "Columns…")
 
         view_menu.AppendSeparator()
 
@@ -2805,9 +2801,6 @@ class GhViewerFrame(wx.Frame):
         menu_bar.Check(ID_TAB_ISSUES, self.tab_filter == "issues")
         menu_bar.Check(ID_TAB_PRS, self.tab_filter == "prs")
         menu_bar.Check(ID_TAB_BOTH, self.tab_filter == "both")
-        # Columns
-        for item_id, col in self._col_menu_items.items():
-            menu_bar.Check(item_id, col in self.columns)
         # Sort order
         for item_id, order in self._sort_menu_items.items():
             menu_bar.Check(item_id, order == self.sort_order)
@@ -2883,20 +2876,6 @@ class GhViewerFrame(wx.Frame):
         noun = self._COPY_IDENT_NOUNS.get(self.view_mode, "Name")
         self._act_copy_ident.SetItemLabel(f"Copy {noun}\tCtrl+Shift+I")
 
-    def _rebuild_columns_menu(self) -> None:
-        """Rebuild the Columns submenu for the current view mode."""
-        # Remove old items
-        for item_id in list(self._col_menu_items.keys()):
-            self.Unbind(wx.EVT_MENU, id=item_id)
-            self._col_menu.DestroyItem(self._col_menu.FindItemById(item_id))
-        self._col_menu_items = {}
-        # Get available columns for current view
-        for col in _view_columns(self.view_mode).columns:
-            item_id = wx.NewIdRef()
-            self._col_menu_items[item_id] = col.id
-            self._col_menu.AppendCheckItem(item_id, col.heading)
-            self.Bind(wx.EVT_MENU, self.on_column_toggled, id=item_id)
-
     def _switch_view(self, mode: str, load: bool = True) -> None:
         """Switch to a different view mode (issues, branches, commits, etc.).
 
@@ -2935,7 +2914,6 @@ class GhViewerFrame(wx.Frame):
         # Update columns for the new view
         self.columns = settings.load_columns(_view_columns(mode))
         self._rebuild_columns()
-        self._rebuild_columns_menu()
         self._update_menu_checks()
         self.current_limit = self.page_size
         # Keep the repo list in step with the view however you got there —
@@ -6602,7 +6580,7 @@ class GhViewerFrame(wx.Frame):
             self._refresh_list_display()
 
     def on_choose_columns(self, event: wx.CommandEvent) -> None:
-        """View ▸ Choose Columns: every list's columns, their order, and
+        """View ▸ Columns: every list's columns, their order, and
         whether their names are read, in one dialog (ColumnsDialog)."""
         current = _view_columns(self.view_mode)
         sets = COLUMN_SETS
@@ -6646,24 +6624,6 @@ class GhViewerFrame(wx.Frame):
             self._announce("Column names on." if speak else "Column names off.")
         else:
             self._announce("No changes to the columns.")
-
-    def on_column_toggled(self, event: wx.CommandEvent) -> None:
-        col = self._col_menu_items.get(event.GetId())
-        if not col:
-            return
-        if col in self.columns:
-            if len(self.columns) == 1:
-                self._update_menu_checks()
-                self._announce("At least one column has to be shown.")
-                return
-            self.columns.remove(col)
-        else:
-            self.columns.append(col)
-        settings.save_columns(_view_columns(self.view_mode), self.columns)
-        item = self._focused_item()  # before the rebuild empties the list
-        self._update_menu_checks()
-        self._rebuild_columns()
-        self._refresh_list_display(focus=item)
 
     def on_state_open(self, event: wx.CommandEvent) -> None:
         self.state_filter = "open"

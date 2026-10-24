@@ -121,7 +121,7 @@ def _toggle_frame(columns):
         view_mode=ghviewer.VIEW_COMMITS, columns=list(columns),
         _col_menu_items={item_id: None}, _announce=said.append,
         _update_menu_checks=lambda: None, _rebuild_columns=lambda: None,
-        _refresh_list_display=lambda: None)
+        _refresh_list_display=lambda focus=None: None, _focused_item=lambda: None)
     event = types.SimpleNamespace(GetId=lambda: item_id)
 
     def toggle(col):
@@ -155,3 +155,23 @@ def test_list_mode_is_remembered():
     assert settings.load_list_mode() == "full"
     ghviewer.GhViewerFrame.on_quick_mode(f, None)
     assert settings.load_list_mode() == "quick"
+
+
+def test_quitting_writes_what_a_busy_file_kept_back(monkeypatch):
+    real = settings.os.replace
+    monkeypatch.setattr(settings.os, "replace", lambda a, b: (_ for _ in ()).throw(OSError()))
+    monkeypatch.setattr(settings.time, "sleep", lambda s: None)
+    settings.save_list_mode("full")
+    assert not _file().exists()
+    monkeypatch.setattr(settings.os, "replace", real)
+    settings.flush()
+    settings._session.clear()
+    assert settings.load_list_mode() == "full"
+
+
+def test_rubbish_that_cannot_be_moved_aside_is_not_written_over(monkeypatch):
+    _file().write_text("{bad", encoding="utf-8")
+    monkeypatch.setattr(settings.Path, "replace", lambda self, target: (_ for _ in ()).throw(OSError()))
+    settings.save_list_mode("full")
+    assert _file().read_text(encoding="utf-8") == "{bad"
+    assert settings.load_list_mode() == "full"  # kept for the session

@@ -72,11 +72,11 @@ def _frame(view_mode, columns, list_mode="quick"):
     calls = []
     f = types.SimpleNamespace(
         view_mode=view_mode, columns=list(columns), list_mode=list_mode,
-        items=[], git_items=[object()],
+        items=[], git_items=[object()], _focused_item=lambda: None,
         _update_mode_status=lambda: calls.append("mode"),
         _rebuild_columns=lambda: calls.append("columns"),
         _update_menu_checks=lambda: None,
-        _refresh_list_display=lambda: calls.append("refresh"),
+        _refresh_list_display=lambda focus=None: calls.append("refresh"),
         _announce=lambda text: calls.append(text))
     return f, calls
 
@@ -95,7 +95,7 @@ def test_ok_with_names_turned_on_switches_to_full_mode():
     f, calls = _frame(COMMITS, ["sha"])
     ghviewer.GhViewerFrame._apply_column_choices(f, {}, True)
     assert f.list_mode == "full" and settings.load_list_mode() == "full"
-    assert calls == ["mode", "refresh", "Columns saved."]
+    assert calls == ["mode", "refresh", "Column names on."]
 
 
 def test_ok_with_another_list_changed_leaves_this_one_alone():
@@ -109,3 +109,13 @@ def test_ok_with_nothing_changed():
     f, calls = _frame(COMMITS, ["sha"])
     ghviewer.GhViewerFrame._apply_column_choices(f, {}, False)
     assert calls == ["No changes to the columns."]
+
+
+def test_ok_lands_back_on_the_row_you_were_on():
+    item = object()
+    landed = []
+    f, calls = _frame(COMMITS, ["sha", "message"])
+    f._focused_item = lambda: item
+    f._refresh_list_display = lambda focus=None: landed.append(focus)
+    ghviewer.GhViewerFrame._apply_column_choices(f, {"commits": ["message", "sha"]}, False)
+    assert landed == [item]

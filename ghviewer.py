@@ -34,7 +34,7 @@ from saved_searches import (
 
 from columns import ColumnSet, LayoutEditor, cell_text, row_text
 from gh_columns import (
-    ACTIVITY_SET, ARTIFACT_SET, ASSET_SET, BRANCH_SET, COMMIT_SET, FAVORITES_SET,
+    COLUMN_SETS, ACTIVITY_SET, ARTIFACT_SET, ASSET_SET, BRANCH_SET, COMMIT_SET, FAVORITES_SET,
     ISSUE_SET, JOB_SET, LABEL_SET, MY_WORK_SET, NOTIFICATION_SET, ORG_SET,
     PAGEFILE_SET, PAGES_SET, RELEASE_SET, REPO_SET, SEARCH_ITEM_SET, TAG_SET,
     WORKFLOW_RUN_SET, WORKFLOW_SET,
@@ -2493,7 +2493,7 @@ class GhViewerFrame(wx.Frame):
         self._col_menu_items = {}
         self._rebuild_columns_menu()
         view_menu.AppendSubMenu(self._col_menu, "Columns")
-        view_menu.Append(ID_CHOOSE_COLUMNS, "Choose Columns...")
+        view_menu.Append(ID_CHOOSE_COLUMNS, "Choose Columns…")
 
         view_menu.AppendSeparator()
 
@@ -6548,6 +6548,7 @@ class GhViewerFrame(wx.Frame):
         # A downloaded update is left staged: updater.bootstrap() applies it on
         # the next launch, before any window appears. Applying here instead
         # would mean racing our own shutdown for a lock on the install dir.
+        settings.flush()  # a choice a busy file kept from being written
         self.Destroy()
 
     # ── View menu actions ───────────────────────────────────────────────
@@ -6559,7 +6560,7 @@ class GhViewerFrame(wx.Frame):
         self._update_mode_status()
         self._announce("Quick mode: compact display")
         if self.items or self.git_items:
-            self._refresh_list_display()
+            self._refresh_list_display(focus=self._focused_item())
 
     def on_full_mode(self, event: wx.CommandEvent) -> None:
         self.list_mode = "full"
@@ -6568,7 +6569,7 @@ class GhViewerFrame(wx.Frame):
         self._update_mode_status()
         self._announce("Full mode: field names included for screen reader")
         if self.items or self.git_items:
-            self._refresh_list_display()
+            self._refresh_list_display(focus=self._focused_item())
 
     def on_sort_selected(self, event: wx.CommandEvent) -> None:
         if self.view_mode == VIEW_MY_WORK:
@@ -6590,7 +6591,7 @@ class GhViewerFrame(wx.Frame):
         """View ▸ Choose Columns: every list's columns, their order, and
         whether their names are read, in one dialog (ColumnsDialog)."""
         current = _view_columns(self.view_mode)
-        sets = list({cs.id: cs for cs in VIEW_COLUMNS.values()}.values())
+        sets = COLUMN_SETS
         layouts = {cs.id: settings.load_columns(cs) for cs in sets}
         layouts[current.id] = list(self.columns)
         # The selected row, or the first, for the preview.
@@ -6606,7 +6607,9 @@ class GhViewerFrame(wx.Frame):
         self._apply_column_choices(changed, speak)
 
     def _apply_column_choices(self, changed: dict[str, list[str]], speak: bool) -> None:
-        sets = {cs.id: cs for cs in VIEW_COLUMNS.values()}
+        sets = {cs.id: cs for cs in COLUMN_SETS}
+        # Before the columns are rebuilt, which empties the list.
+        item = self._focused_item()
         for set_id, cols in changed.items():
             settings.save_columns(sets[set_id], cols)
         mode = "full" if speak else "quick"
@@ -6622,8 +6625,13 @@ class GhViewerFrame(wx.Frame):
             redraw = True
         self._update_menu_checks()
         if redraw and (self.items or self.git_items or self.view_mode == VIEW_FAVORITES):
-            self._refresh_list_display()
-        self._announce("Columns saved." if changed or redraw else "No changes to the columns.")
+            self._refresh_list_display(focus=item)
+        if changed:
+            self._announce("Columns saved.")
+        elif redraw:
+            self._announce("Column names on." if speak else "Column names off.")
+        else:
+            self._announce("No changes to the columns.")
 
     def on_column_toggled(self, event: wx.CommandEvent) -> None:
         col = self._col_menu_items.get(event.GetId())
@@ -6638,9 +6646,10 @@ class GhViewerFrame(wx.Frame):
         else:
             self.columns.append(col)
         settings.save_columns(_view_columns(self.view_mode), self.columns)
+        item = self._focused_item()  # before the rebuild empties the list
         self._update_menu_checks()
         self._rebuild_columns()
-        self._refresh_list_display()
+        self._refresh_list_display(focus=item)
 
     def on_state_open(self, event: wx.CommandEvent) -> None:
         self.state_filter = "open"
@@ -6746,15 +6755,21 @@ class GhViewerFrame(wx.Frame):
 
     # ── List display refresh ───────────────────────────────────────────
 
-    def _refresh_list_display(self) -> None:
-        """Re-populate the list from current data without re-fetching."""
+    def _refresh_list_display(self, focus=None) -> None:
+        """Re-populate the list from current data without re-fetching.
+
+        ``focus`` is the item to land on, so a change to how rows read (the
+        columns, Quick or Full mode) leaves you where you were; the first
+        row otherwise.
+        """
         if self.view_mode == VIEW_FAVORITES:
-            self._load_favorites_view()
+            self._load_favorites_view(focus=focus)
             return
         items = self.items if self.view_mode in ITEM_VIEWS else self.git_items
         filtered = self._populate_filtered_list(items, use_favorite_prefix=True)
         if filtered:
-            wx.CallLater(100, self._focus_list)
+            row = self._row_of(focus) if focus is not None else 0
+            wx.CallLater(100, self._focus_list, max(row, 0))
 
     # ── Actions ─────────────────────────────────────────────────────────
 

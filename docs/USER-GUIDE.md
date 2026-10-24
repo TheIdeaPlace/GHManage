@@ -250,7 +250,7 @@ Lists load 100 items to begin with. `Ctrl++` (**File → View More**) loads the 
 |------|---------------|
 | **File** | Open Repository or Address, Remove from List, Hidden Repositories, Switch GitHub Account, Refresh, Search GitHub, View More, Go To Issue, Quick Filter, Next and Previous Comment, Quit |
 | **Actions** | Everything that acts on the item you are on. See [The Actions Menu](#the-actions-menu). |
-| **View** | View Mode, List Mode, Sort Order, Columns, State, Filter |
+| **View** | View Mode, List Mode, Sort Order, Columns, Choose Columns, State, Filter |
 | **Help** | User Guide, Keyboard Shortcuts, Command Palette, Check for Updates, About GHManage |
 
 **Help → User Guide** (`F1`, or `fn+F1` on a Mac) opens this guide in your web browser.
@@ -887,7 +887,20 @@ The current mode is shown on the status bar, and the status bar says "Quick mode
 
 ### Columns
 
-**View → Columns** lists the columns the current view can show, each with a checkmark when it is on. Choose one to turn it on or off. Each view has its own columns, and its own defaults.
+**View → Columns** lists the columns the current view can show, each with a checkmark when it is on. Choose one to turn it on or off; a column turned on goes at the end. Each view has its own columns, and its own defaults.
+
+#### Choose Columns
+
+A screen reader reads a row's columns from left to right, so the order of the columns is the order you hear them. **View → Choose Columns...** lets you decide that order, which columns are shown and whether their names are read, for every kind of list in one place:
+
+- **List** starts on the list you're in. Choose another to change its columns too.
+- **Available columns** are the ones not shown. `Enter` or **Add** puts the selected one at the end of the row.
+- **Shown columns, in the order they're read** lists what each row says, first to last. `Delete` or **Remove** takes one off; at least one always stays. `Alt+Up` and `Alt+Down` (or **Move Up** and **Move Down**) move the selected column one place, and `Alt+Home` and `Alt+End` (**Move to Top** and **Move to Bottom**) move it to the start or the end. The column stays selected as it moves, so your screen reader reads its new place, for example "Author, 2 of 4". When there is nothing to do, such as moving the first column up, GHManage beeps.
+- **Reset to Default** puts back the list's original columns.
+- **Speak column names (Full mode)** is the same choice as **View → List Mode**.
+- **Preview** shows how the selected row (or the first row) will read. For a list other than the one you're in, it shows the order the columns will be read in.
+
+**OK** keeps every change, for every list you changed; **Cancel** or `Escape` leaves them all as they were.
 
 | View | Shown by default | Also available |
 |------|------------------|----------------|

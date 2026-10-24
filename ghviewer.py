@@ -32,7 +32,7 @@ from saved_searches import (
     remove_saved_search,
 )
 
-from columns import ColumnSet, cell_text, row_text
+from columns import ColumnSet, LayoutEditor, cell_text, row_text
 from gh_columns import (
     ACTIVITY_SET, ARTIFACT_SET, ASSET_SET, BRANCH_SET, COMMIT_SET, FAVORITES_SET,
     ISSUE_SET, JOB_SET, LABEL_SET, MY_WORK_SET, NOTIFICATION_SET, ORG_SET,
@@ -575,6 +575,7 @@ ID_COMMENT = wx.NewIdRef()
 ID_OPEN_BROWSER = wx.NewIdRef()
 ID_QUICK_MODE = wx.NewIdRef()
 ID_FULL_MODE = wx.NewIdRef()
+ID_CHOOSE_COLUMNS = wx.NewIdRef()
 ID_STATE_OPEN = wx.NewIdRef()
 ID_STATE_CLOSED = wx.NewIdRef()
 ID_STATE_ALL = wx.NewIdRef()
@@ -1664,6 +1665,218 @@ class HiddenReposDialog(wx.Dialog):
         self.list.SetFocus()
 
 
+class ColumnsDialog(wx.Dialog):
+    """View ▸ Choose Columns: which columns each kind of list shows, the
+    order a screen reader reads them in, and whether their names are read
+    too. Modelled on The Chat Place's Session List Columns and QuickMail's
+    Message List Fields: the columns not shown, the ones shown in reading
+    order, Add, Remove, Move Up, Move Down, Move to Top, Move to Bottom and
+    Reset to Default, and a preview of a row. OK keeps every change; Cancel
+    or Escape leaves them all.
+
+    Keys as well as the buttons: Enter in Available adds, Delete (or
+    Backspace, a Mac's Delete) in Shown removes, and Alt+Up, Alt+Down,
+    Alt+Home and Alt+End in Shown move. Focus stays on the column that moved,
+    so a screen reader reads its new place ("Author, 2 of 4"); when there is
+    nothing to do it beeps. The rules are ``columns.LayoutEditor``'s."""
+
+    def __init__(self, parent: wx.Window, column_sets: list[ColumnSet], current_id: str,
+                 layouts: dict[str, list[str]], speak_labels: bool,
+                 sample: dict[str, str] | None) -> None:
+        """``layouts``: each set's columns as they are now. ``sample``: the
+        values of a row in the current list, for the preview, or None."""
+        super().__init__(parent, title="Choose Columns",
+                         style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
+        self._sets = column_sets
+        self._layouts = layouts
+        self._editors: dict[str, LayoutEditor] = {}
+        self._current_id = current_id
+        self._sample = sample
+        outer = wx.BoxSizer(wx.VERTICAL)
+
+        label = "&List"
+        outer.Add(wx.StaticText(self, label=label), 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
+        self.set_ctrl = wx.Choice(self, choices=[cs.name for cs in column_sets])
+        self.set_ctrl.SetName(label.replace("&", ""))
+        ids = [cs.id for cs in column_sets]
+        self.set_ctrl.SetSelection(ids.index(current_id) if current_id in ids else 0)
+        outer.Add(self.set_ctrl, 0, wx.LEFT | wx.RIGHT, 10)
+
+        lists = wx.BoxSizer(wx.HORIZONTAL)
+        self.available = self._list_box(lists, "A&vailable columns")
+        self.shown = self._list_box(lists, "&Shown columns, in the order they're read")
+        outer.Add(lists, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 4)
+
+        row = wx.WrapSizer(wx.HORIZONTAL)
+        actions = [
+            ("&Add", self.add), ("&Remove", self.remove),
+            ("Move &Up", lambda: self.move(-1)), ("Move &Down", lambda: self.move(1)),
+            ("Move to &Top", lambda: self.move_to_end(top=True)),
+            ("Move to &Bottom", lambda: self.move_to_end(top=False)),
+            ("R&eset to Default", self.reset),
+        ]
+        # Always enabled, so the Tab order never changes; each beeps when
+        # there is nothing it can do.
+        for text, action in actions:
+            button = wx.Button(self, label=text)
+            button.Bind(wx.EVT_BUTTON, lambda e, act=action: act())
+            row.Add(button, 0, wx.RIGHT | wx.BOTTOM, 6)
+        outer.Add(row, 0, wx.LEFT | wx.RIGHT, 10)
+
+        self.labels_ctrl = wx.CheckBox(self, label="Speak column &names (Full mode)")
+        self.labels_ctrl.SetValue(speak_labels)
+        outer.Add(self.labels_ctrl, 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
+
+        label = "&Preview"
+        outer.Add(wx.StaticText(self, label=label), 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
+        self.preview = wx.TextCtrl(self, style=wx.TE_MULTILINE | wx.TE_READONLY, size=(-1, 60))
+        self.preview.SetName(label.replace("&", ""))
+        outer.Add(self.preview, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
+
+        buttons = wx.StdDialogButtonSizer()
+        ok = wx.Button(self, wx.ID_OK, "OK")
+        ok.SetDefault()
+        buttons.AddButton(ok)
+        buttons.AddButton(wx.Button(self, wx.ID_CANCEL, "Cancel"))
+        buttons.Realize()
+        outer.Add(buttons, 0, wx.EXPAND | wx.ALL, 10)
+        self.SetSizerAndFit(outer)
+        self.SetEscapeId(wx.ID_CANCEL)
+
+        self.set_ctrl.Bind(wx.EVT_CHOICE, lambda e: self._fill(0, 0))
+        self.labels_ctrl.Bind(wx.EVT_CHECKBOX, lambda e: self._show_preview())
+        self.shown.Bind(wx.EVT_LISTBOX, lambda e: self._show_preview())
+        self.available.Bind(wx.EVT_LISTBOX_DCLICK, lambda e: self.add())
+        self.shown.Bind(wx.EVT_LISTBOX_DCLICK, lambda e: self.remove())
+        self.Bind(wx.EVT_CHAR_HOOK, self._on_char_hook)
+        self._fill(0, 0)
+        self.CentreOnParent()
+        wx.CallAfter(self.shown.SetFocus)
+
+    def _list_box(self, sizer: wx.BoxSizer, label: str) -> wx.ListBox:
+        column = wx.BoxSizer(wx.VERTICAL)
+        column.Add(wx.StaticText(self, label=label), 0, wx.BOTTOM, 4)
+        box = wx.ListBox(self, style=wx.LB_SINGLE, size=(260, 240))
+        box.SetName(label.replace("&", ""))
+        column.Add(box, 1, wx.EXPAND)
+        sizer.Add(column, 1, wx.EXPAND | wx.ALL, 6)
+        return box
+
+    # ── State ────────────────────────────────────────────────────────
+
+    @property
+    def _set(self) -> ColumnSet:
+        return self._sets[max(self.set_ctrl.GetSelection(), 0)]
+
+    @property
+    def _editor(self) -> LayoutEditor:
+        cs = self._set
+        if cs.id not in self._editors:
+            self._editors[cs.id] = LayoutEditor(cs, self._layouts.get(cs.id))
+        return self._editors[cs.id]
+
+    def layouts(self) -> dict[str, list[str]]:
+        """The lists whose columns changed, and their columns now."""
+        return {set_id: list(ed.shown) for set_id, ed in self._editors.items()
+                if ed.changed_from(self._layouts.get(set_id))}
+
+    def speak_labels(self) -> bool:
+        return self.labels_ctrl.GetValue()
+
+    def _heading(self, col_id: str) -> str:
+        return self._set.column(col_id).heading
+
+    def _fill(self, shown_index: int | None = None, available_index: int | None = None) -> None:
+        """Both lists again, each keeping its place or going to the given row."""
+        if shown_index is None:
+            shown_index = self.shown.GetSelection()
+        if available_index is None:
+            available_index = self.available.GetSelection()
+        ed = self._editor
+        self.shown.Set([self._heading(c) for c in ed.shown])
+        self.shown.SetSelection(min(max(shown_index, 0), len(ed.shown) - 1))
+        rest = ed.available()
+        # An empty list reads as nothing at all to a screen reader.
+        self.available.Set([self._heading(c) for c in rest] or ["Every column is shown."])
+        self.available.SetSelection(min(max(available_index, 0), max(len(rest), 1) - 1))
+        self._show_preview()
+
+    def _show_preview(self) -> None:
+        ed = self._editor
+        text = ""
+        if self._sample is not None and self._set.id == self._current_id:
+            text = row_text(self._sample, self._set.defs(ed.shown), self.speak_labels())
+            if not text:
+                text = "This row has nothing in the columns shown."
+        if not text:
+            text = "Read in this order: " + ", ".join(self._heading(c) for c in ed.shown) + "."
+        self.preview.ChangeValue(text)
+
+    # ── Actions ──────────────────────────────────────────────────────
+
+    def add(self) -> None:
+        """Show the selected available column, at the end of the row; stay in
+        Available for the next, or go to Shown when that was the last."""
+        index = self.available.GetSelection()
+        if not self._editor.add(index):
+            wx.Bell()
+            return
+        self._fill(len(self._editor.shown) - 1, index)
+        (self.available if self._editor.available() else self.shown).SetFocus()
+
+    def remove(self) -> None:
+        index = self.shown.GetSelection()
+        self.shown.SetFocus()
+        if not self._editor.remove(index):
+            wx.Bell()  # nothing selected, or the last column
+            return
+        self._fill(index)
+
+    def move(self, step: int) -> None:
+        index = self.shown.GetSelection()
+        self._move_to(index, index + step)
+
+    def move_to_end(self, top: bool) -> None:
+        self._move_to(self.shown.GetSelection(), 0 if top else len(self._editor.shown) - 1)
+
+    def _move_to(self, index: int, target: int) -> None:
+        self.shown.SetFocus()
+        if not self._editor.move(index, target):
+            wx.Bell()
+            return
+        # Only the rows that changed: setting every row again would reset the
+        # list under the screen reader.
+        for row in range(min(index, target), max(index, target) + 1):
+            self.shown.SetString(row, self._heading(self._editor.shown[row]))
+        self.shown.SetSelection(target)
+        self._show_preview()
+
+    def reset(self) -> None:
+        self._editor.reset()
+        self._fill(0, 0)
+        self.shown.SetFocus()
+
+    def _on_char_hook(self, event: wx.KeyEvent) -> None:
+        key = event.GetKeyCode()
+        focus = wx.Window.FindFocus()
+        plain = not (event.ControlDown() or event.ShiftDown() or event.AltDown())
+        if focus is self.available and plain and key in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER):
+            self.add()  # Enter in Available adds, rather than pressing OK
+            return
+        if focus is self.shown:
+            if plain and key in (wx.WXK_DELETE, wx.WXK_NUMPAD_DELETE, wx.WXK_BACK):
+                self.remove()
+                return
+            if event.AltDown() and not (event.ControlDown() or event.ShiftDown()):
+                moves = {wx.WXK_UP: lambda: self.move(-1), wx.WXK_DOWN: lambda: self.move(1),
+                         wx.WXK_HOME: lambda: self.move_to_end(True),
+                         wx.WXK_END: lambda: self.move_to_end(False)}
+                if key in moves:
+                    moves[key]()
+                    return
+        event.Skip()
+
+
 # ── Pull request dialogs ────────────────────────────────────────────────
 
 
@@ -2280,6 +2493,7 @@ class GhViewerFrame(wx.Frame):
         self._col_menu_items = {}
         self._rebuild_columns_menu()
         view_menu.AppendSubMenu(self._col_menu, "Columns")
+        view_menu.Append(ID_CHOOSE_COLUMNS, "Choose Columns...")
 
         view_menu.AppendSeparator()
 
@@ -2325,6 +2539,7 @@ class GhViewerFrame(wx.Frame):
         # Bind mode/state/tab menu items
         self.Bind(wx.EVT_MENU, self.on_quick_mode, id=ID_QUICK_MODE)
         self.Bind(wx.EVT_MENU, self.on_full_mode, id=ID_FULL_MODE)
+        self.Bind(wx.EVT_MENU, self.on_choose_columns, id=ID_CHOOSE_COLUMNS)
         self.Bind(wx.EVT_MENU, self.on_state_open, id=ID_STATE_OPEN)
         self.Bind(wx.EVT_MENU, self.on_state_closed, id=ID_STATE_CLOSED)
         self.Bind(wx.EVT_MENU, self.on_state_all, id=ID_STATE_ALL)
@@ -6370,6 +6585,45 @@ class GhViewerFrame(wx.Frame):
         if self.items:
             self.items = sort_items(self.items, self.sort_order)
             self._refresh_list_display()
+
+    def on_choose_columns(self, event: wx.CommandEvent) -> None:
+        """View ▸ Choose Columns: every list's columns, their order, and
+        whether their names are read, in one dialog (ColumnsDialog)."""
+        current = _view_columns(self.view_mode)
+        sets = list({cs.id: cs for cs in VIEW_COLUMNS.values()}.values())
+        layouts = {cs.id: settings.load_columns(cs) for cs in sets}
+        layouts[current.id] = list(self.columns)
+        # The selected row, or the first, for the preview.
+        item = self._focused_item() or self._row_item(0)
+        sample = _row_values(item, current.ids) if item is not None else None
+        dlg = ColumnsDialog(self, sets, current.id, layouts, self.list_mode == "full", sample)
+        try:
+            if dlg.ShowModal() != wx.ID_OK:
+                return
+            changed, speak = dlg.layouts(), dlg.speak_labels()
+        finally:
+            dlg.Destroy()
+        self._apply_column_choices(changed, speak)
+
+    def _apply_column_choices(self, changed: dict[str, list[str]], speak: bool) -> None:
+        sets = {cs.id: cs for cs in VIEW_COLUMNS.values()}
+        for set_id, cols in changed.items():
+            settings.save_columns(sets[set_id], cols)
+        mode = "full" if speak else "quick"
+        redraw = mode != self.list_mode
+        if redraw:
+            self.list_mode = mode
+            settings.save_list_mode(mode)
+            self._update_mode_status()
+        current = _view_columns(self.view_mode)
+        if current.id in changed:
+            self.columns = list(changed[current.id])
+            self._rebuild_columns()
+            redraw = True
+        self._update_menu_checks()
+        if redraw and (self.items or self.git_items or self.view_mode == VIEW_FAVORITES):
+            self._refresh_list_display()
+        self._announce("Columns saved." if changed or redraw else "No changes to the columns.")
 
     def on_column_toggled(self, event: wx.CommandEvent) -> None:
         col = self._col_menu_items.get(event.GetId())

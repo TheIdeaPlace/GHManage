@@ -86,3 +86,15 @@ def row_text(values: Mapping[str, str], columns: Sequence[ColumnDef],
         else:
             out += separator + p
     return out
+
+
+def reconcile(saved, column_set: ColumnSet) -> list[str]:
+    """A saved layout made safe to use: columns the set no longer has, and
+    repeats, are dropped, the saved order kept. Columns added since stay off
+    until chosen. Nothing usable left means the set's defaults."""
+    known = set(column_set.ids)
+    out: list[str] = []
+    for col_id in saved if isinstance(saved, (list, tuple)) else []:
+        if isinstance(col_id, str) and col_id in known and col_id not in out:
+            out.append(col_id)
+    return out or list(column_set.defaults)

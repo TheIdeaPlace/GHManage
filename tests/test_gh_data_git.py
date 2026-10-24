@@ -80,10 +80,29 @@ def test_fetch_commits_endpoint(fake_gh, branch, endpoint):
 
 
 def test_fetch_commits_keeps_first_line_only(fake_gh):
+    fake_gh.route(".default_branch", "main\n")
     fake_gh.route("commits", [{"sha": "c" * 40, "message": "Subject\n\nBody", "author": "A",
                                "date": "d", "url": "https://x"}])
     [c] = gh_data.fetch_commits("o/r")
     assert c.message == "Subject" and c.short_sha == "c" * 8 and c.url == "https://x"
+
+
+def test_fetch_commits_names_the_branch(fake_gh):
+    fake_gh.route(".default_branch", "main\n")
+    fake_gh.route("commits", [{"sha": "c" * 40, "message": "m"}])
+    [c] = gh_data.fetch_commits("o/r")
+    assert c.branches == ["main"]
+    [c] = gh_data.fetch_commits("o/r", branch="dev")
+    assert c.branches == ["dev"]
+    # The default branch is only looked up when no branch was asked for
+    assert len(fake_gh.called_with(".default_branch")) == 1
+
+
+def test_fetch_commits_default_branch_lookup_failing_leaves_it_blank(fake_gh):
+    fake_gh.route(".default_branch", GhError("nope"))
+    fake_gh.route("commits", [{"sha": "c" * 40, "message": "m"}])
+    [c] = gh_data.fetch_commits("o/r")
+    assert c.branches == []
 
 
 def test_fetch_commit_detail(fake_gh):
@@ -105,6 +124,142 @@ def test_commit_row():
     assert c.to_row(["sha", "+/-", "files"]) == {"sha": "short", "+/-": "", "files": ""}
     c.additions, c.files_changed = 4, 2
     assert c.to_row(["+/-", "files"]) == {"+/-": "+4/-0", "files": "2"}
+    c.branches = ["main"]
+    assert c.to_row(["branch"]) == {"branch": "main"}
+
+
+@pytest.mark.parametrize("branches, shown", [
+    ([], ""),
+    (["main", "a", "b", "c"], "main, a, b, c"),        # one more would just say "and 1 more"
+    (["main", "a", "b", "c", "d"], "main, a, b and 2 more"),
+])
+def test_branch_summary(branches, shown):
+    assert gh_data.branch_summary(branches) == shown
+
+
+# ── Commits on all branches ────────────────────────────────────────────
+
+
+def _node(sha, date, msg="m"):
+    return {"oid": sha, "message": msg, "url": f"u/{sha}",
+            "authoredDate": date, "author": {"name": "A"}}
+
+
+class FakeGraphql:
+    """Stands in for ``_graphql``: the branch list, then each branch's history."""
+
+    def __init__(self, names, default, history, fail=(), tips=None, page=100):
+        self.names, self.default, self.history, self.fail = names, default, history, fail
+        self.tips = tips or {}       # branch -> its latest commit's date
+        self.page = page
+        self.queries: list[str] = []
+
+    def __call__(self, query):
+        self.queries.append(query)
+        if "refs(" in query:
+            import re
+            cursor = re.search(r'after: "(\d+)"', query)
+            start = int(cursor.group(1)) if cursor else 0
+            names = self.names[start:start + self.page]
+            more = start + self.page < len(self.names)
+            return {"data": {"repository": {
+                "defaultBranchRef": {"name": self.default},
+                "refs": {
+                    "pageInfo": {"hasNextPage": more, "endCursor": str(start + self.page)},
+                    "nodes": [{"name": n, "target": {"committedDate": self.tips.get(n, "")}}
+                              for n in names]}}}}
+        repo = {}
+        for i, name in enumerate(self._asked(query)):
+            if name in self.fail:
+                raise GhError("timed out")
+            if name in self.history:
+                repo[f"b{i}"] = {"target": {"history": {"nodes": self.history[name]}}}
+            else:
+                repo[f"b{i}"] = None   # gone, or an error in that part of the reply
+        return {"data": {"repository": repo}}
+
+    @staticmethod
+    def _asked(query):
+        import re
+        return re.findall(r'qualifiedName: "refs/heads/([^"]+)"', query)
+
+
+def test_all_branches_merges_and_names_every_branch(monkeypatch):
+    shared, old = _node("s" * 40, "2026-01-02T00:00:00Z"), _node("o" * 40, "2026-01-01T00:00:00Z")
+    fake = FakeGraphql(["dev", "main"], "main", {
+        "main": [shared, old],
+        "dev": [_node("d" * 40, "2026-01-03T00:00:00Z", "Dev work"), shared],
+    })
+    monkeypatch.setattr(gh_data, "_graphql", fake)
+    commits, unread = gh_data.fetch_all_branch_commits("o/r", limit=50)
+    assert unread == 0
+    # Each commit once, newest first
+    assert [c.sha[0] for c in commits] == ["d", "s", "o"]
+    dev, both, main_only = commits
+    assert dev.branches == ["dev"] and dev.message == "Dev work" and dev.short_sha == "d" * 8
+    # The default branch leads, though dev was committed to more recently
+    assert both.branches == ["main", "dev"]
+    assert main_only.branches == ["main"]
+    assert all("history(first: 50)" in q for q in fake.queries[1:])
+
+
+def test_all_branches_asks_for_at_most_a_page_of_history(monkeypatch):
+    fake = FakeGraphql(["main"], "main", {"main": []})
+    monkeypatch.setattr(gh_data, "_graphql", fake)
+    gh_data.fetch_all_branch_commits("o/r", limit=300)
+    assert "history(first: 100)" in fake.queries[1]
+
+
+def test_all_branches_splits_branches_across_queries(monkeypatch):
+    names = [f"b{i}" for i in range(45)]
+    fake = FakeGraphql(names, "b0", {n: [_node(f"{i:040d}", "2026-01-01T00:00:00Z")]
+                                     for i, n in enumerate(names)})
+    monkeypatch.setattr(gh_data, "_graphql", fake)
+    commits, _ = gh_data.fetch_all_branch_commits("o/r")
+    assert len(commits) == 45
+    asked = [FakeGraphql._asked(q) for q in fake.queries[1:]]
+    assert sorted(len(a) for a in asked) == [5, 20, 20]
+
+
+def test_all_branches_keeps_what_it_got_when_some_fail(monkeypatch):
+    names = [f"b{i}" for i in range(25)]   # two queries: b0..b19, b20..b24
+    fake = FakeGraphql(names, "b0", {"b0": [_node("a" * 40, "2026-01-01T00:00:00Z")]},
+                       fail={"b20"})
+    monkeypatch.setattr(gh_data, "_graphql", fake)
+    [c], unread = gh_data.fetch_all_branch_commits("o/r")
+    assert c.branches == ["b0"]
+    # b20..b24 failed together; b1..b19 were read and had no commits, but
+    # their parts of the reply were null, so they count as not read either
+    assert unread == 24
+
+
+def test_all_branches_raises_when_every_query_fails(monkeypatch):
+    fake = FakeGraphql(["main"], "main", {}, fail={"main"})
+    monkeypatch.setattr(gh_data, "_graphql", fake)
+    with pytest.raises(GhError, match="timed out"):
+        gh_data.fetch_all_branch_commits("o/r")
+
+
+def test_all_branches_reports_github_error(monkeypatch):
+    monkeypatch.setattr(gh_data, "_graphql", lambda q: {
+        "data": {"repository": None},
+        "errors": [{"message": "Could not resolve to a Repository"}]})
+    with pytest.raises(GhError, match="Could not resolve"):
+        gh_data.fetch_all_branch_commits("o/r")
+
+
+def test_all_branches_with_no_branches_is_empty(monkeypatch):
+    fake = FakeGraphql([], "", {})
+    monkeypatch.setattr(gh_data, "_graphql", fake)
+    assert gh_data.fetch_all_branch_commits("o/r") == ([], 0)
+    assert len(fake.queries) == 1
+
+
+def test_all_branches_quotes_names_into_the_query(monkeypatch):
+    fake = FakeGraphql(['we"ird'], "", {})
+    monkeypatch.setattr(gh_data, "_graphql", fake)
+    gh_data.fetch_all_branch_commits('o/r')
+    assert 'qualifiedName: "refs/heads/we\\"ird"' in fake.queries[1]
 
 
 # ── Tags ───────────────────────────────────────────────────────────────
@@ -303,3 +458,123 @@ def test_fetch_compare_bad_payload(fake_gh):
     fake_gh.route("compare", [])
     result = gh_data.fetch_compare("o/r", "a", "b")
     assert (result.ahead_by, result.behind_by) == (0, 0)
+
+
+def test_all_branches_reads_every_branch_it_listed(monkeypatch):
+    fake = FakeGraphql(["main", "dev"], "main", {"main": [], "dev": []})
+    monkeypatch.setattr(gh_data, "_graphql", fake)
+    assert gh_data.fetch_all_branch_commits("o/r") == ([], 0)
+
+
+def test_all_branches_puts_dates_in_utc_and_sorts_by_them(monkeypatch):
+    # 23:30 at -08:00 is 07:30 the next day in UTC: later than 06:00Z
+    late = _node("l" * 40, "2026-01-01T23:30:00-08:00")
+    early = _node("e" * 40, "2026-01-02T06:00:00Z")
+    fake = FakeGraphql(["main"], "main", {"main": [early, late]})
+    monkeypatch.setattr(gh_data, "_graphql", fake)
+    commits, _ = gh_data.fetch_all_branch_commits("o/r")
+    assert [c.date for c in commits] == ["2026-01-02T07:30:00Z", "2026-01-02T06:00:00Z"]
+
+
+def test_all_branches_keeps_the_whole_message(monkeypatch):
+    fake = FakeGraphql(["main"], "main", {"main": [
+        _node("a" * 40, "2026-01-01T00:00:00Z", "Subject\n\nBody")]})
+    monkeypatch.setattr(gh_data, "_graphql", fake)
+    [c], _ = gh_data.fetch_all_branch_commits("o/r")
+    assert c.message == "Subject\n\nBody"
+    assert c.to_row(["message"]) == {"message": "Subject"}
+
+
+def test_all_branches_reads_a_quiet_default_branch(monkeypatch):
+    names = [f"b{i}" for i in range(100)]   # 100 busier branches, main not among them
+    fake = FakeGraphql(names, "main", {n: [] for n in names + ["main"]})
+    monkeypatch.setattr(gh_data, "_graphql", fake)
+    gh_data.fetch_all_branch_commits("o/r")
+    asked = [b for q in fake.queries[1:] for b in FakeGraphql._asked(q)]
+    assert asked[0] == "main" and len(asked) == 100 and "b99" not in asked
+
+
+def test_all_branches_keeps_the_newest_up_to_the_limit(monkeypatch):
+    nodes = [_node(f"{i:040d}", f"2026-01-{i + 1:02d}T00:00:00Z") for i in range(30)]
+    fake = FakeGraphql(["main", "dev"], "main", {"main": nodes[:15], "dev": nodes[15:]})
+    monkeypatch.setattr(gh_data, "_graphql", fake)
+    commits, _ = gh_data.fetch_all_branch_commits("o/r", limit=10)
+    assert [c.date[:10] for c in commits] == [f"2026-01-{d:02d}" for d in range(30, 20, -1)]
+
+
+def test_fetch_commits_refuses_all_branches():
+    with pytest.raises(ValueError):
+        gh_data.fetch_commits("o/r", branch=gh_data.ALL_BRANCHES)
+
+
+def test_default_branch_is_looked_up_once_per_repo(fake_gh):
+    fake_gh.route(".default_branch", "main\n")
+    fake_gh.route("commits", [{"sha": "c" * 40, "message": "m"}])
+    gh_data.fetch_commits("o/r")
+    gh_data.fetch_commits("o/r")
+    assert len(fake_gh.called_with(".default_branch")) == 1
+
+
+def test_a_failed_default_branch_lookup_is_tried_again(fake_gh):
+    fake_gh.route(".default_branch", GhError("nope"))
+    assert gh_data.fetch_default_branch("o/r") == ""
+    assert gh_data.fetch_default_branch("o/r") == ""
+    assert len(fake_gh.called_with(".default_branch")) == 2
+
+
+def _asked_branches(fake):
+    return [b for q in fake.queries if "refs(" not in q for b in FakeGraphql._asked(q)]
+
+
+def test_all_branches_reads_the_most_recently_committed_to(monkeypatch):
+    names = [f"b{i:03d}" for i in range(250)]
+    # Newest last by name, so taking them in GitHub's order would miss them
+    tips = {n: f"2026-01-01T00:{i // 60:02d}:{i % 60:02d}Z" for i, n in enumerate(names)}
+    fake = FakeGraphql(names, "b000", {n: [] for n in names}, tips=tips)
+    monkeypatch.setattr(gh_data, "_graphql", fake)
+    gh_data.fetch_all_branch_commits("o/r")
+    assert sum("refs(" in q for q in fake.queries) == 3     # 250 names, 100 a page
+    asked = _asked_branches(fake)
+    assert asked[0] == "b000"                                 # the default, though oldest
+    assert asked[1:3] == ["b249", "b248"] and len(asked) == 100
+    assert "b150" not in asked
+
+
+def test_all_branches_sorts_tips_in_any_offset(monkeypatch):
+    tips = {"west": "2026-01-01T23:00:00-08:00",   # 07:00Z on the 2nd
+            "utc": "2026-01-02T06:00:00Z"}
+    fake = FakeGraphql(["utc", "west"], "", {"utc": [], "west": []}, tips=tips)
+    monkeypatch.setattr(gh_data, "_graphql", fake)
+    gh_data.fetch_all_branch_commits("o/r")
+    assert _asked_branches(fake) == ["west", "utc"]
+
+
+def test_all_branches_stops_listing_after_ten_pages(monkeypatch):
+    names = [f"b{i:04d}" for i in range(1500)]
+    fake = FakeGraphql(names, "", {}, page=100)
+    monkeypatch.setattr(gh_data, "_graphql", fake)
+    gh_data.fetch_all_branch_commits("o/r")
+    assert sum("refs(" in q for q in fake.queries) == 10
+
+
+def test_all_branches_keeps_the_branches_listed_before_a_page_fails(monkeypatch):
+    names = [f"b{i:03d}" for i in range(150)]
+    fake = FakeGraphql(names, "", {n: [] for n in names})
+
+    def flaky(query):
+        if 'after: "100"' in query:
+            raise GhError("rate limited")
+        return fake(query)
+
+    monkeypatch.setattr(gh_data, "_graphql", flaky)
+    assert gh_data.fetch_all_branch_commits("o/r") == ([], 0)
+    assert len(_asked_branches(fake)) == 100
+
+
+def test_all_branches_fails_when_no_branches_could_be_listed(monkeypatch):
+    def failing(query):
+        raise GhError("rate limited")
+
+    monkeypatch.setattr(gh_data, "_graphql", failing)
+    with pytest.raises(GhError, match="rate limited"):
+        gh_data.fetch_all_branch_commits("o/r")

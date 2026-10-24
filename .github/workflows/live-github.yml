@@ -1,0 +1,46 @@
+name: Live GitHub checks
+
+# The unit tests fake gh. These run tests/test_live_github.py against the
+# real API, read-only, with the workflow's own token: whether GitHub accepts
+# the queries and fills the fields the way the code expects. They don't open
+# the app. Run by hand, or on a PR that changes how gh_data talks to GitHub.
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: Public repository to read (OWNER/NAME)
+        default: cli/cli
+  pull_request:
+    branches: [main]
+    paths:
+      - gh_data.py
+      - tests/test_live_github.py
+      - .github/workflows/live-github.yml
+
+permissions:
+  contents: read
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GHMANAGE_LIVE_GITHUB: '1'
+      GHMANAGE_LIVE_REPO: ${{ inputs.repo || 'cli/cli' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      # gh_data needs nothing beyond the standard library and gh, which the
+      # runner has; the wx app isn't imported.
+      - name: Install pytest
+        run: pip install "pytest>=8,<10"
+
+      - name: Run live checks
+        run: python -m pytest tests/test_live_github.py -v -s -rs

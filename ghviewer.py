@@ -45,6 +45,8 @@ from gh_data import (
     RepoEntry,
     BRANCH_COLUMNS,
     BRANCH_DEFAULT_COLUMNS,
+    ALL_BRANCHES,
+    ALL_BRANCHES_PER_BRANCH_MAX,
     COMMIT_COLUMNS,
     COMMIT_DEFAULT_COLUMNS,
     DEFAULT_COLUMNS,
@@ -132,6 +134,7 @@ from gh_data import (
     fetch_dispatch_spec,
     fetch_run_artifacts,
     fetch_compare,
+    fetch_all_branch_commits,
     fetch_commits,
     fetch_commit_detail,
     fetch_issues,
@@ -508,6 +511,15 @@ def _utc_now_iso() -> str:
 
 def _first_line(text: str) -> str:
     return text.splitlines()[0].strip() if text else ""
+
+
+# What Select Branch lists for ALL_BRANCHES.
+ALL_BRANCHES_CHOICE = "All branches"
+
+
+def _commit_branch_label(branch: str) -> str:
+    """``commit_branch`` as words: ALL_BRANCHES reads "all branches"."""
+    return "all branches" if branch == ALL_BRANCHES else branch
 
 
 def copy_values(item) -> CopyValues | None:
@@ -1902,7 +1914,9 @@ class GhViewerFrame(wx.Frame):
         self.current_limit: int = 100  # current fetch limit (grows via View More)
         self.view_mode: str = VIEW_ISSUES  # current view: issues, branches, commits, etc.
         self.git_items: list = []   # holds Branch/Commit/Tag/Release/WorkflowRun objects
-        self.commit_branch: str = ""  # branch for commits view ("" = default branch)
+        # branch for commits view ("" = default branch, ALL_BRANCHES = every one)
+        self.commit_branch: str = ""
+        self._branches_unread: int = 0  # all-branches commits: branches that failed to load
         self.artifacts_run: WorkflowRun | None = None  # run whose artifacts are shown
         self.jobs_run: WorkflowRun | None = None  # run whose jobs are shown
         self.assets_release: Release | None = None  # release whose assets are shown
@@ -3249,6 +3263,7 @@ class GhViewerFrame(wx.Frame):
         token = self._begin_fetch()
         view = self.view_mode
         limit = self.current_limit
+        commit_branch = self.commit_branch
         include_read = self._include_read
         org = self._org
         org_logins = [o.login for o in self._orgs]
@@ -3280,8 +3295,11 @@ class GhViewerFrame(wx.Frame):
                 elif view == VIEW_BRANCHES:
                     branches = fetch_branches(self.repo, self.current_limit)
                     wx.CallAfter(self._on_git_items_loaded, token, branches, "branches")
+                elif view == VIEW_COMMITS and commit_branch == ALL_BRANCHES:
+                    commits, unread = fetch_all_branch_commits(self.repo, limit)
+                    wx.CallAfter(self._on_all_branch_commits_loaded, token, commits, unread)
                 elif view == VIEW_COMMITS:
-                    commits = fetch_commits(self.repo, self.commit_branch, self.current_limit)
+                    commits = fetch_commits(self.repo, commit_branch, limit)
                     wx.CallAfter(self._on_git_items_loaded, token, commits, "commits")
                 elif view == VIEW_TAGS:
                     tags = fetch_tags(self.repo, self.current_limit)
@@ -3455,7 +3473,7 @@ class GhViewerFrame(wx.Frame):
         parts: list[str] = [view_label]
         # Include branch where it matters (commits view)
         if self.view_mode == VIEW_COMMITS and self.commit_branch:
-            parts.append(self.commit_branch)
+            parts.append(_commit_branch_label(self.commit_branch))
         # Include the run being drilled into (artifacts view)
         if self.view_mode == VIEW_ARTIFACTS and self.artifacts_run:
             parts.append(f"run #{self.artifacts_run.run_number} {self.artifacts_run.name}")
@@ -3599,6 +3617,19 @@ class GhViewerFrame(wx.Frame):
         self._announce(f"{self.repo} — GitHub Pages is not enabled.")
         self._update_title()
 
+    def _on_all_branch_commits_loaded(self, token: int, commits: list, unread: int) -> None:
+        """Commits on all branches, and how many branches couldn't be read."""
+        if not self._fetch_is_current(token):
+            return
+        self._branches_unread = unread
+        self._on_git_items_loaded(token, commits, "commits")
+        if unread:
+            # The status bar says so too, but a list with gaps is worth hearing
+            self._announce(
+                f"{unread} branch{'es' if unread != 1 else ''} couldn't be read, "
+                "so their commits may be missing."
+            )
+
     def _on_git_items_loaded(self, token: int, items: list, kind: str) -> None:
         """Handle loaded git items (branches, commits, tags, releases, workflow runs)."""
         if not self._fetch_is_current(token):
@@ -3609,7 +3640,8 @@ class GhViewerFrame(wx.Frame):
         # Build status text — include branch name for commits view
         branch_info = ""
         if self.view_mode == VIEW_COMMITS:
-            branch_info = f" on {self.commit_branch}" if self.commit_branch else " on default branch"
+            branch_info = (f" on {_commit_branch_label(self.commit_branch)}"
+                           if self.commit_branch else " on default branch")
         compare_hint = "  Ctrl+Shift+B=compare branches" if self.view_mode == VIEW_BRANCHES else ""
         if self.view_mode == VIEW_WORKFLOWS:
             compare_hint = "  Enter=run on branch"
@@ -3650,6 +3682,11 @@ class GhViewerFrame(wx.Frame):
                 f" Live at {site.url} — {site.status_display}, "
                 f"published from {site.source_branch}{site.source_path}."
             )
+        elif (self.view_mode == VIEW_COMMITS and self.commit_branch == ALL_BRANCHES
+              and self._branches_unread):
+            n = self._branches_unread
+            totals = (f" {n} branch{'es' if n != 1 else ''} couldn't be read, "
+                      "so their commits may be missing.")
         # Ctrl+B only picks a branch in the Commits view — offering it in the
         # tags, releases, or labels list is advertising a key that answers
         # "Select Branch is only available in Commits view."
@@ -4002,7 +4039,8 @@ class GhViewerFrame(wx.Frame):
         """Show a commit that isn't in the list: fetched, and put at the top."""
         if self.view_mode != VIEW_COMMITS or not self.repo:
             return
-        self._announce(f"Commit {sha[:7]} isn't among the newest on this branch, fetching…")
+        where = "any branch" if self.commit_branch == ALL_BRANCHES else "this branch"
+        self._announce(f"Commit {sha[:7]} isn't among the newest on {where}, fetching…")
         repo, token = self.repo, self._fetch_token
 
         def worker() -> None:
@@ -4026,7 +4064,7 @@ class GhViewerFrame(wx.Frame):
         self._focus_list(0)
         self._announce(
             f"Opened commit {commit.short_sha} — {_first_line(commit.message)}. "
-            "It is not on this branch's latest commits, so it is shown first."
+            "It is not among the latest commits listed, so it is shown first."
         )
 
     def _on_items_error(self, msg: str) -> None:
@@ -4181,8 +4219,14 @@ class GhViewerFrame(wx.Frame):
         elif isinstance(item, Commit):
             lines.append(f"Commit: {item.sha}")
             lines.append(f"Short SHA: {item.short_sha}")
-            branch = self.commit_branch if self.commit_branch else "default branch"
-            lines.append(f"Branch: {branch}")
+            if len(item.branches) > 1:
+                lines.append(f"Branches: {', '.join(item.branches)}")
+            elif item.branches:
+                lines.append(f"Branch: {item.branches[0]}")
+            elif self.commit_branch != ALL_BRANCHES:
+                # Opened on its own (Go To, an address): the list's branch.
+                # On all branches there is no telling which, so nothing.
+                lines.append(f"Branch: {self.commit_branch or 'default branch'}")
             lines.append(f"Author: {item.author}")
             lines.append(f"Date: {item.date}")
             lines.append("URL:")
@@ -5698,6 +5742,14 @@ class GhViewerFrame(wx.Frame):
             self._pending_focus_row = len(self._shown)
         elif not self.repo:
             return
+        elif (self.view_mode == VIEW_COMMITS and self.commit_branch == ALL_BRANCHES
+              and len(self.git_items) < self.current_limit):
+            self._announce(
+                f"That is every commit All branches reads: the newest "
+                f"{ALL_BRANCHES_PER_BRANCH_MAX} of each branch. To go further back, "
+                "pick one branch with Ctrl+B."
+            )
+            return
         self.current_limit += self.page_size
         self._load_items()
 
@@ -6136,6 +6188,11 @@ class GhViewerFrame(wx.Frame):
             self._announce("No branches found.")
             return
         current = self.commit_branch if self.commit_branch else names[0]
+        if current == ALL_BRANCHES:
+            current = ALL_BRANCHES_CHOICE
+        # Every branch at once comes first. Git allows no spaces in a branch
+        # name, so "All branches" can't be one.
+        names = [ALL_BRANCHES_CHOICE] + names
         dlg = wx.SingleChoiceDialog(
             self,
             "Select a branch to view commits:",
@@ -6148,11 +6205,16 @@ class GhViewerFrame(wx.Frame):
         if dlg.ShowModal() == wx.ID_OK:
             selected = dlg.GetStringSelection()
             dlg.Destroy()
+            if selected == ALL_BRANCHES_CHOICE:
+                selected = ALL_BRANCHES
             if selected and selected != self.commit_branch:
                 self.commit_branch = selected
                 self.current_limit = self.page_size
                 self._load_items()
-                self._announce(f"Showing commits on branch {selected}")
+                if selected == ALL_BRANCHES:
+                    self._announce("Showing commits on all branches")
+                else:
+                    self._announce(f"Showing commits on branch {selected}")
         else:
             dlg.Destroy()
 

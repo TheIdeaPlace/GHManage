@@ -132,7 +132,7 @@ UI thread via `wx.CallAfter`. Never touch wx widgets from a worker thread.
 - `_navigate_comment(direction)` — Alt+N/Alt+P comment jumping.
 - `_refresh_list_display` — re-populate list from `self.items` or `self.git_items` without re-fetching.
 - `on_item_activated` — context-dependent: in Branches view, Enter switches to Commits for that branch; otherwise opens in browser.
-- `on_select_branch` — Ctrl+B branch picker dialog for Commits view.
+- `on_select_branch` — Ctrl+B branch picker dialog for Commits view. Its first entry, "All branches", sets `commit_branch` to `ALL_BRANCHES` ("*"), which `fetch_commits` hands to `fetch_all_branch_commits` (GraphQL, newest 100 commits of up to 100 branches, merged).
 - **The Labels view is a view of the Issues view, not a drill-down.** Enter on a label
   sets `label_filter` and loads Issues & PRs restricted to it, which keeps the state
   filter, columns, sorting, and every issue action working. It is deliberately *not* in

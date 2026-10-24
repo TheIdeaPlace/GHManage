@@ -85,6 +85,7 @@ def _isolated(monkeypatch, tmp_path_factory):
     # blank. Tests about titles install their own via the `graphql` fixture.
     monkeypatch.setattr(gh_data, "_graphql", lambda query: {"data": {}})
     monkeypatch.setattr(gh_data, "_gh_exe", None)
+    monkeypatch.setattr(gh_data, "_default_branches", {})  # looked up afresh per test
     monkeypatch.delenv("GHMANAGE_GH_PATH", raising=False)
     home = tmp_path_factory.mktemp("appdata")
     monkeypatch.setenv("APPDATA", str(home))

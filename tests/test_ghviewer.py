@@ -1546,3 +1546,141 @@ def test_the_status_bar_names_the_way_back(view, return_view, keys, expected):
     f._update_filter_status = lambda: None
     Frame._set_view_status(f, "msg", keys)
     assert set_items["keys"] == expected
+
+
+# ── Commits on all branches ────────────────────────────────────────────
+
+
+def _commit(branches):
+    return Commit("c" * 40, "cccccccc", "msg", "me", "2026-01-01", url=URL, branches=branches)
+
+
+@pytest.mark.parametrize("branches, commit_branch, line", [
+    (["main", "dev"], ghviewer.ALL_BRANCHES, "Branches: main, dev"),
+    (["main"], "", "Branch: main"),
+    # A commit opened on its own carries no branch: say what the list is of
+    ([], "dev", "Branch: dev"),
+    ([], "", "Branch: default branch"),
+])
+def test_commit_details_name_its_branches(branches, commit_branch, line):
+    f = _frame(git_items=[_commit(branches)], commit_branch=commit_branch)
+    Frame._show_git_details(f, 0)
+    assert line in f.details_text.lines
+
+
+def test_commit_opened_on_its_own_on_all_branches_names_no_branch():
+    f = _frame(git_items=[_commit([])], commit_branch=ghviewer.ALL_BRANCHES)
+    Frame._show_git_details(f, 0)
+    assert not any(l.startswith("Branch") for l in f.details_text.lines)
+
+
+def _commits_frame(branch, limit):
+    loads: list[int] = []
+    f = _frame(view_mode=ghviewer.VIEW_COMMITS, commit_branch=branch,
+               current_limit=limit, page_size=100)
+    f._load_items = lambda: loads.append(f.current_limit)
+    return f, loads
+
+
+def test_view_more_on_all_branches_stops_when_there_is_no_more():
+    f, loads = _commits_frame(ghviewer.ALL_BRANCHES, 200)
+    f.git_items = [_commit(["main"])] * 150
+    Frame.on_view_more(f, None)
+    assert loads == []
+    assert "pick one branch with Ctrl+B" in f.announced[-1]
+
+
+def test_view_more_on_all_branches_loads_while_the_list_is_full():
+    f, loads = _commits_frame(ghviewer.ALL_BRANCHES, 100)
+    f.git_items = [_commit(["main"])] * 100
+    Frame.on_view_more(f, None)
+    assert loads == [200]
+
+
+def test_view_more_on_one_branch_still_loads():
+    f, loads = _commits_frame("dev", 100)
+    Frame.on_view_more(f, None)
+    assert loads == [200]
+
+
+def test_commit_branch_label():
+    assert ghviewer._commit_branch_label(ghviewer.ALL_BRANCHES) == "all branches"
+    assert ghviewer._commit_branch_label("dev") == "dev"
+
+
+class FakeChoiceDialog:
+    """Stands in for wx.SingleChoiceDialog; picks ``choose`` on ShowModal."""
+    choose = None
+    last = None
+
+    def __init__(self, parent, message, caption, choices):
+        self.choices, self.selection = choices, None
+        FakeChoiceDialog.last = self
+
+    def SetSelection(self, i): self.selection = i
+    def ShowModal(self): return ghviewer.wx.ID_OK
+    def GetStringSelection(self): return self.choose
+    def Destroy(self): pass
+
+
+@pytest.fixture
+def choice_dialog(monkeypatch):
+    monkeypatch.setattr(ghviewer.wx, "SingleChoiceDialog", FakeChoiceDialog)
+    return FakeChoiceDialog
+
+
+@pytest.mark.parametrize("current, preselected", [
+    (ghviewer.ALL_BRANCHES, 0),
+    ("dev", 2),
+])
+def test_branch_picker_offers_all_branches_first(choice_dialog, current, preselected):
+    f, loads = _commits_frame(current, 100)
+    choice_dialog.choose = "main" if current != "main" else "dev"
+    Frame._show_branch_picker(f, ["main", "dev"])
+    assert choice_dialog.last.choices == ["All branches", "main", "dev"]
+    assert choice_dialog.last.selection == preselected
+
+
+def test_picking_all_branches_loads_every_branch(choice_dialog):
+    f, loads = _commits_frame("dev", 300)
+    choice_dialog.choose = "All branches"
+    Frame._show_branch_picker(f, ["main", "dev"])
+    assert f.commit_branch == ghviewer.ALL_BRANCHES
+    assert loads == [100]   # back to the first page
+    assert f.announced[-1] == "Showing commits on all branches"
+
+
+def _loaded_frame(branch, unread=0):
+    statuses: list = []
+    f = _frame(view_mode=ghviewer.VIEW_COMMITS, commit_branch=branch, current_limit=100,
+               _branches_unread=unread, _fetch_token=1)
+    f._fetch_is_current = lambda t: t == 1
+    f._populate_filtered_list = lambda items, use_favorite_prefix=False: []
+    f._set_view_status = lambda msg, keys="": statuses.append(msg)
+    f._update_title = lambda: None
+    f._take_pending_row = lambda items, token: 0
+    f._on_git_items_loaded = lambda t, items, kind: Frame._on_git_items_loaded(f, t, items, kind)
+    f.statuses = statuses
+    return f
+
+
+def test_all_branches_status_says_so():
+    f = _loaded_frame(ghviewer.ALL_BRANCHES)
+    Frame._on_all_branch_commits_loaded(f, 1, [_commit(["main"])], 0)
+    assert f.statuses[-1].startswith("o/r — 1 commits on all branches.")
+    assert "couldn't be read" not in f.statuses[-1]
+    assert f.announced == []
+
+
+@pytest.mark.parametrize("unread, words", [(1, "1 branch couldn't"), (3, "3 branches couldn't")])
+def test_all_branches_status_says_when_branches_are_missing(unread, words):
+    f = _loaded_frame(ghviewer.ALL_BRANCHES)
+    Frame._on_all_branch_commits_loaded(f, 1, [_commit(["main"])], unread)
+    assert words in f.statuses[-1]
+    assert words in f.announced[-1]
+
+
+def test_stale_all_branches_results_are_dropped():
+    f = _loaded_frame(ghviewer.ALL_BRANCHES, unread=0)
+    Frame._on_all_branch_commits_loaded(f, 0, [_commit(["main"])], 5)
+    assert f.statuses == [] and f._branches_unread == 0

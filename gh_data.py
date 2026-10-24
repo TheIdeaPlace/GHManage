@@ -1107,6 +1107,9 @@ class Commit:
     deletions: int = 0
     files_changed: int = 0
     files: list[dict] = field(default_factory=list)
+    # The branches it was listed from, the default branch first; empty when
+    # not known (a commit opened on its own).
+    branches: list[str] = field(default_factory=list)
 
     def to_row(self, columns: list[str]) -> dict[str, str]:
         mapping = {
@@ -1116,6 +1119,7 @@ class Commit:
             "message": (self.message.splitlines() or [""])[0][:80],
             "author": self.author,
             "date": self.date[:10] if self.date else "",
+            "branch": branch_summary(self.branches),
             "files": str(self.files_changed) if self.files_changed else "",
             "+/-": f"+{self.additions}/-{self.deletions}" if self.additions or self.deletions else "",
         }
@@ -1127,12 +1131,49 @@ class Commit:
         return ", ".join(parts)
 
 
-COMMIT_COLUMNS = ["sha", "message", "author", "date", "files", "+/-"]
+COMMIT_COLUMNS = ["sha", "message", "author", "date", "branch", "files", "+/-"]
 COMMIT_DEFAULT_COLUMNS = ["sha", "message", "author", "date"]
+
+# ``fetch_commits`` branch meaning every branch. Git allows no "*" in a
+# branch name, so it can't be mistaken for one.
+ALL_BRANCHES = "*"
+_ALL_BRANCHES_MAX = 100       # branches read, the most recently committed to first
+_BRANCHES_PER_QUERY = 20      # keeps each history query small enough for GitHub
+ALL_BRANCHES_PER_BRANCH_MAX = 100  # one page of GraphQL history holds no more
+
+
+def branch_summary(branches: list[str], shown: int = 3) -> str:
+    """"main, dev, fix and 4 more" — a row's worth of a commit's branches."""
+    if len(branches) <= shown + 1:
+        return ", ".join(branches)
+    return f"{', '.join(branches[:shown])} and {len(branches) - shown} more"
+
+
+# repo -> its default branch, looked up once a session: it seldom changes,
+# and the Commits view would otherwise ask again on every load.
+_default_branches: dict[str, str] = {}
+
+
+def fetch_default_branch(repo: Optional[str]) -> str:
+    """The repo's default branch name, or "" if it can't be had."""
+    if repo and repo in _default_branches:
+        return _default_branches[repo]
+    try:
+        name = _api(["repos/{owner}/{repo}", "-q", ".default_branch"], repo).strip()
+    except GhError:
+        return ""
+    if repo and name:
+        _default_branches[repo] = name
+    return name
 
 
 def fetch_commits(repo: Optional[str], branch: str = "", limit: int = 100) -> list[Commit]:
-    """Fetch commits for the repo (optionally for a specific branch)."""
+    """Fetch commits for the repo (optionally for a specific branch).
+
+    Not for ``ALL_BRANCHES``: that is ``fetch_all_branch_commits``.
+    """
+    if branch == ALL_BRANCHES:
+        raise ValueError("use fetch_all_branch_commits for every branch")
     endpoint = "repos/{owner}/{repo}/commits"
     if branch:
         endpoint += f"?sha={branch}"
@@ -1142,6 +1183,8 @@ def fetch_commits(repo: Optional[str], branch: str = "", limit: int = 100) -> li
                      repo)
     if not isinstance(rows, list):
         return []
+    # Without a branch GitHub lists the default branch; name it for the column.
+    branch_name = branch or (fetch_default_branch(repo) if rows else "")
     commits: list[Commit] = []
     for row in rows:
         sha = row.get("sha", "")
@@ -1154,8 +1197,126 @@ def fetch_commits(repo: Optional[str], branch: str = "", limit: int = 100) -> li
             author=row.get("author", ""),
             date=row.get("date", ""),
             url=row.get("url", ""),
+            branches=[branch_name] if branch_name else [],
         ))
     return commits
+
+
+def _graphql_repository(reply: dict) -> dict:
+    """The ``repository`` of a GraphQL reply, or GhError saying why not."""
+    data = reply.get("data") if isinstance(reply.get("data"), dict) else {}
+    node = data.get("repository")
+    if isinstance(node, dict):
+        return node
+    errors = reply.get("errors") or []
+    message = errors[0].get("message", "") if errors and isinstance(errors[0], dict) else ""
+    raise GhError(message or "GitHub returned no repository")
+
+
+def _utc_date(stamp: str) -> str:
+    """An ISO 8601 time in UTC with a Z, as REST gives commit dates.
+
+    GraphQL may carry the author's own offset, and dates in different
+    offsets neither sort as strings nor show the same day the other views do.
+    """
+    from datetime import datetime, timezone
+    try:
+        when = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+    except ValueError:
+        return stamp
+    if when.tzinfo is None:
+        return stamp
+    return when.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def fetch_all_branch_commits(repo: Optional[str], limit: int = 100) -> tuple[list[Commit], int]:
+    """The newest commits across branches, each commit once, newest first.
+
+    GitHub has no list of every commit in a repository, so this reads the
+    newest commits (at most 100) of each of the 100 most recently
+    committed-to branches, plus the default branch, merges them and keeps
+    the newest ``limit``. A commit on several branches is one commit naming
+    each of them — each it is among the newest commits of, which for an
+    older commit need not be every branch that has it.
+
+    Returns the commits and how many branches couldn't be read: the
+    others are still worth showing, but the list is then incomplete.
+    """
+    repo = repo or detect_repo()
+    if not repo or "/" not in repo:
+        raise GhError("No repository to list commits for")
+    owner, name = repo.split("/", 1)
+    # json.dumps gives a valid GraphQL string literal, quotes escaped
+    where = f"owner: {json.dumps(owner)}, name: {json.dumps(name)}"
+    node = _graphql_repository(_graphql(
+        f"{{ repository({where}) {{ defaultBranchRef {{ name }} "
+        f'refs(refPrefix: "refs/heads/", first: {_ALL_BRANCHES_MAX}, '
+        "orderBy: {field: TAG_COMMIT_DATE, direction: DESC}) { nodes { name } } } }"
+    ))
+    names = [r["name"] for r in (node.get("refs") or {}).get("nodes") or []
+             if isinstance(r, dict) and r.get("name")]
+    # The default branch leads, even when it is too quiet to be among the
+    # most recently committed to.
+    default = (node.get("defaultBranchRef") or {}).get("name") or ""
+    if default:
+        if default in names:
+            names.remove(default)
+        names = [default] + names[:_ALL_BRANCHES_MAX - 1]
+    if not names:
+        return [], 0
+
+    per_branch = max(1, min(limit, ALL_BRANCHES_PER_BRANCH_MAX))
+    history = (f"target {{ ... on Commit {{ history(first: {per_branch}) "
+               "{ nodes { oid message url authoredDate author { name } } } } }")
+    chunks = [names[i:i + _BRANCHES_PER_QUERY]
+              for i in range(0, len(names), _BRANCHES_PER_QUERY)]
+
+    def fetch_chunk(chunk: list[str]) -> dict[str, list[dict]]:
+        """Each branch read to its commits; a branch it couldn't read, left out."""
+        refs = " ".join(
+            f"b{i}: ref(qualifiedName: {json.dumps('refs/heads/' + b)}) {{ {history} }}"
+            for i, b in enumerate(chunk)
+        )
+        found = _graphql_repository(_graphql(f"{{ repository({where}) {{ {refs} }} }}"))
+        out: dict[str, list[dict]] = {}
+        for i, b in enumerate(chunk):
+            ref = found.get(f"b{i}")
+            if not isinstance(ref, dict):
+                continue  # gone since it was listed, or an error in its part
+            nodes = ((ref.get("target") or {}).get("history") or {}).get("nodes") or []
+            out[b] = [n for n in nodes if isinstance(n, dict) and n.get("oid")]
+        return out
+
+    per_name: dict[str, list[dict]] = {}
+    failure: Optional[GhError] = None
+    with ThreadPoolExecutor(max_workers=min(4, len(chunks))) as pool:
+        for future in as_completed([pool.submit(fetch_chunk, c) for c in chunks]):
+            try:
+                per_name.update(future.result())
+            except GhError as exc:
+                failure = exc  # the other branches are still worth showing
+    if failure is not None and not per_name:
+        raise failure
+
+    # Walk the branches in order, so each commit's list starts with the
+    # default branch and then the most recently committed to.
+    by_sha: dict[str, Commit] = {}
+    for b in names:
+        for n in per_name.get(b, []):
+            commit = by_sha.get(n["oid"])
+            if commit is None:
+                author = n.get("author") or {}
+                commit = by_sha[n["oid"]] = Commit(
+                    sha=n["oid"],
+                    short_sha=n["oid"][:8],
+                    message=n.get("message") or "",
+                    author=author.get("name") or "",
+                    date=_utc_date(n.get("authoredDate") or ""),
+                    url=n.get("url") or "",
+                )
+            commit.branches.append(b)
+    commits = sorted(by_sha.values(), key=lambda c: c.date, reverse=True)
+    return commits[:limit], len(names) - len(per_name)
 
 
 def fetch_commit_detail(repo: Optional[str], sha: str) -> Commit:

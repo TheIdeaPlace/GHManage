@@ -26,12 +26,42 @@ def test_columns_and_mode_round_trip():
     assert settings.load_columns(ISSUE_SET) == list(ISSUE_SET.defaults)
 
 
-def test_reset_forgets_one_list_only():
-    settings.save_columns(COMMIT_SET, ["message"])
+def test_a_choice_that_cannot_be_written_is_kept_for_the_session(monkeypatch):
+    def locked(src, dst):
+        raise PermissionError("held open")
+    monkeypatch.setattr(settings.os, "replace", locked)
+    monkeypatch.setattr(settings.time, "sleep", lambda s: None)
+    settings.save_columns(COMMIT_SET, ["message", "sha"])
+    assert settings.load_columns(COMMIT_SET) == ["message", "sha"]
+    assert not _file().exists()
+    assert not list(settings.app_data_dir().glob("*.tmp"))
+
+
+def test_a_file_that_cannot_be_read_is_left_alone(monkeypatch):
     settings.save_columns(ISSUE_SET, ["title"])
-    assert settings.reset_columns(COMMIT_SET) == list(COMMIT_SET.defaults)
-    assert settings.load_columns(COMMIT_SET) == list(COMMIT_SET.defaults)
+    settings._session.clear()  # a new session
+    real = settings.Path.read_bytes
+
+    def locked(self):
+        if self.name == "settings.json":
+            raise PermissionError("held open")
+        return real(self)
+    monkeypatch.setattr(settings.Path, "read_bytes", locked)
+    settings.save_list_mode("full")
+    assert settings.load_list_mode() == "full"
+    monkeypatch.setattr(settings.Path, "read_bytes", real)
+    assert not list(settings.app_data_dir().glob("settings.json.bak-*"))
+    # Nothing the earlier session saved was written over.
     assert settings.load_columns(ISSUE_SET) == ["title"]
+
+
+def test_two_bad_files_in_the_same_second_both_kept():
+    for text in ("{bad", "{worse"):
+        _file().write_text(text, encoding="utf-8")
+        settings.load_settings()
+    backups = sorted(p.read_text(encoding="utf-8")
+                     for p in settings.app_data_dir().glob("settings.json.bak-*"))
+    assert backups == ["{bad", "{worse"]
 
 
 def test_unknown_mode_is_not_kept():
@@ -51,6 +81,15 @@ def test_file_that_is_not_an_object_is_set_aside():
     _file().write_text("[1, 2]", encoding="utf-8")
     assert settings.load_columns(COMMIT_SET) == list(COMMIT_SET.defaults)
     assert list(settings.app_data_dir().glob("settings.json.bak-*"))
+
+
+def test_saves_from_two_sessions_combine():
+    settings.save_columns(ISSUE_SET, ["title"])
+    settings._session.clear()
+    settings.save_columns(COMMIT_SET, ["sha"])
+    settings._session.clear()
+    assert settings.load_columns(ISSUE_SET) == ["title"]
+    assert settings.load_columns(COMMIT_SET) == ["sha"]
 
 
 def test_other_settings_survive_a_save():

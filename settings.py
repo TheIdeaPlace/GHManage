@@ -2,9 +2,12 @@
 kind of list shows and the order they're read in.
 
 Kept in ``settings.json`` in the per-user app data folder
-(``%APPDATA%\ghmanage`` on Windows). A file that can't be read is set aside
-as ``settings.json.bak-<time>`` and the defaults used, so one bad write never
-stops the app starting.
+(``%APPDATA%\\ghmanage`` on Windows). What is chosen is also kept in memory
+for the session, so a write that fails — the file held open for a moment by
+antivirus or a backup — never undoes a choice; the next save tries again.
+A file that can be read but not understood is set aside as
+``settings.json.bak-<time>`` and the defaults used, so one bad write never
+stops the app starting. A file that can't be read just now is left alone.
 """
 
 from __future__ import annotations
@@ -15,55 +18,90 @@ import time
 from pathlib import Path
 
 from columns import ColumnSet, reconcile
+from favorites import _app_data_dir as app_data_dir
 
 LIST_MODES = ("quick", "full")
+_LAYOUTS = "column_layouts"
 
-
-def app_data_dir() -> Path:
-    """The per-user app data directory for ghmanage, created if needed."""
-    base = os.environ.get("APPDATA") or os.path.join(os.path.expanduser("~"), ".config")
-    path = Path(base) / "ghmanage"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+# This session's choices, laid over what is on disk.
+_session: dict = {}
 
 
 def _settings_file() -> Path:
     return app_data_dir() / "settings.json"
 
 
-def load_settings() -> dict:
+def _read_disk() -> dict | None:
+    """The saved settings; {} when there are none or they were unreadable
+    rubbish (now set aside); None when the file can't be read just now."""
     f = _settings_file()
     if not f.exists():
         return {}
     try:
-        data = json.loads(f.read_text(encoding="utf-8"))
+        raw = f.read_bytes()
+    except OSError:
+        return None
+    try:
+        data = json.loads(raw.decode("utf-8"))
         if isinstance(data, dict):
             return data
-    except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+    except (json.JSONDecodeError, UnicodeDecodeError):
         pass
-    try:
-        f.replace(f.with_name(f"{f.name}.bak-{time.strftime('%Y%m%d-%H%M%S')}"))
-    except OSError:
-        pass
+    _set_aside(f)
     return {}
 
 
-def save_settings(data: dict) -> None:
-    """Write every setting at once: to a temporary file first, then over the
-    old one, so a crash part-way leaves the old file whole."""
+def _set_aside(f: Path) -> None:
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    backup, n = f.with_name(f"{f.name}.bak-{stamp}"), 1
+    while backup.exists():
+        n += 1
+        backup = f.with_name(f"{f.name}.bak-{stamp}-{n}")
+    try:
+        f.replace(backup)
+    except OSError:
+        pass
+
+
+def _merged(disk: dict) -> dict:
+    data = dict(disk)
+    for key, value in _session.items():
+        if key == _LAYOUTS:
+            layouts = data.get(_LAYOUTS)
+            data[_LAYOUTS] = {**(layouts if isinstance(layouts, dict) else {}), **value}
+        else:
+            data[key] = value
+    return data
+
+
+def load_settings() -> dict:
+    return _merged(_read_disk() or {})
+
+
+def _save() -> None:
+    """Write the session's choices over what is on disk: to a temporary file
+    first, then in place of the old one, so a crash part-way leaves the old
+    file whole. Not written while the file can't be read, so nothing saved
+    by an earlier session is lost; the choices stay in memory meanwhile."""
+    disk = _read_disk()
+    if disk is None:
+        return
     f = _settings_file()
     tmp = f.with_name(f.name + ".tmp")
     try:
-        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
-        os.replace(tmp, f)
+        tmp.write_text(json.dumps(_merged(disk), indent=2), encoding="utf-8")
     except OSError:
-        pass  # a setting not kept is no reason to interrupt what you're doing
-
-
-def _update(key: str, value) -> None:
-    data = load_settings()
-    data[key] = value
-    save_settings(data)
+        return
+    for attempt in range(3):
+        try:
+            os.replace(tmp, f)
+            return
+        except OSError:
+            time.sleep(0.05)  # antivirus or OneDrive holding it for a moment
+    try:
+        tmp.unlink()
+    except OSError:
+        pass
 
 
 def load_list_mode() -> str:
@@ -73,31 +111,17 @@ def load_list_mode() -> str:
 
 def save_list_mode(mode: str) -> None:
     if mode in LIST_MODES:
-        _update("list_mode", mode)
+        _session["list_mode"] = mode
+        _save()
 
 
 def load_columns(column_set: ColumnSet) -> list[str]:
     """The columns a kind of list shows, in order: as last chosen, or its defaults."""
-    layouts = load_settings().get("column_layouts")
+    layouts = load_settings().get(_LAYOUTS)
     saved = layouts.get(column_set.id) if isinstance(layouts, dict) else None
     return reconcile(saved, column_set)
 
 
 def save_columns(column_set: ColumnSet, columns: list[str]) -> None:
-    data = load_settings()
-    layouts = data.get("column_layouts")
-    if not isinstance(layouts, dict):
-        layouts = {}
-    layouts[column_set.id] = reconcile(columns, column_set)
-    data["column_layouts"] = layouts
-    save_settings(data)
-
-
-def reset_columns(column_set: ColumnSet) -> list[str]:
-    """Forget a list's chosen columns; returns its defaults."""
-    data = load_settings()
-    layouts = data.get("column_layouts")
-    if isinstance(layouts, dict) and column_set.id in layouts:
-        del layouts[column_set.id]
-        save_settings(data)
-    return list(column_set.defaults)
+    _session.setdefault(_LAYOUTS, {})[column_set.id] = reconcile(columns, column_set)
+    _save()

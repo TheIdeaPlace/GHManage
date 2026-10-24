@@ -20,6 +20,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import gh_data  # noqa: E402
+import settings  # noqa: E402
 
 # Kept before any fixture swaps it out, for the tests of _run_gh itself.
 _REAL_RUN_GH = gh_data._run_gh
@@ -86,6 +87,7 @@ def _isolated(monkeypatch, tmp_path_factory):
     monkeypatch.setattr(gh_data, "_graphql", lambda query: {"data": {}})
     monkeypatch.setattr(gh_data, "_gh_exe", None)
     monkeypatch.setattr(gh_data, "_default_branches", {})  # looked up afresh per test
+    monkeypatch.setattr(settings, "_session", {})  # each test starts with no choices made
     monkeypatch.delenv("GHMANAGE_GH_PATH", raising=False)
     home = tmp_path_factory.mktemp("appdata")
     monkeypatch.setenv("APPDATA", str(home))

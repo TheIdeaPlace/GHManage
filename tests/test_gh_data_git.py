@@ -555,3 +555,26 @@ def test_all_branches_stops_listing_after_ten_pages(monkeypatch):
     monkeypatch.setattr(gh_data, "_graphql", fake)
     gh_data.fetch_all_branch_commits("o/r")
     assert sum("refs(" in q for q in fake.queries) == 10
+
+
+def test_all_branches_keeps_the_branches_listed_before_a_page_fails(monkeypatch):
+    names = [f"b{i:03d}" for i in range(150)]
+    fake = FakeGraphql(names, "", {n: [] for n in names})
+
+    def flaky(query):
+        if 'after: "100"' in query:
+            raise GhError("rate limited")
+        return fake(query)
+
+    monkeypatch.setattr(gh_data, "_graphql", flaky)
+    assert gh_data.fetch_all_branch_commits("o/r") == ([], 0)
+    assert len(_asked_branches(fake)) == 100
+
+
+def test_all_branches_fails_when_no_branches_could_be_listed(monkeypatch):
+    def failing(query):
+        raise GhError("rate limited")
+
+    monkeypatch.setattr(gh_data, "_graphql", failing)
+    with pytest.raises(GhError, match="rate limited"):
+        gh_data.fetch_all_branch_commits("o/r")

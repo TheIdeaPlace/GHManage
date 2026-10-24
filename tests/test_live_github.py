@@ -57,8 +57,9 @@ def test_one_branch_commits_name_the_default_branch():
 def test_tag_commit_date_does_not_order_branches():
     """Why fetch_all_branch_commits sorts branches itself: ordering refs by
     TAG_COMMIT_DATE, documented only for tags, leaves branches unsorted.
-    If this starts failing, GitHub sorts them now and the code could ask it."""
-    owner, name = BUSY_REPO.split("/", 1)
+    Reported, not asserted: whether a page happens to come out sorted
+    depends on the repository, and a GitHub fix shouldn't turn a PR red."""
+    owner, name = "cli", "cli"   # where it was seen, whatever repo is being checked
     node = gh_data._graphql_repository(gh_data._graphql(
         f'{{ repository(owner: "{owner}", name: "{name}") {{ '
         'refs(refPrefix: "refs/heads/", first: 30, '
@@ -66,7 +67,11 @@ def test_tag_commit_date_does_not_order_branches():
         "{ nodes { name target { ... on Commit { committedDate } } } } } }"
     ))
     dates = [r["target"]["committedDate"] for r in node["refs"]["nodes"]]
-    assert len(dates) > 1 and dates != sorted(dates, reverse=True)
+    assert len(dates) > 1
+    if dates == sorted(dates, reverse=True):
+        print("\nTAG_COMMIT_DATE now sorts branches: GitHub could order them for us")
+    else:
+        print("\nTAG_COMMIT_DATE still leaves branches unsorted")
 
 
 def test_all_branches_reaches_the_newest_work():

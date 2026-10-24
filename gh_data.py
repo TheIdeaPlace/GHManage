@@ -1257,12 +1257,17 @@ def fetch_all_branch_commits(repo: Optional[str], limit: int = 100) -> tuple[lis
     default = ""
     after = ""
     for _ in range(_BRANCH_LIST_PAGES_MAX):
-        node = _graphql_repository(_graphql(
-            f"{{ repository({where}) {{ defaultBranchRef {{ name }} "
-            f'refs(refPrefix: "refs/heads/", first: 100{after}) '
-            "{ pageInfo { hasNextPage endCursor } "
-            "nodes { name target { ... on Commit { committedDate } } } } } }"
-        ))
+        try:
+            node = _graphql_repository(_graphql(
+                f"{{ repository({where}) {{ defaultBranchRef {{ name }} "
+                f'refs(refPrefix: "refs/heads/", first: 100{after}) '
+                "{ pageInfo { hasNextPage endCursor } "
+                "nodes { name target { ... on Commit { committedDate } } } } } }"
+            ))
+        except GhError:
+            if not tips:
+                raise
+            break  # a later page failed: go on with the branches already listed
         default = (node.get("defaultBranchRef") or {}).get("name") or default
         refs = node.get("refs") or {}
         for r in refs.get("nodes") or []:

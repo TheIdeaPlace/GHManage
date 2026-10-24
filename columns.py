@@ -70,10 +70,20 @@ def cell_text(col: ColumnDef, value: str, speak_labels: bool) -> str:
     return value
 
 
+def names_cell(position: int) -> bool:
+    """Whether the cell at this position may carry its column's name. Never
+    the first: it is the row's name, read first, and typing a letter in a
+    list jumps by it — "Repository: ..." on every row would stop "g" finding
+    the repositories starting with g."""
+    return position > 0
+
+
 def row_text(values: Mapping[str, str], columns: Sequence[ColumnDef],
              speak_labels: bool = True, separator: str = ", ") -> str:
-    """A whole row as one line, in column order, empty cells left out."""
-    parts = [cell_text(c, values.get(c.id, "") or "", speak_labels) for c in columns]
+    """A whole row as one line, in column order, empty cells left out. The
+    first column is never named (see ``names_cell``)."""
+    parts = [cell_text(c, values.get(c.id, "") or "", speak_labels and names_cell(i))
+             for i, c in enumerate(columns)]
     parts = [p.strip() for p in parts if p and p.strip()]
     if not parts:
         return ""

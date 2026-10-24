@@ -289,7 +289,7 @@ UI thread via `wx.CallAfter`. Never touch wx widgets from a worker thread.
   so Tab never lands on them.
 - **F6 loop** — `_cycle_pane` in `on_char_hook`: repo list → item list → details → status bar,
   wrapping; Shift+F6 reverses. A new pane goes in `_focus_panes`.
-- **Full mode** prefixes field names in list rows: `"Number: 208, PR, OPEN, Title: ..."`.
+- **Full mode** prefixes field names in list rows: `"208, PR, OPEN, Title: ..."` (never the first column, `names_cell`).
   Every column is described once in `gh_columns.py` (`ColumnDef`: heading, kind, width), and
   each view's columns are a `ColumnSet` there. A new column needs a `CATALOG` entry with a
   heading in plain words ("Commit", not "sha"). Make it `STATE` when its value says what it is

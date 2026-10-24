@@ -32,7 +32,7 @@ from saved_searches import (
     remove_saved_search,
 )
 
-from columns import ColumnSet, LayoutEditor, cell_text, row_text
+from columns import ColumnSet, LayoutEditor, cell_text, names_cell, row_text
 from gh_columns import (
     COLUMN_SETS, ACTIVITY_SET, ARTIFACT_SET, ASSET_SET, BRANCH_SET, COMMIT_SET, FAVORITES_SET,
     ISSUE_SET, JOB_SET, LABEL_SET, MY_WORK_SET, NOTIFICATION_SET, ORG_SET,
@@ -1676,9 +1676,9 @@ class ColumnsDialog(wx.Dialog):
 
     Keys as well as the buttons: Enter in Available adds, Delete (or
     Backspace, a Mac's Delete) in Shown removes, and Alt+Up, Alt+Down,
-    Alt+Home and Alt+End in Shown move. Focus stays on the column that moved,
-    so a screen reader reads its new place ("Author, 2 of 4"); when there is
-    nothing to do it beeps. The rules are ``columns.LayoutEditor``'s."""
+    Alt+Home and Alt+End in Shown move (Option on a Mac). Focus stays on
+    the column that moved, so a Windows screen reader reads its new place
+    ("Author, 2 of 4"); when there is nothing to do it beeps. The rules are ``columns.LayoutEditor``'s."""
 
     def __init__(self, parent: wx.Window, column_sets: list[ColumnSet], current_id: str,
                  layouts: dict[str, list[str]], speak_labels: bool,
@@ -1694,7 +1694,7 @@ class ColumnsDialog(wx.Dialog):
         self._sample = sample
         outer = wx.BoxSizer(wx.VERTICAL)
 
-        label = "&List"
+        label = "&List to change"
         outer.Add(wx.StaticText(self, label=label), 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
         self.set_ctrl = wx.Choice(self, choices=[cs.name for cs in column_sets])
         self.set_ctrl.SetName(label.replace("&", ""))
@@ -1706,6 +1706,14 @@ class ColumnsDialog(wx.Dialog):
         self.available = self._list_box(lists, "A&vailable columns")
         self.shown = self._list_box(lists, "&Shown columns, in the order they're read")
         outer.Add(lists, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 4)
+
+        # One line, next to what it describes: a screen reader reads a
+        # one-line box whole on reaching it, a multi-line one a line at a time.
+        label = "&Preview"
+        outer.Add(wx.StaticText(self, label=label), 0, wx.LEFT | wx.RIGHT, 10)
+        self.preview = wx.TextCtrl(self, style=wx.TE_READONLY, size=(560, -1))
+        self.preview.SetName(label.replace("&", ""))
+        outer.Add(self.preview, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
 
         row = wx.WrapSizer(wx.HORIZONTAL)
         actions = [
@@ -1727,12 +1735,6 @@ class ColumnsDialog(wx.Dialog):
         self.labels_ctrl.SetValue(speak_labels)
         outer.Add(self.labels_ctrl, 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
 
-        label = "&Preview"
-        outer.Add(wx.StaticText(self, label=label), 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
-        self.preview = wx.TextCtrl(self, style=wx.TE_MULTILINE | wx.TE_READONLY, size=(-1, 60))
-        self.preview.SetName(label.replace("&", ""))
-        outer.Add(self.preview, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
-
         buttons = wx.StdDialogButtonSizer()
         ok = wx.Button(self, wx.ID_OK, "OK")
         ok.SetDefault()
@@ -1745,7 +1747,6 @@ class ColumnsDialog(wx.Dialog):
 
         self.set_ctrl.Bind(wx.EVT_CHOICE, lambda e: self._fill(0, 0))
         self.labels_ctrl.Bind(wx.EVT_CHECKBOX, lambda e: self._show_preview())
-        self.shown.Bind(wx.EVT_LISTBOX, lambda e: self._show_preview())
         self.available.Bind(wx.EVT_LISTBOX_DCLICK, lambda e: self.add())
         self.shown.Bind(wx.EVT_LISTBOX_DCLICK, lambda e: self.remove())
         self.Bind(wx.EVT_CHAR_HOOK, self._on_char_hook)
@@ -1797,9 +1798,15 @@ class ColumnsDialog(wx.Dialog):
         self.shown.SetSelection(min(max(shown_index, 0), len(ed.shown) - 1))
         rest = ed.available()
         # An empty list reads as nothing at all to a screen reader.
-        self.available.Set([self._heading(c) for c in rest] or ["Every column is shown."])
+        self.available.Set([self._heading(c) for c in rest] or ["Every column is shown"])
         self.available.SetSelection(min(max(available_index, 0), max(len(rest), 1) - 1))
         self._show_preview()
+        # Refilled, the focused row is often the same row number as before,
+        # which NVDA takes for no change; say its name has changed.
+        focus = wx.Window.FindFocus()
+        if focus in (self.shown, self.available) and hasattr(wx, "Accessible"):
+            wx.Accessible.NotifyEvent(wx.ACC_EVENT_OBJECT_NAMECHANGE, focus,
+                                      wx.OBJID_CLIENT, focus.GetSelection() + 1)
 
     def _show_preview(self) -> None:
         ed = self._editor
@@ -1827,8 +1834,12 @@ class ColumnsDialog(wx.Dialog):
     def remove(self) -> None:
         index = self.shown.GetSelection()
         self.shown.SetFocus()
+        if len(self._editor.shown) == 1:
+            wx.MessageBox("At least one column has to be shown.", "Choose Columns",
+                          wx.OK | wx.ICON_INFORMATION, self)
+            return
         if not self._editor.remove(index):
-            wx.Bell()  # nothing selected, or the last column
+            wx.Bell()
             return
         self._fill(index)
 
@@ -1844,10 +1855,12 @@ class ColumnsDialog(wx.Dialog):
         if not self._editor.move(index, target):
             wx.Bell()
             return
-        # Only the rows that changed: setting every row again would reset the
-        # list under the screen reader.
-        for row in range(min(index, target), max(index, target) + 1):
-            self.shown.SetString(row, self._heading(self._editor.shown[row]))
+        # The one row taken out and put back: on Windows SetString deletes
+        # and reinserts each row it touches, and the screen reader would hear
+        # the column pushed aside before the one that moved.
+        heading = self.shown.GetString(index)
+        self.shown.Delete(index)
+        self.shown.Insert(heading, target)
         self.shown.SetSelection(target)
         self._show_preview()
 
@@ -2493,7 +2506,7 @@ class GhViewerFrame(wx.Frame):
         self._col_menu_items = {}
         self._rebuild_columns_menu()
         view_menu.AppendSubMenu(self._col_menu, "Columns")
-        view_menu.Append(ID_CHOOSE_COLUMNS, "Choose Columns…")
+        view_menu.Append(ID_CHOOSE_COLUMNS, "C&hoose Columns…")
 
         view_menu.AppendSeparator()
 
@@ -3564,7 +3577,8 @@ class GhViewerFrame(wx.Frame):
         """Get the display value for a single column, with mode-aware formatting."""
         val = _row_values(item, self.columns).get(col, "")
         column = _view_columns(self.view_mode).column(col)
-        return cell_text(column, val, self.list_mode == "full")
+        position = self.columns.index(col) if col in self.columns else 0
+        return cell_text(column, val, self.list_mode == "full" and names_cell(position))
 
     def _favorite_prefix(self, item) -> str:
         """Return '★ ' if the item is in favorites, else empty string."""

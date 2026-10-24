@@ -877,7 +877,7 @@ With focus in the repository list, Copy Link, Copy Markdown Link, Copy Title and
 **View → List Mode** decides how much each row says:
 
 - **Quick Mode (compact)** shows just the values: "208  PR  OPEN  Fix the braille cursor". It is the default and the fastest to arrow through.
-- **Full Mode (field names for screen reader)** puts each column's name before its value: "Number: 208, PR, OPEN, Title: Fix the braille cursor". Columns whose value already says what it is (Type, State, Status and Result) are left without a name, so you hear "OPEN" rather than "State: OPEN". In Full mode the status bar message also repeats the row as you move to it.
+- **Full Mode (field names for screen reader)** puts each column's name before its value: "208, PR, OPEN, Title: Fix the braille cursor". The first column is never named: it's the row's name, and typing a letter in the list still jumps to the rows starting with it. Columns whose value already says what it is (Type, State, Status and Result) are left without a name too, so you hear "OPEN" rather than "State: OPEN". In Full mode the status bar message also repeats the row as you move to it.
 
 The current mode is shown on the status bar, and the status bar says "Quick mode: compact display" or "Full mode: field names included for screen reader" when you switch. The mode you choose is kept for next time.
 
@@ -893,12 +893,12 @@ The current mode is shown on the status bar, and the status bar says "Quick mode
 
 A screen reader reads a row's columns from left to right, so the order of the columns is the order you hear them. **View → Choose Columns…** lets you decide that order, which columns are shown and whether their names are read, for every kind of list in one place:
 
-- **List** starts on the list you're in. Choose another to change its columns too.
+- **List to change** starts on the list you're in. Choose another to change its columns too.
 - **Available columns** are the ones not shown. `Enter` or **Add** puts the selected one at the end of the row.
-- **Shown columns, in the order they're read** lists what each row says, first to last. `Delete` (or `Backspace`) or **Remove** takes one off; at least one always stays. `Alt+Up` and `Alt+Down` (or **Move Up** and **Move Down**) move the selected column one place, and `Alt+Home` and `Alt+End` (**Move to Top** and **Move to Bottom**) move it to the start or the end. The column stays selected as it moves, so your screen reader reads its new place, for example "Author, 2 of 4". When there is nothing to do, such as moving the first column up, GHManage beeps.
+- **Shown columns, in the order they're read** lists what each row says, first to last. `Delete` (or `Backspace`) or **Remove** takes one off; at least one always stays. `Alt+Up` and `Alt+Down` (or **Move Up** and **Move Down**) move the selected column one place, and `Alt+Home` and `Alt+End` (**Move to Top** and **Move to Bottom**) move it to the start or the end; on a Mac, use `Option` for `Alt`. The column stays selected as it moves, so on Windows your screen reader reads its new place, for example "Author, 2 of 4". When there is nothing to do, such as moving the first column up, GHManage beeps.
 - **Reset to Default** puts back the list's original columns.
 - **Speak column names (Full mode)** is the same choice as **View → List Mode**.
-- **Preview** shows how the selected row (or the first row) will read, without the ★ a favorite starts with. For a list other than the one you're in, or when the list is empty, it shows the order the columns will be read in.
+- **Preview**, just after the lists, shows how the selected row (or the first row) will read, without the ★ a favorite starts with. For a list other than the one you're in, or when the list is empty, it shows the order the columns will be read in.
 
 **OK** keeps every change, for every list you changed, and leaves you on the row you were on; **Cancel** or `Escape` leaves them all as they were.
 

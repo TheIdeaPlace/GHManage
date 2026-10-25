@@ -249,7 +249,7 @@ Lists load 100 items to begin with. `Ctrl++` (**File → View More**) loads the 
 
 | Menu | What is on it |
 |------|---------------|
-| **File** | Open Repository or Address, Remove from List, Hidden Repositories, Switch GitHub Account, Refresh, Search GitHub, View More, Go To Issue, Quick Filter, Next and Previous Comment, Quit |
+| **File** | Open Repository or Address, Remove from List, Hidden Repositories, Archive or Unarchive Repository, Delete Repository from GitHub, Switch GitHub Account, Refresh, Search GitHub, View More, Go To Issue, Quick Filter, Next and Previous Comment, Quit |
 | **Actions** | Everything that acts on the item you are on. See [The Actions Menu](#the-actions-menu). |
 | **View** | View Mode, List Mode, Sort Order, Columns, State, Filter, Include Read Notifications, Speak Results |
 | **Help** | User Guide, Keyboard Shortcuts, Command Palette, Check for Updates, About GHManage |
@@ -319,6 +319,21 @@ After a removal you are on the row that took its place, so you can go on down th
 To put one back, choose **File → Hidden Repositories…**. It lists the repositories you have removed: move to one and press `Enter` (the **Show Again** button) to put it back in the list. The window stays open for the next one, and closes on its own when none are left; `Escape` closes it. Opening a hidden repository by its address with **File → Open Repository or Address…** brings it back too.
 
 The entries at the top, organizations included, are always there. A saved search is removed the same way, but it can't be brought back, so GHManage asks first.
+
+### Archiving or deleting a repository on GitHub
+
+Removing a repository from the list leaves it on GitHub. To change the repository on GitHub itself, select it in the list and choose one of these from the **File** menu or the repository's context menu. Neither has a shortcut key, so a slip of the finger can't reach them. Both need admin rights on the repository; without them, GHManage says so and stops.
+
+- **Archive Repository…** makes it read-only on GitHub: no new issues, pull requests, comments or pushes, but everything stays and you can still read it. GHManage asks first, with **No** as the answer if you just press `Enter`. An archived repository's entry reads **Unarchive Repository…**, which undoes it. On the File menu the entry is **Archive or Unarchive Repository…**, and the question says which it will do.
+- **Delete Repository from GitHub…** deletes it for good, with its code, issues, pull requests, releases, wiki and Actions history. This can't be undone. The window that opens says so, and asks you to type the repository's name, for example `owner/name`. **Delete** stays unavailable until what you have typed matches. When what you type matches, GHManage says "The name matches. Delete is available." **Cancel** is the default, and `Enter` in the box moves to **Delete** once the name matches rather than deleting, so pressing `Enter` never deletes on its own; before it matches, `Enter` says "That doesn't match owner/name yet." Afterwards the repository is gone from the list, from your pinned repositories and from your favorites, and you are on the row that took its place. If it was the repository open on the right, GHManage shows your notifications instead.
+
+The first time you delete a repository, gh will probably not have the permission it needs, because it doesn't ask for it when you sign in. GHManage tells you the command to run once in a terminal:
+
+```
+gh auth refresh -h github.com -s delete_repo
+```
+
+Then try again.
 
 ### Forks
 

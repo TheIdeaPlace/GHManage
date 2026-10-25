@@ -25,6 +25,14 @@ serve it from the frame itself: that took over the window's UIA name.
 posted on the application, through ctypes into the Objective-C runtime
 (from The Chat Place's ``ui/mac_a11y.py``). Only while VoiceOver is on.
 
+**macOS: control labels** (#69, ``set_label``, also from The Chat Place).
+wx's ``SetName()`` reaches nothing native on a Mac: every ``wx.TextCtrl``,
+``wx.ListBox`` and ``wx.Choice`` reports ``accessibilityLabel == nil`` however
+it was named, so VoiceOver read a box's contents and never its label, and
+``SetAccessible()`` is Windows-only. So the label is set on the native view
+through NSAccessibility. Buttons and check boxes need no help: AppKit names
+them from their title.
+
 Nothing here imports wx, so this can move to app-kit with ``announce``.
 """
 
@@ -347,6 +355,78 @@ def voiceover_announce(text: str, interrupt: bool, category: str = "result") -> 
         return True
     except Exception:  # noqa: BLE001 - never break the app over speech
         return False
+
+
+def _responds(obj, selector: str) -> bool:
+    sel = _runtime().sel_registerName(selector.encode())
+    return bool(_send(obj, "respondsToSelector:", ctypes.c_void_p(sel),
+                      restype=ctypes.c_bool, argtypes=(ctypes.c_void_p,)))
+
+
+def _to_str(nsstring) -> str | None:
+    if not nsstring:
+        return None
+    pointer = _send(nsstring, "UTF8String", restype=ctypes.c_char_p)
+    return pointer.decode("utf-8") if pointer else None
+
+
+def _target_view(window):
+    """The native view VoiceOver focuses for ``window``, or None.
+
+    ``GetHandle()`` isn't always it. A multi-line ``wx.TextCtrl`` is a scroll
+    view around an ``NSTextView``, a ``wx.ListBox`` and the Mac item list
+    (``wx.dataview.DataViewListCtrl``) a scroll view around a table, and
+    VoiceOver lands on the inner view. So when the handle has a
+    ``documentView``, that is what gets the label.
+    """
+    if _runtime() is None:
+        return None
+    try:
+        handle = window.GetHandle()
+    except (AttributeError, RuntimeError):
+        return None
+    if not handle:
+        return None
+    view = ctypes.c_void_p(handle)
+    if _responds(view, "documentView"):
+        inner = _send(view, "documentView")
+        if inner:
+            return ctypes.c_void_p(inner)
+    return view
+
+
+def set_label(window, label: str) -> bool:
+    """Give ``window`` (anything with ``GetHandle()``) the name VoiceOver reads.
+    True if it was applied.
+
+    False, never an exception, off macOS or on a control with no native view:
+    a missing name mustn't take the window down with it.
+    """
+    if not IS_MACOS or not label:
+        return False
+    try:
+        view = _target_view(window)
+        if view is None or not _responds(view, "setAccessibilityLabel:"):
+            return False
+        _send(view, "setAccessibilityLabel:", ctypes.c_void_p(_nsstring(label)),
+              argtypes=(ctypes.c_void_p,))
+        return True
+    except Exception:  # noqa: BLE001 - never break the window over a name
+        return False
+
+
+def get_label(window) -> str | None:
+    """The name VoiceOver would read for ``window``, or None. For tests, and
+    for checking a control reported as unlabelled."""
+    if not IS_MACOS:
+        return None
+    try:
+        view = _target_view(window)
+        if view is None or not _responds(view, "accessibilityLabel"):
+            return None
+        return _to_str(_send(view, "accessibilityLabel"))
+    except Exception:  # noqa: BLE001
+        return None
 
 
 # ── Choosing one ────────────────────────────────────────────────────────

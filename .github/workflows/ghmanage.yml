@@ -257,6 +257,9 @@ jobs:
         run: |
           pip install "pytest>=8,<10"
           python -m pytest -q -rs
+          # Named one by one, so the log shows the AppKit label checks ran
+          # here rather than being skipped. They take under a second.
+          python -m pytest -v tests/test_mac_labels.py
 
       - name: Verify tag matches version.py
         if: startsWith(github.ref, 'refs/tags/v')

@@ -15,6 +15,11 @@ User Guide (`F1`) opens it from the app. This README is a summary.
   e.g. "Notifications (12 unread)"
 - **Notifications** — your GitHub inbox: why you were told, what it is, mark read, mark done,
   unsubscribe; Enter opens an issue or PR right here, and Backspace comes back
+- **Remove, archive or delete** — `Delete` (File → Remove from List) only takes a repository
+  off GHManage's list. File → Archive or Unarchive Repository makes it read-only on GitHub, or
+  undoes that. File → Delete Repository from GitHub deletes it for good, after you type its name
+  to confirm. Both need admin rights, and deleting needs one extra gh permission, added once with
+  `gh auth refresh -h github.com -s delete_repo`.
 - **Search GitHub** — Ctrl+Shift+F searches issues and PRs, or repositories, across all of GitHub
   with GitHub's own qualifiers (`is:open label:bug author:@me …`); save a search and it sits in the
   repo list, one Enter away

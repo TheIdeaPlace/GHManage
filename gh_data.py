@@ -680,7 +680,7 @@ def list_repos(limit: int = 100) -> RepoListing:
     own_part = (
         "own: repositories(first: %d, ownerAffiliations: [OWNER], "
         "orderBy: {field: PUSHED_AT, direction: DESC}) "
-        "{ nodes { nameWithOwner description pushedAt } } " % first
+        "{ nodes { nameWithOwner description pushedAt isArchived } } " % first
     )
     extras = (
         "shared: repositories(first: 100, ownerAffiliations: [COLLABORATOR]) "
@@ -3079,6 +3079,56 @@ def _scope_error(exc: GhError) -> Optional[MissingScope]:
         m = re.search(r'needs the "([^"]+)" scope', text)
         return MissingScope(m.group(1) if m else "notifications")
     return None
+
+
+# ── Deleting and archiving a repository ────────────────────────────────
+
+
+@dataclass
+class RepoAdmin:
+    """What you may do to a repository as a whole."""
+    admin: bool       # deleting and archiving both need admin rights
+    archived: bool
+
+
+def repo_admin(repo: str) -> RepoAdmin:
+    """Whether you are an admin of ``repo``, and whether it is archived."""
+    raw = _run_gh(["repo", "view", repo, "--json", "viewerPermission,isArchived"])
+    try:
+        data = json.loads(raw) if raw.strip() else {}
+    except ValueError:
+        raise GhError(f"Unexpected reply about {repo}")
+    if not isinstance(data, dict):
+        data = {}
+    return RepoAdmin(admin=data.get("viewerPermission") == "ADMIN",
+                     archived=bool(data.get("isArchived")))
+
+
+def delete_repo(repo: str) -> None:
+    """Delete ``repo`` on GitHub, with everything in it. ``--yes`` because the
+    caller has had the name typed back; there is no undo.
+
+    gh doesn't ask for the "delete_repo" permission at sign-in, so the first
+    try usually fails with MissingScope, which says how to add it.
+    """
+    try:
+        _run_gh(["repo", "delete", repo, "--yes"])
+    except GhError as exc:
+        missing = _scope_error(exc)
+        if missing:
+            raise missing
+        if "Must have admin rights" in str(exc):
+            # gh only names the missing scope for a classic token. A
+            # fine-grained token, or one in GH_TOKEN, just gets the 403.
+            raise GhError(f"{exc}\n\nIf gh signs in with a token, the token needs the "
+                          '"delete_repo" scope, or for a fine-grained token, write access '
+                          "to the repository's Administration.")
+        raise
+
+
+def set_archived(repo: str, archived: bool) -> None:
+    """Archive ``repo`` (read-only, can be undone) or unarchive it."""
+    _run_gh(["repo", "archive" if archived else "unarchive", repo, "--yes"])
 
 
 def get_watch_level(repo: str) -> str:

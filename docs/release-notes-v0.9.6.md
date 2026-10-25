@@ -5,6 +5,25 @@ a fast, keyboard-driven list.
 
 On a Mac, use `Cmd` where these notes say `Ctrl`, and `Option` where they say `Alt`.
 
+## Archive or delete a repository on GitHub
+
+Select a repository in the list and choose **File → Archive or Unarchive
+Repository…** or **File → Delete Repository from GitHub…**, or the same from
+the repository's context menu. Neither has a shortcut key. (#68)
+
+- **Archive** makes the repository read-only on GitHub, and can be undone with
+  **Unarchive**.
+- **Delete** removes it from GitHub for good. You type the repository's name
+  to confirm, as on github.com, and **Delete** stays unavailable until it
+  matches. Afterwards it is gone from the list, your pinned repositories and
+  your favorites.
+- Both need admin rights on the repository. The first delete usually needs one
+  more permission for gh, and GHManage gives you the command to add it:
+  `gh auth refresh -h github.com -s delete_repo`.
+
+**Remove from List** (`Delete`) still only takes a repository off GHManage's
+list and never touches GitHub.
+
 ## GHManage tells your screen reader what an action did
 
 In **View → Columns…**, every action is now said, not just shown: "Author

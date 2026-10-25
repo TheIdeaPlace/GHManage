@@ -23,9 +23,11 @@ from version import __version__ as APP_VERSION
 from pinned_repos import (
     add_pinned, hide_repo, load_hidden, load_pinned, remove_pinned, unhide_repos,
 )
+import announce
 import commands
 import settings
 import search_help
+import speech
 from favorites import FavoriteEntry, load_favorites, save_favorites, is_favorite, toggle_favorite
 from saved_searches import (
     KIND_ISSUES, KIND_REPOS, SavedSearch, add_saved_search, load_saved_searches,
@@ -608,6 +610,7 @@ ID_MARK_READ = wx.NewIdRef()
 ID_MARK_ALL_READ = wx.NewIdRef()
 ID_UNSUBSCRIBE = wx.NewIdRef()
 ID_SHOW_READ = wx.NewIdRef()
+ID_SPEAK_RESULTS = wx.NewIdRef()
 ID_USER_GUIDE = wx.NewIdRef()
 ID_SHORTCUTS = wx.NewIdRef()
 ID_COMMAND_PALETTE = wx.NewIdRef()
@@ -1725,14 +1728,18 @@ class ColumnsDialog(wx.Dialog):
     Keys as well as the buttons: Enter in Available adds, Delete (or
     Backspace, a Mac's Delete) in Shown removes, and Alt+Up, Alt+Down,
     Alt+Home and Alt+End in Shown move (Option on a Mac). Focus stays on
-    the column that moved, so a Windows screen reader reads its new place
-    ("Author, 2 of 4"); when there is nothing to do it beeps. The rules are ``columns.LayoutEditor``'s."""
+    the column that moved. Each action is said through ``say`` in
+    ``LayoutEditor``'s words ("Author moved above Message") and shown under
+    the lists; when there is nothing to do it beeps and says why. The rules
+    are ``columns.LayoutEditor``'s."""
 
     def __init__(self, parent: wx.Window, column_sets: list[ColumnSet], current_id: str,
                  layouts: dict[str, list[str]], speak_labels: bool,
-                 sample: dict[str, str] | None) -> None:
+                 sample: dict[str, str] | None,
+                 say: Callable[[str], bool] | None = None) -> None:
         """``layouts``: each set's columns as they are now. ``sample``: the
-        values of a row in the current list, for the preview, or None."""
+        values of a row in the current list, for the preview, or None.
+        ``say``: tells the user what an action did; True if it was spoken."""
         super().__init__(parent, title="Columns",
                          style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
         self._sets = column_sets
@@ -1740,6 +1747,7 @@ class ColumnsDialog(wx.Dialog):
         self._editors: dict[str, LayoutEditor] = {}
         self._current_id = current_id
         self._sample = sample
+        self._say = say or (lambda text: False)
         outer = wx.BoxSizer(wx.VERTICAL)
 
         label = "&List to change"
@@ -1754,6 +1762,12 @@ class ColumnsDialog(wx.Dialog):
         self.available = self._list_box(lists, "A&vailable columns")
         self.shown = self._list_box(lists, "&Shown columns, in the order they're read")
         outer.Add(lists, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 4)
+
+        # What the last action did, on screen under the lists, as well as
+        # said: it is the only place a refusal's reason shows when it isn't
+        # spoken. Empty when the dialog opens, so nothing extra is read then.
+        self.result = wx.StaticText(self, label="")
+        outer.Add(self.result, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
 
         # One line, next to what it describes: a screen reader reads a
         # one-line box whole on reaching it, a multi-line one a line at a time.
@@ -1874,22 +1888,20 @@ class ColumnsDialog(wx.Dialog):
         Available for the next, or go to Shown when that was the last."""
         index = self.available.GetSelection()
         if not self._editor.add(index):
-            wx.Bell()
+            self._refused()
             return
         self._fill(len(self._editor.shown) - 1, index)
         (self.available if self._editor.available() else self.shown).SetFocus()
+        self._report()
 
     def remove(self) -> None:
         index = self.shown.GetSelection()
         self.shown.SetFocus()
-        if len(self._editor.shown) == 1:
-            wx.MessageBox("At least one column has to be shown.", "Columns",
-                          wx.OK | wx.ICON_INFORMATION, self)
-            return
         if not self._editor.remove(index):
-            wx.Bell()
+            self._refused()
             return
         self._fill(index)
+        self._report()
 
     def move(self, step: int) -> None:
         index = self.shown.GetSelection()
@@ -1901,7 +1913,7 @@ class ColumnsDialog(wx.Dialog):
     def _move_to(self, index: int, target: int) -> None:
         self.shown.SetFocus()
         if not self._editor.move(index, target):
-            wx.Bell()
+            self._refused()
             return
         # The one row taken out and put back: on Windows SetString deletes
         # and reinserts each row it touches, and the screen reader would hear
@@ -1911,11 +1923,23 @@ class ColumnsDialog(wx.Dialog):
         self.shown.Insert(heading, target)
         self.shown.SetSelection(target)
         self._show_preview()
+        self._report()
 
     def reset(self) -> None:
         self._editor.reset()
         self._fill(0, 0)
         self.shown.SetFocus()
+        self._report()
+
+    def _report(self) -> None:
+        """What the last action did: shown under the lists, and said."""
+        self.result.SetLabel(self._editor.said)
+        self._say(self._editor.said)
+
+    def _refused(self) -> None:
+        """Nothing to do: a beep, and why."""
+        wx.Bell()
+        self._report()
 
     def _on_char_hook(self, event: wx.KeyEvent) -> None:
         key = event.GetKeyCode()
@@ -2163,6 +2187,7 @@ class GhViewerFrame(wx.Frame):
         self.columns: list[str] = settings.load_columns(ISSUE_SET)
         self.sort_order: str = SORT_ORDERS[0]
         self.list_mode: str = settings.load_list_mode()  # "quick" or "full"
+        announce.announcer.configure(*settings.load_announcements())
         self.state_filter: str = "open"  # "open", "closed", "all"
         self.tab_filter: str = "both"  # "issues", "prs", "both"
         self.page_size: int = 100      # how many items to fetch per page
@@ -2252,6 +2277,14 @@ class GhViewerFrame(wx.Frame):
         self._show_shared: bool = False
 
         self._build_ui()
+        # Spoken messages are raised from a hidden window of their own (see
+        # speech.UiaNotifier); a child of a panel, so no sizer or frame
+        # layout ever counts it.
+        self._speech_window = wx.Window(self.main_splitter.GetWindow1(), size=(1, 1),
+                                        name="speech")
+        self._speech_window.Hide()
+        self._speech_window.Disable()
+        announce.announcer.speaker = speech.speaker_for_platform(self._speech_window.GetHandle())
         self._bind_events()
         self._build_menu()
         self._update_menu_checks()
@@ -2572,6 +2605,10 @@ class GhViewerFrame(wx.Frame):
         self._show_read_item = view_menu.AppendCheckItem(
             ID_SHOW_READ, "Include Read Notifications (I)"
         )
+        view_menu.AppendSeparator()
+        # What an action did, said as well as shown in the status bar. For
+        # now the Columns dialog's actions; more as #54 moves them over.
+        view_menu.AppendCheckItem(ID_SPEAK_RESULTS, "Speak Results")
 
         menu_bar.Append(view_menu, "View")
 
@@ -2616,6 +2653,7 @@ class GhViewerFrame(wx.Frame):
         self.Bind(wx.EVT_MENU, self.on_view_activity, id=ID_VIEW_ACTIVITY)
         self.Bind(wx.EVT_MENU, self.on_view_notifications, id=ID_VIEW_NOTIFICATIONS)
         self.Bind(wx.EVT_MENU, lambda e: self._toggle_include_read(), id=ID_SHOW_READ)
+        self.Bind(wx.EVT_MENU, lambda e: self._toggle_speak_results(), id=ID_SPEAK_RESULTS)
         self.Bind(wx.EVT_MENU, lambda e: self._mark_notification_read(), id=ID_MARK_READ)
         self.Bind(wx.EVT_MENU, lambda e: self._mark_all_read(), id=ID_MARK_ALL_READ)
         self.Bind(wx.EVT_MENU, lambda e: self._unsubscribe_notification(), id=ID_UNSUBSCRIBE)
@@ -2837,6 +2875,7 @@ class GhViewerFrame(wx.Frame):
         menu_bar.Check(ID_VIEW_SEARCH_RESULTS, self.view_mode in SEARCH_VIEWS)
         menu_bar.Check(ID_VIEW_ACTIVITY, self.view_mode == VIEW_ACTIVITY)
         menu_bar.Check(ID_SHOW_READ, self._include_read)
+        menu_bar.Check(ID_SPEAK_RESULTS, announce.announcer.categories[announce.RESULT])
         menu_bar.Check(ID_VIEW_STARRED, self.view_mode == VIEW_STARRED)
         menu_bar.Check(ID_VIEW_WATCHED, self.view_mode == VIEW_WATCHED)
         menu_bar.Check(ID_VIEW_SHARED, self.view_mode == VIEW_SHARED)
@@ -6637,7 +6676,8 @@ class GhViewerFrame(wx.Frame):
         # The selected row, or the first, for the preview.
         item = self._focused_item() or self._row_item(0)
         sample = _row_values(item, current.ids) if item is not None else None
-        dlg = ColumnsDialog(self, sets, current.id, layouts, self.list_mode == "full", sample)
+        dlg = ColumnsDialog(self, sets, current.id, layouts, self.list_mode == "full", sample,
+                            say=self._tell)
         try:
             if dlg.ShowModal() != wx.ID_OK:
                 return
@@ -7225,6 +7265,26 @@ class GhViewerFrame(wx.Frame):
             self._load_items()
         self._announce("Including read notifications." if self._include_read
                        else "Unread notifications only.")
+
+    def _toggle_speak_results(self) -> None:
+        """View ▸ Speak Results."""
+        a = announce.announcer
+        a.categories[announce.RESULT] = not a.categories[announce.RESULT]
+        settings.save_announcements(a.enabled, a.categories)
+        self.GetMenuBar().Check(ID_SPEAK_RESULTS, a.categories[announce.RESULT])
+        # Said whatever the setting, or turning it off would be silent.
+        self._tell("Results will be spoken." if a.categories[announce.RESULT]
+                   else "Results won't be spoken.", force=True)
+
+    def _tell(self, msg: str, category: str = announce.RESULT, force: bool = False) -> bool:
+        """The status bar, and the screen reader if this kind of message is
+        spoken. True if it was handed to a screen reader. From a worker
+        thread it is passed to the UI thread, and returns False."""
+        if not wx.IsMainThread():
+            wx.CallAfter(self._tell, msg, category, force)
+            return False
+        self._announce(msg)
+        return announce.announce(msg, category, force)
 
     # ── Search ──────────────────────────────────────────────────────────
 

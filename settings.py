@@ -1,5 +1,5 @@
-"""Choices that last between sessions: the list mode, and the columns each
-kind of list shows and the order they're read in.
+"""Choices that last between sessions: the list mode, the columns each
+kind of list shows and the order they're read in, and what is spoken.
 
 Kept in ``settings.json`` in the per-user app data folder
 (``%APPDATA%\\ghmanage`` on Windows). What is chosen is also kept in memory
@@ -18,6 +18,7 @@ import os
 import time
 from pathlib import Path
 
+from announce import CATEGORIES
 from columns import ColumnSet, reconcile
 from favorites import _app_data_dir as app_data_dir
 
@@ -135,4 +136,20 @@ def load_columns(column_set: ColumnSet) -> list[str]:
 
 def save_columns(column_set: ColumnSet, columns: list[str]) -> None:
     _session.setdefault(_LAYOUTS, {})[column_set.id] = reconcile(columns, column_set)
+    _save()
+
+
+def load_announcements() -> tuple[bool, dict[str, bool]]:
+    """Whether GHManage speaks at all, and which kinds of message
+    (``announce.CATEGORIES``). Everything is on until turned off."""
+    saved = load_settings().get("announcements")
+    saved = saved if isinstance(saved, dict) else {}
+    on = saved.get("enabled")
+    return (on if isinstance(on, bool) else True,
+            {c: saved[c] if isinstance(saved.get(c), bool) else True for c in CATEGORIES})
+
+
+def save_announcements(enabled: bool, categories: dict[str, bool]) -> None:
+    _session["announcements"] = {"enabled": bool(enabled),
+                                 **{c: bool(categories.get(c, True)) for c in CATEGORIES}}
     _save()

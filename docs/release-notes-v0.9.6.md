@@ -5,6 +5,20 @@ a fast, keyboard-driven list.
 
 On a Mac, use `Cmd` where these notes say `Ctrl`, and `Option` where they say `Alt`.
 
+## GHManage tells your screen reader what an action did
+
+In **View → Columns…**, every action is now said, not just shown: "Author
+moved above Message", "Author moved to the top", "Branches added at the end,
+5 of 5", "Author removed, 3 columns shown", "Columns reset to the default".
+When there is nothing to do, you hear why, such as "Commit is already at the
+top", rather than only a beep. A move names the column it is now next to, so
+you know what changed without counting positions. (#65)
+
+It is shown under the lists too. On Windows it is sent as a UI Automation
+notification, the standard way for an app to give a screen reader something to
+say, so your screen reader speaks it in your own voice and settings, with
+nothing extra installed. **View → Speak Results** turns it off and on.
+
 ## Fixed
 
 - **The Search GitHub dialog no longer reads its examples when it opens.**

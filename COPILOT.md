@@ -296,6 +296,17 @@ UI thread via `wx.CallAfter`. Never touch wx widgets from a worker thread.
   ("open", "success") so Full mode doesn't name it; Yes/No columns stay `TEXT`, since "Yes"
   means nothing without its name. `columns.py` builds the cells and rows (`cell_text`,
   `row_text`) and knows nothing about GitHub or wx, so it can move into app-kit.
+- **Spoken results** (#65). `self._tell(msg, category)` writes the status bar and hands the
+  message to `announce.announcer`, which filters it by category (`RESULT` interrupts,
+  `STATUS` and `HINT` queue, `SILENT` is never spoken) and the user's settings
+  (`settings.load_announcements`, View ▸ Speak Results). `_announce` stays status-bar only.
+  `speech.py` delivers it: on Windows a UIA notification raised from a minimal ctypes
+  `IRawElementProviderSimple` that a hidden child window (`_speech_window`) serves through
+  `WM_GETOBJECT`. A notification from `UiaHostProviderFromHwnd` alone is never delivered,
+  and serving the provider from the frame takes over the frame's UIA name, so don't do
+  either. On a Mac, a VoiceOver announcement. UI thread only (`_tell` hops there). Dialogs take a
+  `say` callable, which tests replace; wording that comes from a rule, like the Columns
+  dialog's, lives beside the rule (`LayoutEditor.said`) and is tested there.
 - **Keyboard first.** Every action has a keybinding. Never add a feature that requires mouse-only access.
 - **No patronizing hand-holding.** Don't add "Welcome!" dialogs or verbose tooltips. Power users want speed.
 - **Comment navigation** uses Alt+N/Alt+P with position tracking via `_comment_positions`.

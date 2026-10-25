@@ -114,12 +114,20 @@ class LayoutEditor:
     """The columns a list shows, being changed: what a Columns dialog does,
     without the dialog, so the rules are the same wherever it's drawn and can
     be tested without windows. Each action returns False when there was
-    nothing it could do (already at the top, the last column), for the
-    dialog to say so."""
+    nothing it could do (already at the top, the last column).
+
+    After every action, ``said`` is the sentence to tell the user, whether
+    it worked or not. A move names the column it is now next to, in the
+    direction it went ("Author moved above Message"): someone arrowing the
+    list learns what changed, where "moved to position 2" makes them count."""
 
     def __init__(self, column_set: ColumnSet, shown) -> None:
         self.column_set = column_set
         self.shown: list[str] = reconcile(shown, column_set)
+        self.said = ""
+
+    def _name(self, col_id: str) -> str:
+        return self.column_set.column(col_id).heading
 
     def available(self) -> list[str]:
         """The columns not shown, in the set's order."""
@@ -129,26 +137,56 @@ class LayoutEditor:
         """Show an available column, at the end of the row."""
         rest = self.available()
         if not 0 <= available_index < len(rest):
+            self.said = "Every column is shown." if not rest else "No column is selected."
             return False
         self.shown.append(rest[available_index])
+        n = len(self.shown)
+        self.said = f"{self._name(rest[available_index])} added at the end, {n} of {n}."
         return True
 
     def remove(self, index: int) -> bool:
         """Stop showing a column. The last one always stays."""
-        if not 0 <= index < len(self.shown) or len(self.shown) == 1:
+        if not 0 <= index < len(self.shown):
+            self.said = "No column is selected."
             return False
-        del self.shown[index]
+        if len(self.shown) == 1:
+            self.said = "At least one column has to be shown."
+            return False
+        name = self._name(self.shown.pop(index))
+        n = len(self.shown)
+        self.said = f"{name} removed, {n} column{'s' if n != 1 else ''} shown."
         return True
 
     def move(self, index: int, target: int) -> bool:
-        if not (0 <= index < len(self.shown) and 0 <= target < len(self.shown)) \
-                or index == target:
+        last = len(self.shown) - 1
+        if not 0 <= index <= last:
+            self.said = "No column is selected."
+            return False
+        name = self._name(self.shown[index])
+        if not 0 <= target <= last or index == target:
+            if last == 0:
+                self.said = f"{name} is the only column shown."
+            elif target <= index and index == 0:
+                self.said = f"{name} is already at the top."
+            elif target >= index and index == last:
+                self.said = f"{name} is already at the bottom."
+            else:
+                self.said = f"{name} didn't move."
             return False
         self.shown.insert(target, self.shown.pop(index))
+        if target == 0:
+            self.said = f"{name} moved to the top."
+        elif target == last:
+            self.said = f"{name} moved to the bottom."
+        elif target < index:
+            self.said = f"{name} moved above {self._name(self.shown[target + 1])}."
+        else:
+            self.said = f"{name} moved below {self._name(self.shown[target - 1])}."
         return True
 
     def reset(self) -> None:
         self.shown = list(self.column_set.defaults)
+        self.said = "Columns reset to the default."
 
     def changed_from(self, saved) -> bool:
         return self.shown != reconcile(saved, self.column_set)

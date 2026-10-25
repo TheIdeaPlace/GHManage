@@ -1291,6 +1291,48 @@ class NewLabelDialog(wx.Dialog):
 # ── Search dialog ───────────────────────────────────────────────────────
 
 
+def _reading_box(parent: wx.Window, label: str, text: str, max_width: int = 640) -> wx.BoxSizer:
+    """Help text you hear only if you go to it: a labelled, read-only box.
+
+    A StaticText in a dialog that labels nothing is "dialog text", which
+    screen readers read along with the focused control when the dialog
+    opens. In a box it is read only when you Tab to it. Call this after
+    the dialog's buttons are made, so the box is last in tab order, and
+    Insert the sizer where it should appear on screen. The label stays
+    the box's label because it is made just before it.
+
+    It is as wide as its longest line, up to max_width, and tall enough
+    for the text wrapped to that width. Enter presses the dialog's default
+    button, as it does in the dialog's other fields; a multi-line box
+    would otherwise keep it.
+    """
+    sizer = wx.BoxSizer(wx.VERTICAL)
+    sizer.Add(wx.StaticText(parent, label=label))
+    box = wx.TextCtrl(parent, value=text,
+                      style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_WORDWRAP)
+    box.SetName(label.replace("&", ""))
+    margin = 24  # the edit's borders and inner padding, with room to spare
+    widths = [box.GetTextExtent(line).width for line in text.split("\n")]
+    width = min(max(widths) + margin, max_width)
+    lines = sum(-(-w // (width - margin)) or 1 for w in widths)  # each wraps to ceil(w / room)
+    box.SetMinSize((width, box.GetCharHeight() * lines + margin))
+
+    def on_key(event: wx.KeyEvent) -> None:
+        button = wx.GetTopLevelParent(box).GetDefaultItem()
+        if (event.GetKeyCode() in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER)
+                and not event.HasAnyModifiers() and isinstance(button, wx.Button)
+                and button.IsEnabled()):
+            press = wx.CommandEvent(wx.wxEVT_BUTTON, button.GetId())
+            press.SetEventObject(button)
+            button.GetEventHandler().ProcessEvent(press)
+            return
+        event.Skip()
+
+    box.Bind(wx.EVT_KEY_DOWN, on_key)
+    sizer.Add(box, 0, wx.EXPAND)
+    return sizer
+
+
 class SearchDialog(wx.Dialog):
     """What to search GitHub for, and how.
 
@@ -1300,6 +1342,13 @@ class SearchDialog(wx.Dialog):
     """
 
     KINDS = [(KIND_ISSUES, "Issues and pull requests"), (KIND_REPOS, "Repositories")]
+
+    EXAMPLES = (
+        "Words and GitHub's qualifiers, for example:\n"
+        "is:open is:issue label:bug repo:nvaccess/nvda\n"
+        "author:@me review-requested:@me updated:>2026-01-01\n"
+        "screen reader language:python stars:>50 (repositories)"
+    )
 
     def __init__(self, parent: wx.Window, kind: str = KIND_ISSUES, query: str = "",
                  select: bool = True) -> None:
@@ -1315,29 +1364,26 @@ class SearchDialog(wx.Dialog):
         self.kind_ctrl.SetSelection(keys.index(kind) if kind in keys else 0)
         outer.Add(self.kind_ctrl, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
 
-        # A short label: it is said every time you land on the field. The
-        # examples are in the help below and under Insert Qualifier (Alt+Q). No hint text either:
-        # it too was read every time you landed on the field.
+        # A short label, and no hint text: both are said every time you
+        # land on the field. Examples are in the Examples box (Alt+X) and
+        # under Insert Qualifier (Alt+Q).
         label = "&Search"
         outer.Add(wx.StaticText(self, label=label), 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
         self.query_ctrl = wx.TextCtrl(self, value=query)
         self.query_ctrl.SetName(label.replace("&", ""))
         outer.Add(self.query_ctrl, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
 
-        help_text = (
-            "Words and GitHub's qualifiers, for example:\n"
-            "  is:open is:issue label:bug repo:nvaccess/nvda\n"
-            "  author:@me  review-requested:@me  updated:>2026-01-01\n"
-            "  screen reader language:python stars:>50   (repositories)"
-        )
-        outer.Add(wx.StaticText(self, label=help_text), 0, wx.ALL, 10)
         # Alt+Q, from its label. F1 is help, as everywhere: the guide's
         # section on searching (see _on_char_hook).
         self.qualifiers_btn = wx.Button(self, label="Insert &Qualifier…")
-        outer.Add(self.qualifiers_btn, 0, wx.LEFT | wx.RIGHT, 10)
+        outer.Add(self.qualifiers_btn, 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
         outer.Add(self.CreateStdDialogButtonSizer(wx.OK | wx.CANCEL), 0, wx.ALIGN_RIGHT | wx.ALL, 10)
+        # Under the Search box on screen, but last in tab order: as plain
+        # text it was read with the Search box when the dialog opened (#60).
+        examples = _reading_box(self, "E&xamples", self.EXAMPLES)
+        outer.Insert(4, examples, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP, 10)
+        outer.SetMinSize((520, -1))  # on the dialog, Fit would replace it
         self.SetSizerAndFit(outer)
-        self.SetMinSize((520, -1))
         self.Bind(wx.EVT_BUTTON, self._on_ok, id=wx.ID_OK)
         self.qualifiers_btn.Bind(wx.EVT_BUTTON, lambda e: self._show_qualifiers())
         self.Bind(wx.EVT_CHAR_HOOK, self._on_char_hook)
@@ -1412,8 +1458,6 @@ class SearchQualifiersDialog(wx.Dialog):
             self.list.InsertColumn(i, heading, width=width)
         outer.Add(self.list, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
 
-        outer.Add(wx.StaticText(self, label=search_help.GENERAL_NOTE), 0, wx.ALL, 10)
-
         buttons = wx.BoxSizer(wx.HORIZONTAL)
         insert = wx.Button(self, wx.ID_OK, "&Insert into Search")
         insert.SetDefault()
@@ -1422,6 +1466,10 @@ class SearchQualifiersDialog(wx.Dialog):
         for b in (insert, docs, close):
             buttons.Add(b, 0, wx.LEFT, 6)
         outer.Add(buttons, 0, wx.ALIGN_RIGHT | wx.ALL, 10)
+        # Under the list on screen, last in tab order, for the same reason
+        # as the Search dialog's examples (#60).
+        notes = _reading_box(self, "&Notes", search_help.GENERAL_NOTE)
+        outer.Insert(outer.GetItemCount() - 1, notes, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP, 10)
         self.SetSizerAndFit(outer)
 
         self.filter_ctrl.Bind(wx.EVT_TEXT, lambda e: self._fill())

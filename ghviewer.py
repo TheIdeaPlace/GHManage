@@ -2015,7 +2015,7 @@ class DeleteRepoDialog(wx.Dialog):
         label = f"&Type {repo} to confirm"
         outer.Add(wx.StaticText(self, label=label), 0, wx.LEFT | wx.RIGHT, 10)
         self.name_ctrl = wx.TextCtrl(self, style=wx.TE_PROCESS_ENTER)
-        self.name_ctrl.SetName(label.replace("&", ""))
+        _name(self.name_ctrl, label.replace("&", ""))
         outer.Add(self.name_ctrl, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
 
         buttons = wx.BoxSizer(wx.HORIZONTAL)

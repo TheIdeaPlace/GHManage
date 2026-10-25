@@ -162,6 +162,7 @@ def _dialogs(frame):
         "Command Palette": lambda: ghviewer.CommandListDialog(
             frame, "Command Palette", [Command("Quit", "Ctrl+Q", "File", 1)],
             (("Command", 330), ("Shortcut", 150)), lambda c: (c.name, c.keys), palette=True),
+        "Delete Repository": lambda: ghviewer.DeleteRepoDialog(frame, "owner/name"),
         "Run workflow": lambda: ghviewer.WorkflowInputsDialog(frame, "CI", "main", [
             WorkflowInput("level", "choice", "Log level", "info", True, ["info", "debug"]),
             WorkflowInput("note", "string", "A note"),

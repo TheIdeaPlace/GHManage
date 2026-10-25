@@ -9,6 +9,7 @@ only (CI's build-macos job runs them).
 
 from __future__ import annotations
 
+import ctypes
 import os
 import sys
 
@@ -21,6 +22,7 @@ else:
 
 import ghviewer  # noqa: E402
 import speech  # noqa: E402
+from commands import Command  # noqa: E402
 from gh_columns import COMMIT_SET, TAG_SET  # noqa: E402
 from gh_data import WorkflowInput  # noqa: E402
 
@@ -96,6 +98,24 @@ def _labelled_controls(window: wx.Window) -> list[wx.Window]:
     return found
 
 
+def _is_kind_of(view, class_name: str) -> bool:
+    return bool(speech._send(view, "isKindOfClass:", ctypes.c_void_p(speech._class(class_name)),
+                             restype=ctypes.c_bool, argtypes=(ctypes.c_void_p,)))
+
+
+# The AppKit view each control's label has to be on: the one VoiceOver lands
+# on. get_label reads back through the same _target_view as set_label, so
+# without this a change in what wx's GetHandle() returns would put the label
+# on a scroll view VoiceOver never focuses and still pass.
+VIEW_CLASSES = {
+    "Search": "NSTextField",
+    "Description": "NSTextView",
+    "Hidden repositories": "NSTableView",
+    "List to change": "NSPopUpButton",
+    "Issues": "NSTableView",  # an NSOutlineView, which is one
+}
+
+
 @mac
 def test_each_kind_of_control_reads_its_name(frame):
     controls = {
@@ -110,6 +130,7 @@ def test_each_kind_of_control_reads_its_name(frame):
     try:
         for label, ctrl in controls.items():
             assert speech.get_label(ctrl) == label, type(ctrl).__name__
+            assert _is_kind_of(speech._target_view(ctrl), VIEW_CLASSES[label]), label
         # Renaming, as the item list is on every view change, replaces it.
         ghviewer._name(controls["Issues"], "Branches")
         assert speech.get_label(controls["Issues"]) == "Branches"
@@ -138,6 +159,9 @@ def _dialogs(frame):
         "New Issue": lambda: ghviewer.NewIssueDialog(frame, "owner/name"),
         "New Label": lambda: ghviewer.NewLabelDialog(frame, "owner/name"),
         "Review": lambda: ghviewer.ReviewDialog(frame, "PR #1"),
+        "Command Palette": lambda: ghviewer.CommandListDialog(
+            frame, "Command Palette", [Command("Quit", "Ctrl+Q", "File", 1)],
+            (("Command", 330), ("Shortcut", 150)), lambda c: (c.name, c.keys), palette=True),
         "Run workflow": lambda: ghviewer.WorkflowInputsDialog(frame, "CI", "main", [
             WorkflowInput("level", "choice", "Log level", "info", True, ["info", "debug"]),
             WorkflowInput("note", "string", "A note"),
@@ -148,12 +172,14 @@ def _dialogs(frame):
 @pytest.mark.parametrize("which", list(_dialogs(None)))
 def test_every_text_box_list_and_choice_in_a_dialog_is_named(frame, which):
     """Anywhere: none is left with wx's default name ("text", "listBox",
-    "choice"), which is what a control made without _name has."""
+    "choice", "listCtrl"), which is what a control made without _name has."""
     dlg = _dialogs(frame)[which]()
     try:
-        controls = _labelled_controls(dlg)
+        controls = _labelled_controls(dlg) + [
+            w for w in dlg.GetChildren() if isinstance(w, wx.ListCtrl)]
         assert controls
-        defaults = {wx.TextCtrlNameStr, wx.ListBoxNameStr, wx.ChoiceNameStr}
+        defaults = {wx.TextCtrlNameStr, wx.ListBoxNameStr, wx.ChoiceNameStr,
+                    wx.ListCtrlNameStr}
         assert [c.GetName() for c in controls if c.GetName() in defaults] == []
     finally:
         dlg.Destroy()

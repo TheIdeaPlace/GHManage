@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -128,13 +129,14 @@ def test_menu_walk_gives_every_command_with_its_menu():
     f = _frame()
     got = Frame._menu_commands(f, enabled_only=False)
     assert f.updated == 1   # enables brought up to date first
+    ctrl = "Cmd" if sys.platform == "darwin" else "Ctrl"  # as a Mac's menus show it
     assert got == [
-        Command("Refresh (R)", "Ctrl+R", "File", 1),
-        Command("Quit", "Ctrl+Q", "File", 2),
-        Command("Close Issue/PR (C)", "Ctrl+W", "Actions", 3),
-        Command("Copy Link", "Ctrl+Shift+C", "Actions > Copy", 5),
-        Command("Issues & PRs", "Ctrl+1", "View > View Mode", 7, checked=True),
-        Command("Branches", "Ctrl+2", "View > View Mode", 8),
+        Command("Refresh (R)", f"{ctrl}+R", "File", 1),
+        Command("Quit", f"{ctrl}+Q", "File", 2),
+        Command("Close Issue/PR (C)", f"{ctrl}+W", "Actions", 3),
+        Command("Copy Link", f"{ctrl}+Shift+C", "Actions > Copy", 5),
+        Command("Issues & PRs", f"{ctrl}+1", "View > View Mode", 7, checked=True),
+        Command("Branches", f"{ctrl}+2", "View > View Mode", 8),
     ]
 
 

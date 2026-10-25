@@ -30,9 +30,9 @@ nothing extra installed. **View → Speak Results** turns it off and on.
 - **On a Mac, screen readers now read the labels of lists, choices and text
   boxes in dialogs.** Before, they could read what was in a box without what
   the box was for, such as the two lists in **View → Columns…** without
-  "Available columns" and "Shown columns". Every labelled list, choice and
-  text box now has its label on a Mac, in every dialog and in the main
-  window's repository list, item list and details panel. (#69)
+  "Available columns" and "Shown columns". Lists, choices and text boxes now
+  have their labels on a Mac, in the dialogs and in the main window's
+  repository list, item list and details panel. (#69)
 
 ## Before you start
 

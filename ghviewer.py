@@ -1560,7 +1560,10 @@ class CommandListDialog(wx.Dialog):
         self.summary = wx.StaticText(self, label="")
         outer.Add(self.summary, 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
         self._described = None
-        if hasattr(wx, "Accessible"):  # Windows; VoiceOver waits for #54
+        # Windows only; VoiceOver waits for #54. A Mac's wx has wx.Accessible
+        # too, but making one raises NotImplementedError, which stopped this
+        # dialog opening there.
+        if wx.Platform == "__WXMSW__":
             self._described = _DescribedAccessible(self.filter_ctrl)
             self.filter_ctrl.SetAccessible(self._described)
         self._notify_timer: wx.CallLater | None = None
@@ -1875,9 +1878,10 @@ class ColumnsDialog(wx.Dialog):
         self.available.SetSelection(min(max(available_index, 0), max(len(rest), 1) - 1))
         self._show_preview()
         # Refilled, the focused row is often the same row number as before,
-        # which NVDA takes for no change; say its name has changed.
+        # which NVDA takes for no change; say its name has changed. Windows
+        # only: on a Mac wx.Accessible exists but raises NotImplementedError.
         focus = wx.Window.FindFocus()
-        if focus in (self.shown, self.available) and hasattr(wx, "Accessible"):
+        if focus in (self.shown, self.available) and wx.Platform == "__WXMSW__":
             wx.Accessible.NotifyEvent(wx.ACC_EVENT_OBJECT_NAMECHANGE, focus,
                                       wx.OBJID_CLIENT, focus.GetSelection() + 1)
 

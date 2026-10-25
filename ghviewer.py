@@ -94,6 +94,9 @@ from gh_data import (
     WATCH_IGNORE,
     WATCH_PARTICIPATING,
     get_watch_level,
+    repo_admin,
+    delete_repo,
+    set_archived,
     list_accounts,
     set_watch_level,
     switch_account,
@@ -629,6 +632,8 @@ ID_COMPARE_BRANCHES = wx.NewIdRef()
 ID_OPEN_REPO = wx.NewIdRef()
 ID_REMOVE_REPO = wx.NewIdRef()
 ID_HIDDEN_REPOS = wx.NewIdRef()
+ID_ARCHIVE_REPO = wx.NewIdRef()
+ID_DELETE_REPO = wx.NewIdRef()
 ID_CHECK_UPDATES = wx.NewIdRef()
 ID_NEW_ISSUE = wx.NewIdRef()
 ID_SWITCH_ACCOUNT = wx.NewIdRef()
@@ -1962,6 +1967,78 @@ class ColumnsDialog(wx.Dialog):
         event.Skip()
 
 
+# ── Delete Repository dialog ────────────────────────────────────────────
+
+
+class DeleteRepoDialog(wx.Dialog):
+    """Confirm deleting a repository by typing its name, as github.com does.
+
+    The warning is the dialog's text, read with its title when it opens.
+    Delete stays unavailable until the box holds the repository's name;
+    Cancel is the default, so Enter never deletes on its own: in the box,
+    Enter goes to Delete once the name is right, and does nothing before.
+    Tab passes over Delete while it is unavailable, so the moment it becomes
+    available is said.
+    """
+
+    def __init__(self, parent: wx.Window, repo: str, archived: bool = False) -> None:
+        super().__init__(parent, title="Delete Repository from GitHub")
+        self.repo = repo
+        outer = wx.BoxSizer(wx.VERTICAL)
+        warning = (
+            f"Delete {repo} from GitHub? This cannot be undone.\n\n"
+            "Everything in it goes: its code, issues, pull requests, releases, wiki "
+            "and Actions history. Its stars go too, and forks are no longer linked to it."
+        )
+        if not archived:
+            warning += ("\n\nTo keep it but stop changes to it, cancel and choose "
+                        "Archive Repository instead, which can be undone.")
+        text = wx.StaticText(self, label=warning)
+        text.Wrap(460)
+        outer.Add(text, 0, wx.ALL, 10)
+
+        label = f"&Type {repo} to confirm"
+        outer.Add(wx.StaticText(self, label=label), 0, wx.LEFT | wx.RIGHT, 10)
+        self.name_ctrl = wx.TextCtrl(self, style=wx.TE_PROCESS_ENTER)
+        self.name_ctrl.SetName(label.replace("&", ""))
+        outer.Add(self.name_ctrl, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
+
+        buttons = wx.BoxSizer(wx.HORIZONTAL)
+        self.delete_btn = wx.Button(self, wx.ID_OK, "&Delete")
+        cancel = wx.Button(self, wx.ID_CANCEL, "Cancel")
+        cancel.SetDefault()
+        buttons.Add(self.delete_btn, 0, wx.RIGHT, 6)
+        buttons.Add(cancel)
+        outer.Add(buttons, 0, wx.ALIGN_RIGHT | wx.ALL, 10)
+        self.SetSizerAndFit(outer)
+        self.SetEscapeId(wx.ID_CANCEL)
+        self.delete_btn.Disable()
+
+        self.name_ctrl.Bind(wx.EVT_TEXT, lambda e: self._update())
+        self.name_ctrl.Bind(wx.EVT_TEXT_ENTER, lambda e: self._on_enter())
+        self.CentreOnParent()
+        wx.CallAfter(self.name_ctrl.SetFocus)
+
+    def matches(self) -> bool:
+        return self.name_ctrl.GetValue().strip().lower() == self.repo.lower()
+
+    def _update(self) -> None:
+        was = self.delete_btn.IsEnabled()
+        now = self.matches()
+        self.delete_btn.Enable(now)
+        # Tab passes over an unavailable button, so nothing else says
+        # when Delete becomes available.
+        if now and not was:
+            announce.announce("The name matches. Delete is available.", announce.HINT)
+
+    def _on_enter(self) -> None:
+        if self.matches():
+            self.delete_btn.SetFocus()
+        else:
+            wx.Bell()
+            announce.announce(f"That doesn't match {self.repo} yet.", announce.RESULT)
+
+
 # ── Pull request dialogs ────────────────────────────────────────────────
 
 
@@ -2422,6 +2499,9 @@ class GhViewerFrame(wx.Frame):
         # would swallow Delete in every other control.
         file_menu.Append(ID_REMOVE_REPO, "Remove from List (Delete)")
         file_menu.Append(ID_HIDDEN_REPOS, "Hidden Repositories…")
+        # On GitHub itself, so no shortcut keys: one slip can't reach them.
+        file_menu.Append(ID_ARCHIVE_REPO, "Archive or Unarchive Repository…")
+        file_menu.Append(ID_DELETE_REPO, "Delete Repository from GitHub…")
         file_menu.AppendSeparator()
         file_menu.Append(ID_SWITCH_ACCOUNT, "Switch GitHub Account…\tCtrl+Shift+K")
         file_menu.AppendSeparator()
@@ -3054,6 +3134,8 @@ class GhViewerFrame(wx.Frame):
         self.Bind(wx.EVT_MENU, self.on_open_repo, id=ID_OPEN_REPO)
         self.Bind(wx.EVT_MENU, self.on_remove_repo, id=ID_REMOVE_REPO)
         self.Bind(wx.EVT_MENU, self.on_hidden_repos, id=ID_HIDDEN_REPOS)
+        self.Bind(wx.EVT_MENU, lambda e: self.on_archive_repo(), id=ID_ARCHIVE_REPO)
+        self.Bind(wx.EVT_MENU, lambda e: self.on_delete_repo(), id=ID_DELETE_REPO)
         self.Bind(wx.EVT_MENU, self.on_open_browser, id=ID_OPEN_BROWSER)
         self.Bind(wx.EVT_MENU, self.on_close_item, id=ID_CLOSE_ITEM)
         self.Bind(wx.EVT_MENU, self.on_reopen, id=ID_REOPEN)
@@ -5188,7 +5270,11 @@ class GhViewerFrame(wx.Frame):
                     ("item", ID_COPY_CLONE_SSH, "Copy SSH Clone URL"),
                 ]),
             ]
-            entries += [("sep",), ("item", ID_REMOVE_REPO, "Remove from List\tDelete")]
+            archived = self._known_archived(data)
+            entries += [("sep",), ("item", ID_REMOVE_REPO, "Remove from List\tDelete"),
+                        ("item", ID_ARCHIVE_REPO,
+                         "Unarchive Repository…" if archived else "Archive Repository…"),
+                        ("item", ID_DELETE_REPO, "Delete Repository from GitHub…")]
             return entries
         if isinstance(data, str) and data.startswith(SEARCH_ENTRY_PREFIX):
             return [("item", ID_REPO_OPEN, "Run Search\tEnter"),
@@ -6158,6 +6244,184 @@ class GhViewerFrame(wx.Frame):
                            "File, Hidden Repositories brings it back.")
         else:
             self._announce(f"Removed {name} from the list.")
+
+    # ── Archiving and deleting on GitHub (#68) ──────────────────────────
+
+    def _known_archived(self, repo: str) -> bool:
+        """Whether one of your repositories is archived, as last loaded.
+        False for a repository that isn't yours: it is checked when asked."""
+        return any(r.get("nameWithOwner", "").lower() == repo.lower() and r.get("isArchived")
+                   for r in self._all_repos)
+
+    def _selected_repository(self) -> tuple[int, str] | None:
+        """The repository row selected in the list, or None, said why. Not
+        Favorites, the views, or a saved search: they aren't on GitHub."""
+        idx = self.repo_list.GetSelection()
+        if idx == wx.NOT_FOUND:
+            self._announce("Select a repository in the list first.")
+            return None
+        name = self.repo_list.GetClientData(idx)
+        if (not isinstance(name, str) or not name or name == FAVORITES_ENTRY
+                or name in ENTRY_VIEWS or name.startswith(SEARCH_ENTRY_PREFIX)):
+            self._announce("Select a repository in the list first.")
+            return None
+        return idx, name
+
+    def _with_admin(self, repo: str, doing: str, then) -> None:
+        """Check, off the UI thread, that you can ``doing`` ``repo`` (admin
+        rights), then call ``then(admin_info)`` on the UI thread. One at a
+        time: a second while one is under way would stack its question on
+        top of the first."""
+        if getattr(self, "_admin_pending", None):
+            self._tell(f"Still working on {self._admin_pending}.")
+            return
+        self._admin_pending = repo
+        self._announce(f"Checking your rights on {repo}…")
+
+        def done(call, *args) -> None:
+            self._admin_pending = None
+            call(*args)
+
+        def worker() -> None:
+            try:
+                info = repo_admin(repo)
+            except GhError as exc:
+                wx.CallAfter(done, self._tell, f"Couldn't check {repo}: {exc}")
+                return
+            if not info.admin:
+                wx.CallAfter(done, self._tell, f"You need admin rights on {repo} to {doing} it.")
+                return
+            wx.CallAfter(done, then, info)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def on_archive_repo(self) -> None:
+        """File ▸ Archive or Unarchive Repository: read-only on GitHub, or
+        back again. It can be undone, so a plain Yes or No is enough."""
+        chosen = self._selected_repository()
+        if chosen is None:
+            return
+        repo = chosen[1]
+
+        def ask(info) -> None:
+            archive = not info.archived
+            if archive:
+                question = (f"Archive {repo}?\n\nIt becomes read-only on GitHub: no new "
+                            "issues, pull requests, comments or pushes. You can unarchive "
+                            "it later.")
+            else:
+                question = (f"{repo} is archived. Unarchive it?\n\nIssues, pull requests, "
+                            "comments and pushes are allowed again.")
+            title = "Archive Repository" if archive else "Unarchive Repository"
+            if wx.MessageBox(question, title, wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION,
+                             self) != wx.YES:
+                return
+            self._announce(f"{'Archiving' if archive else 'Unarchiving'} {repo}…")
+
+            def worker() -> None:
+                try:
+                    set_archived(repo, archive)
+                except GhError as exc:
+                    wx.CallAfter(self._tell,
+                                 f"Couldn't {'archive' if archive else 'unarchive'} {repo}: {exc}")
+                    return
+                wx.CallAfter(self._on_archived, repo, archive)
+
+            threading.Thread(target=worker, daemon=True).start()
+
+        self._with_admin(repo, "archive or unarchive", ask)
+
+    # Lists of repositories, whose rows can say "archived" or be the one deleted.
+    _REPO_LIST_VIEWS = (VIEW_STARRED, VIEW_WATCHED, VIEW_ORG, VIEW_SHARED, VIEW_SEARCH_REPOS)
+
+    def _shows_repo(self, repo: str) -> bool:
+        """Whether the right-hand list is ``repo``'s, or a list of repositories."""
+        return ((self.repo or "").lower() == repo.lower()
+                or self.view_mode in self._REPO_LIST_VIEWS)
+
+    def _on_archived(self, repo: str, archived: bool) -> None:
+        for r in self._all_repos:
+            if r.get("nameWithOwner", "").lower() == repo.lower():
+                r["isArchived"] = archived
+        self._tell(f"Archived {repo}. It is read-only on GitHub now." if archived
+                   else f"Unarchived {repo}.")
+        if self._shows_repo(repo):
+            self._load_items()  # so "Archived (read-only)" shows or goes
+
+    def on_delete_repo(self) -> None:
+        """File ▸ Delete Repository from GitHub: gone for good, with
+        everything in it, once you have typed its name back."""
+        chosen = self._selected_repository()
+        if chosen is None:
+            return
+        row, repo = chosen
+
+        def ask(info) -> None:
+            dlg = DeleteRepoDialog(self, repo, info.archived)
+            try:
+                if dlg.ShowModal() != wx.ID_OK:
+                    self._announce(f"{repo} was not deleted.")
+                    return
+            finally:
+                dlg.Destroy()
+            self._announce(f"Deleting {repo}…")
+
+            def worker() -> None:
+                try:
+                    delete_repo(repo)
+                except MissingScope as exc:
+                    wx.CallAfter(self._on_delete_scope, exc)
+                    return
+                except GhError as exc:
+                    wx.CallAfter(self._tell, f"Couldn't delete {repo}: {exc}")
+                    return
+                wx.CallAfter(self._on_repo_deleted, repo, row)
+
+            threading.Thread(target=worker, daemon=True).start()
+
+        self._with_admin(repo, "delete", ask)
+
+    def _on_delete_scope(self, exc: MissingScope) -> None:
+        self._announce(f"Deleting a repository needs gh's \"{exc.scope}\" permission; "
+                       "see the message for how to add it.")
+        wx.MessageBox(str(exc), "Delete Repository from GitHub",
+                      wx.OK | wx.ICON_INFORMATION, self)
+
+    def _on_repo_deleted(self, repo: str, row: int) -> None:
+        """Take every trace of it out of GHManage. The list isn't fetched from
+        GitHub again: for a few seconds GitHub can still list a repository
+        it has just deleted."""
+        key = repo.lower()
+        self._all_repos = [r for r in self._all_repos
+                           if r.get("nameWithOwner", "").lower() != key]
+        if any(p.lower() == key for p in self._pinned_repos):
+            self._pinned_repos = remove_pinned(repo)
+        kept = [f for f in self.favorites if (f.repo or "").lower() != key]
+        favorites_changed = len(kept) != len(self.favorites)
+        if favorites_changed:
+            self.favorites = kept
+            save_favorites(kept)
+        # Where you are now, unless that is the row deleted: you may have
+        # moved on while gh was working, and the old row number may be
+        # another entry by now.
+        idx = self.repo_list.GetSelection()
+        current = self.repo_list.GetClientData(idx) if idx != wx.NOT_FOUND else None
+        self._refresh_repo_list()
+        if not isinstance(current, str) or current.lower() == key:
+            self._select_repo_row(row)
+        self._tell(f"Deleted {repo} from GitHub.")
+        if (self.repo or "").lower() == key:
+            # Everything on the right would now fail against a repository
+            # that isn't there: show your notifications instead, as after
+            # switching account.
+            self.repo = None
+            self._return_to = None
+            self._switch_view(VIEW_NOTIFICATIONS)
+            self._update_title()
+        elif self.view_mode == VIEW_FAVORITES and favorites_changed:
+            self._load_favorites_view()
+        elif self.view_mode in self._REPO_LIST_VIEWS:
+            self._load_items()
 
     def _select_repo_row(self, row: int) -> None:
         """After a removal: the row that took the removed one's place, or the

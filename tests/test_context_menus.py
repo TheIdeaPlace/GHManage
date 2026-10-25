@@ -117,8 +117,11 @@ def test_the_real_actions_menu_offers_new_issue_in_a_repo():
 # ── The repository list ─────────────────────────────────────────────────
 
 
-def _repo_frame(pinned=(), favorites=()):
-    return SimpleNamespace(_pinned_repos=list(pinned), favorites=list(favorites))
+def _repo_frame(pinned=(), favorites=(), repos=()):
+    frame = SimpleNamespace(_pinned_repos=list(pinned), favorites=list(favorites),
+                            _all_repos=list(repos))
+    frame._known_archived = lambda repo: Frame._known_archived(frame, repo)
+    return frame
 
 
 def _ids(entries):

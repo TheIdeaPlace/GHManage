@@ -27,6 +27,12 @@ nothing extra installed. **View → Speak Results** turns it off and on.
   (`Alt+X`, or `Shift+Tab` from Search for), so opening the dialog says its
   title and "Search". The Search Qualifiers table's note about numbers,
   dates and ranges works the same way, under **Notes** (`Alt+N`). (#60)
+- **On a Mac, screen readers now read the labels of lists, choices and text
+  boxes in dialogs.** Before, they could read what was in a box without what
+  the box was for, such as the two lists in **View → Columns…** without
+  "Available columns" and "Shown columns". Every labelled list, choice and
+  text box now has its label on a Mac, in every dialog and in the main
+  window's repository list, item list and details panel. (#69)
 
 ## Before you start
 

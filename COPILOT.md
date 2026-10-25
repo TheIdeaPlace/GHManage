@@ -307,6 +307,10 @@ UI thread via `wx.CallAfter`. Never touch wx widgets from a worker thread.
   either. On a Mac, a VoiceOver announcement. UI thread only (`_tell` hops there). Dialogs take a
   `say` callable, which tests replace; wording that comes from a rule, like the Columns
   dialog's, lives beside the rule (`LayoutEditor.said`) and is tested there.
+- **Name controls with `_name(ctrl, label)`**, never `SetName` alone (#69). On Windows it is
+  just `SetName`; on a Mac, where `SetName` reaches nothing native, it also calls
+  `speech.set_label` to put the label on the native view VoiceOver reads.
+  `tests/test_mac_labels.py` reads every dialog's labels back from AppKit on the macOS CI job.
 - **Keyboard first.** Every action has a keybinding. Never add a feature that requires mouse-only access.
 - **No patronizing hand-holding.** Don't add "Welcome!" dialogs or verbose tooltips. Power users want speed.
 - **Comment navigation** uses Alt+N/Alt+P with position tracking via `_comment_positions`.
@@ -381,7 +385,7 @@ Add tests alongside any change; CI runs them before building.
 
 ## CI/CD
 
-- `.github/workflows/ghmanage.yml` — runs the tests, then builds `ghmanage.exe` via PyInstaller on Windows.
+- `.github/workflows/ghmanage.yml` — runs the tests on Windows and on macOS, then builds `ghmanage.exe` and the Mac app with PyInstaller.
 - Triggers on push to `main`, `v*` tags, and PRs to `main`.
 - On tag push: creates a GitHub Release with `ghmanage.exe` attached.
 - Release notes read from `docs/release-notes-<tag>.md`.

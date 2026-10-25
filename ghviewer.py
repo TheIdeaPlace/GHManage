@@ -856,6 +856,17 @@ def is_repo_entry(data) -> bool:
     )
 
 
+def _name(ctrl: wx.Window, label: str) -> None:
+    """Name a control for screen readers. Use this, not SetName alone.
+
+    On Windows this is SetName and nothing else. On a Mac SetName reaches
+    nothing native, so VoiceOver read text boxes, lists and choices without
+    their labels; speech.set_label puts the name on the native view (#69).
+    """
+    ctrl.SetName(label)
+    speech.set_label(ctrl, label)
+
+
 # ── The item list ───────────────────────────────────────────────────────
 #
 # On Windows wx.ListCtrl is a native list view and screen readers read it
@@ -894,7 +905,7 @@ if IS_MAC:
 
         def __init__(self, parent, name="", **kwargs):
             super().__init__(parent, style=wx.dataview.DV_ROW_LINES | wx.BORDER_SUNKEN)
-            self.SetName(name)
+            _name(self, name)
             self._ncols = 0
 
         # ── columns ──────────────────────────────────────────────────────
@@ -1148,7 +1159,7 @@ class WorkflowInputsDialog(wx.Dialog):
             if spec.type == "boolean":
                 ctrl = wx.CheckBox(self, label=label)
                 ctrl.SetValue(spec.default.strip().lower() == "true")
-                ctrl.SetName(label)
+                _name(ctrl, label)
                 grid.Add(ctrl, 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
             else:
                 text = wx.StaticText(self, label=label)
@@ -1161,7 +1172,7 @@ class WorkflowInputsDialog(wx.Dialog):
                     ctrl.SetSelection(idx)
                 else:
                     ctrl = wx.TextCtrl(self, value=spec.default)
-                ctrl.SetName(label)
+                _name(ctrl, label)
                 grid.Add(ctrl, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
 
             self._controls[spec.name] = ctrl
@@ -1240,7 +1251,7 @@ class NewLabelDialog(wx.Dialog):
             text = wx.StaticText(self, label=label)
             fields.Add(text, 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
             ctrl = wx.TextCtrl(self)
-            ctrl.SetName(label)
+            _name(ctrl, label)
             fields.Add(ctrl, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
             return ctrl
 
@@ -1313,7 +1324,7 @@ def _reading_box(parent: wx.Window, label: str, text: str, max_width: int = 640)
     sizer.Add(wx.StaticText(parent, label=label))
     box = wx.TextCtrl(parent, value=text,
                       style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_WORDWRAP)
-    box.SetName(label.replace("&", ""))
+    _name(box, label.replace("&", ""))
     margin = 24  # the edit's borders and inner padding, with room to spare
     widths = [box.GetTextExtent(line).width for line in text.split("\n")]
     width = min(max(widths) + margin, max_width)
@@ -1362,7 +1373,7 @@ class SearchDialog(wx.Dialog):
         label = "Search &for"
         outer.Add(wx.StaticText(self, label=label), 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
         self.kind_ctrl = wx.Choice(self, choices=[name for _, name in self.KINDS])
-        self.kind_ctrl.SetName(label.replace("&", ""))
+        _name(self.kind_ctrl, label.replace("&", ""))
         keys = [k for k, _ in self.KINDS]
         self.kind_ctrl.SetSelection(keys.index(kind) if kind in keys else 0)
         outer.Add(self.kind_ctrl, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
@@ -1373,7 +1384,7 @@ class SearchDialog(wx.Dialog):
         label = "&Search"
         outer.Add(wx.StaticText(self, label=label), 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
         self.query_ctrl = wx.TextCtrl(self, value=query)
-        self.query_ctrl.SetName(label.replace("&", ""))
+        _name(self.query_ctrl, label.replace("&", ""))
         outer.Add(self.query_ctrl, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
 
         # Alt+Q, from its label. F1 is help, as everywhere: the guide's
@@ -1450,13 +1461,13 @@ class SearchQualifiersDialog(wx.Dialog):
         label = "&Filter"
         outer.Add(wx.StaticText(self, label=label), 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
         self.filter_ctrl = wx.TextCtrl(self)
-        self.filter_ctrl.SetName(label.replace("&", ""))
+        _name(self.filter_ctrl, label.replace("&", ""))
         outer.Add(self.filter_ctrl, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
 
         label = "&Qualifiers"
         outer.Add(wx.StaticText(self, label=label), 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
         self.list = wx.ListCtrl(self, style=wx.LC_REPORT | wx.LC_SINGLE_SEL, size=(640, 300))
-        self.list.SetName(label.replace("&", ""))
+        _name(self.list, label.replace("&", ""))
         for i, (heading, width) in enumerate((("Qualifier", 170), ("Meaning", 300), ("Example", 220))):
             self.list.InsertColumn(i, heading, width=width)
         outer.Add(self.list, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
@@ -1541,7 +1552,7 @@ class CommandListDialog(wx.Dialog):
         label = "&Find a command" if palette else "&Filter"
         outer.Add(wx.StaticText(self, label=label), 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
         self.filter_ctrl = wx.TextCtrl(self, style=wx.TE_PROCESS_ENTER)
-        self.filter_ctrl.SetName(label.replace("&", ""))
+        _name(self.filter_ctrl, label.replace("&", ""))
         outer.Add(self.filter_ctrl, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
         # What the filter has found: on screen under it, and as the filter's
         # accessible description, which the screen reader reads when you
@@ -1644,7 +1655,7 @@ class CommandListDialog(wx.Dialog):
         n = len(self._shown)
         label = f"{self._what}, {n} matching" if n else f"{self._what}, none matching"
         self.list_label.SetLabel("&" + label)
-        self.list.SetName(label)
+        _name(self.list, label)
         self.list.DeleteAllItems()
         for i, c in enumerate(self._shown):
             for col, cell in enumerate(self.cells(c)):
@@ -1681,7 +1692,7 @@ class HiddenReposDialog(wx.Dialog):
         label = "&Hidden repositories"
         outer.Add(wx.StaticText(self, label=label), 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
         self.list = wx.ListBox(self, choices=names, style=wx.LB_SINGLE, size=(420, 260))
-        self.list.SetName(label.replace("&", ""))
+        _name(self.list, label.replace("&", ""))
         self.list.SetSelection(0)
         outer.Add(self.list, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
         buttons = wx.BoxSizer(wx.HORIZONTAL)
@@ -1753,7 +1764,7 @@ class ColumnsDialog(wx.Dialog):
         label = "&List to change"
         outer.Add(wx.StaticText(self, label=label), 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
         self.set_ctrl = wx.Choice(self, choices=[cs.name for cs in column_sets])
-        self.set_ctrl.SetName(label.replace("&", ""))
+        _name(self.set_ctrl, label.replace("&", ""))
         ids = [cs.id for cs in column_sets]
         self.set_ctrl.SetSelection(ids.index(current_id) if current_id in ids else 0)
         outer.Add(self.set_ctrl, 0, wx.LEFT | wx.RIGHT, 10)
@@ -1774,7 +1785,7 @@ class ColumnsDialog(wx.Dialog):
         label = "&Preview"
         outer.Add(wx.StaticText(self, label=label), 0, wx.LEFT | wx.RIGHT, 10)
         self.preview = wx.TextCtrl(self, style=wx.TE_READONLY, size=(560, -1))
-        self.preview.SetName(label.replace("&", ""))
+        _name(self.preview, label.replace("&", ""))
         outer.Add(self.preview, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
 
         row = wx.WrapSizer(wx.HORIZONTAL)
@@ -1820,7 +1831,7 @@ class ColumnsDialog(wx.Dialog):
         column = wx.BoxSizer(wx.VERTICAL)
         column.Add(wx.StaticText(self, label=label), 0, wx.BOTTOM, 4)
         box = wx.ListBox(self, style=wx.LB_SINGLE, size=(260, 240))
-        box.SetName(label.replace("&", ""))
+        _name(box, label.replace("&", ""))
         column.Add(box, 1, wx.EXPAND)
         sizer.Add(column, 1, wx.EXPAND | wx.ALL, 6)
         return box
@@ -1987,7 +1998,7 @@ class ReviewDialog(wx.Dialog):
         label = "&Message (Markdown; needed to request changes or comment)"
         outer.Add(wx.StaticText(self, label=label), 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
         self.body_ctrl = wx.TextCtrl(self, style=wx.TE_MULTILINE)
-        self.body_ctrl.SetName(label.replace("&", ""))
+        _name(self.body_ctrl, label.replace("&", ""))
         outer.Add(self.body_ctrl, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
         outer.Add(self.CreateStdDialogButtonSizer(wx.OK | wx.CANCEL), 0, wx.ALIGN_RIGHT | wx.ALL, 10)
         ok = self.FindWindow(wx.ID_OK)
@@ -2102,14 +2113,14 @@ class NewIssueDialog(wx.Dialog):
         # Enter in the title goes on to the description, as a person filling
         # in the form expects, rather than filing an issue with no body.
         self.title_ctrl = wx.TextCtrl(self, value=title, style=wx.TE_PROCESS_ENTER)
-        self.title_ctrl.SetName(label.replace("&", ""))
+        _name(self.title_ctrl, label.replace("&", ""))
         self.title_ctrl.Bind(wx.EVT_TEXT_ENTER, lambda e: self.body_ctrl.SetFocus())
         outer.Add(self.title_ctrl, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
 
         label = "&Description (Markdown, optional)"
         outer.Add(wx.StaticText(self, label=label), 0, wx.LEFT | wx.RIGHT, 10)
         self.body_ctrl = wx.TextCtrl(self, value=body, style=wx.TE_MULTILINE)
-        self.body_ctrl.SetName(label.replace("&", ""))
+        _name(self.body_ctrl, label.replace("&", ""))
         outer.Add(self.body_ctrl, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
 
         buttons = self.CreateStdDialogButtonSizer(wx.OK | wx.CANCEL)
@@ -2322,6 +2333,9 @@ class GhViewerFrame(wx.Frame):
             name="repo_list",
             style=wx.LB_SINGLE | wx.BORDER_SUNKEN,
         )
+        # Its label for VoiceOver, which wx's name never reaches (#69). The
+        # name stays "repo_list"; Windows reads the StaticText above.
+        speech.set_label(self.repo_list, "Repositories")
         repo_sizer.Add(self.repo_list, proportion=1, flag=wx.EXPAND | wx.ALL, border=3)
         repo_panel.SetSizer(repo_sizer)
 
@@ -2368,6 +2382,7 @@ class GhViewerFrame(wx.Frame):
             name="details_text",
             style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_RICH | wx.TE_WORDWRAP | wx.WANTS_CHARS,
         )
+        speech.set_label(self.details_text, "Details")  # as the repo list's
         self._comment_positions: list[tuple[int, int]] = []  # (line, length) per comment
         self._current_comment: int = -1
         details_sizer.Add(
@@ -3737,7 +3752,7 @@ class GhViewerFrame(wx.Frame):
         """
         label = self._view_label(self.view_mode)
         self.list_label.SetLabel(label)
-        self.list_ctrl.SetName(label)
+        _name(self.list_ctrl, label)
 
     def _populate_filtered_list(self, source_items: list, use_favorite_prefix: bool = False) -> None:
         """Populate the list ctrl with items that match the current filter.
@@ -6605,7 +6620,7 @@ class GhViewerFrame(wx.Frame):
             dlg, value=text,
             style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_RICH2,
         )
-        txt.SetName(title)
+        _name(txt, title)
         sizer.Add(txt, 1, wx.EXPAND | wx.ALL, 8)
         btn_sizer = dlg.CreateButtonSizer(wx.OK)
         if btn_sizer:

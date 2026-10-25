@@ -33,6 +33,8 @@ nothing extra installed. **View → Speak Results** turns it off and on.
   "Available columns" and "Shown columns". Lists, choices and text boxes now
   have their labels on a Mac, in the dialogs and in the main window's
   repository list, item list and details panel. (#69)
+- **On a Mac, Help → Keyboard Shortcuts and the Command Palette open
+  again.** They failed to open there; Windows was not affected.
 
 ## Before you start
 

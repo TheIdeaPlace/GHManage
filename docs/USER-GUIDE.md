@@ -27,6 +27,7 @@ GHManage is a keyboard-driven desktop app for your GitHub repositories, built fo
 - [Quick Filter](#quick-filter)
 - [Copying](#copying)
 - [List Mode, Sorting and Columns](#list-mode-sorting-and-columns)
+- [Spoken Results](#spoken-results)
 - [The Details Panel and Comment Navigation](#the-details-panel-and-comment-navigation)
 - [The Actions Menu](#the-actions-menu)
 - [Keyboard Shortcuts](#keyboard-shortcuts)
@@ -250,7 +251,7 @@ Lists load 100 items to begin with. `Ctrl++` (**File → View More**) loads the 
 |------|---------------|
 | **File** | Open Repository or Address, Remove from List, Hidden Repositories, Switch GitHub Account, Refresh, Search GitHub, View More, Go To Issue, Quick Filter, Next and Previous Comment, Quit |
 | **Actions** | Everything that acts on the item you are on. See [The Actions Menu](#the-actions-menu). |
-| **View** | View Mode, List Mode, Sort Order, Columns, State, Filter |
+| **View** | View Mode, List Mode, Sort Order, Columns, State, Filter, Include Read Notifications, Speak Results |
 | **Help** | User Guide, Keyboard Shortcuts, Command Palette, Check for Updates, About GHManage |
 
 **Help → User Guide** (`F1`, or `fn+F1` on a Mac) opens this guide in your web browser.
@@ -895,8 +896,9 @@ A screen reader reads a row's columns from left to right, so the order of the co
 
 - **List to change** starts on the list you're in. Choose another to change its columns too.
 - **Available columns** are the ones not shown. `Enter` or **Add** puts the selected one at the end of the row.
-- **Shown columns, in the order they're read** lists what each row says, first to last. `Delete` (or `Backspace`) or **Remove** takes one off; at least one always stays. `Alt+Up` and `Alt+Down` (or **Move Up** and **Move Down**) move the selected column one place, and `Alt+Home` and `Alt+End` (**Move to Top** and **Move to Bottom**) move it to the start or the end; on a Mac, use `Option` for `Alt`. The column stays selected as it moves, so on Windows your screen reader reads its new place, for example "Author, 2 of 4". When there is nothing to do, such as moving the first column up, GHManage beeps.
+- **Shown columns, in the order they're read** lists what each row says, first to last. `Delete` (or `Backspace`) or **Remove** takes one off; at least one always stays. `Alt+Up` and `Alt+Down` (or **Move Up** and **Move Down**) move the selected column one place, and `Alt+Home` and `Alt+End` (**Move to Top** and **Move to Bottom**) move it to the start or the end; on a Mac, use `Option` for `Alt`. The column stays selected as it moves, and GHManage says where it went in terms of its neighbours, and shows it under the lists: "Author moved above Message", "Author moved to the top". When there is nothing to do, it beeps and says why, for example "Commit is already at the top".
 - **Reset to Default** puts back the list's original columns.
+- Adding, removing and resetting are said too: "Branches added at the end, 5 of 5", "Author removed, 3 columns shown", "Columns reset to the default". See [Spoken Results](#spoken-results).
 - **Speak column names (Full mode)** is the same choice as **View → List Mode**.
 - **Preview**, just after the lists, shows how the selected row (or the first row) will read, without the ★ a favorite starts with. For a list other than the one you're in, or when the list is empty, it shows the order the columns will be read in.
 
@@ -928,6 +930,16 @@ A screen reader reads a row's columns from left to right, so the order of the co
 The pull-request columns (Changes, Files, Base branch, Head branch) are empty on issues.
 
 GHManage remembers the columns you choose for each kind of list, including after you close it. Every list of repositories shares one choice, since they all show the same columns. At least one column always stays on.
+
+---
+
+## Spoken Results
+
+When you do something whose result isn't obvious from where your focus lands, GHManage tells your screen reader what happened, as well as showing it in the status bar. For now that is the actions in **View → Columns…**; more of GHManage will follow.
+
+On Windows, GHManage sends these as UI Automation notifications, the standard way an app gives a screen reader something to say, so there is nothing to install or set up, and your screen reader speaks them in its own voice and at its own rate. Your screen reader needs to support UI Automation notifications; current versions of the common Windows screen readers do. On a Mac, they are sent as accessibility announcements.
+
+**View → Speak Results** turns this off and on. It is on until you turn it off, and your choice is kept for next time. Turning it off says "Results won't be spoken." so you know it took effect; the status bar, and the Columns dialog itself, still show every result.
 
 ---
 

@@ -324,16 +324,16 @@ The entries at the top, organizations included, are always there. A saved search
 
 Removing a repository from the list leaves it on GitHub. To change the repository on GitHub itself, select it in the list and choose one of these from the **File** menu or the repository's context menu. Neither has a shortcut key, so a slip of the finger can't reach them. Both need admin rights on the repository; without them, GHManage says so and stops.
 
-- **Archive Repository…** makes it read-only on GitHub: no new issues, pull requests, comments or pushes, but everything stays and you can still read it. GHManage asks first, with **No** as the answer if you just press `Enter`. An archived repository's entry reads **Unarchive Repository…**, which undoes it. On the File menu the entry is **Archive or Unarchive Repository…**, and the question says which it will do.
-- **Delete Repository from GitHub…** deletes it for good, with its code, issues, pull requests, releases, wiki and Actions history. This can't be undone. The window that opens says so, and asks you to type the repository's name, for example `owner/name`. **Delete** stays unavailable until what you have typed matches. When what you type matches, GHManage says "The name matches. Delete is available." **Cancel** is the default, and `Enter` in the box moves to **Delete** once the name matches rather than deleting, so pressing `Enter` never deletes on its own; before it matches, `Enter` says "That doesn't match owner/name yet." Afterwards the repository is gone from the list, from your pinned repositories and from your favorites, and you are on the row that took its place. If it was the repository open on the right, GHManage shows your notifications instead.
-
-The first time you delete a repository, gh will probably not have the permission it needs, because it doesn't ask for it when you sign in. GHManage tells you the command to run once in a terminal:
+**Before you delete a repository for the first time**, gh needs one more permission, which it doesn't ask for when you sign in because deleting can't be undone. Do this once for each GitHub account: open a terminal (Command Prompt or PowerShell on Windows, Terminal on a Mac), type the command below and press `Enter`. gh shows a one-time code and asks you to press `Enter`; your browser opens on GitHub, where you type the code and approve.
 
 ```
 gh auth refresh -h github.com -s delete_repo
 ```
 
-Then try again.
+If you haven't done this, GHManage deletes nothing and shows you the same command. Archiving needs no extra permission.
+
+- **Archive Repository…** makes it read-only on GitHub: no new issues, pull requests, comments or pushes, but everything stays and you can still read it. GHManage asks first, with **No** as the answer if you just press `Enter`. An archived repository's entry reads **Unarchive Repository…**, which undoes it. On the File menu the entry is **Archive or Unarchive Repository…**, and the question says which it will do.
+- **Delete Repository from GitHub…** deletes it for good, with its code, issues, pull requests, releases, wiki and Actions history. This can't be undone. The window that opens says so, and asks you to type the repository's name, for example `owner/name`. **Delete** stays unavailable until what you have typed matches. When what you type matches, GHManage says "The name matches. Delete is available." **Cancel** is the default, and `Enter` in the box moves to **Delete** once the name matches rather than deleting, so pressing `Enter` never deletes on its own; before it matches, `Enter` says "That doesn't match owner/name yet." Afterwards the repository is gone from the list, from your pinned repositories and from your favorites, and you are on the row that took its place. If it was the repository open on the right, GHManage shows your notifications instead.
 
 ### Forks
 

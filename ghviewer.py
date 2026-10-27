@@ -7,7 +7,10 @@ Requires the `gh` CLI (https://cli.github.com/) and wxPython.
 from __future__ import annotations
 
 import argparse
+import os
 import re
+import subprocess
+import tempfile
 import sys
 import threading
 import unicodedata
@@ -25,6 +28,7 @@ from pinned_repos import (
 )
 import announce
 import commands
+import diffview
 import settings
 import search_help
 import speech
@@ -36,7 +40,8 @@ from saved_searches import (
 
 from columns import ColumnSet, LayoutEditor, cell_text, names_cell, row_text
 from gh_columns import (
-    COLUMN_SETS, ACTIVITY_SET, ARTIFACT_SET, ASSET_SET, BRANCH_SET, COMMIT_SET, FAVORITES_SET,
+    COLUMN_SETS, ACTIVITY_SET, ARTIFACT_SET, ASSET_SET, BRANCH_SET, CHANGED_FILE_SET, COMMIT_SET,
+    FAVORITES_SET,
     ISSUE_SET, JOB_SET, LABEL_SET, MY_WORK_SET, NOTIFICATION_SET, ORG_SET,
     PAGEFILE_SET, PAGES_SET, RELEASE_SET, REPO_SET, SEARCH_ITEM_SET, TAG_SET,
     WORKFLOW_RUN_SET, WORKFLOW_SET,
@@ -53,7 +58,9 @@ from gh_data import (
     SORT_ORDERS,
     Artifact,
     Branch,
+    ChangedFile,
     Commit,
+    MAX_CHANGED_FILES,
     Label,
     PagesBuild,
     PagesFile,
@@ -114,6 +121,11 @@ from gh_data import (
     fetch_all_branch_commits,
     fetch_commits,
     fetch_commit_detail,
+    fetch_commit_diff,
+    fetch_commit_files,
+    fetch_pr_diff,
+    fetch_pr_files,
+    file_diff,
     fetch_issues,
     fetch_item_by_number,
     fetch_labels,
@@ -535,6 +547,8 @@ def copy_values(item) -> CopyValues | None:
         return CopyValues(item.url, text, item.commit, "Commit", text)
     if isinstance(item, PagesFile):
         return CopyValues(item.url, item.path, item.path, "Path", item.path)
+    if isinstance(item, ChangedFile):
+        return CopyValues(item.url, item.filename, item.filename, "Path", item.filename)
     if isinstance(item, RepoEntry):
         return CopyValues(item.url, item.name, item.name, "Repository Name", item.name)
     if isinstance(item, OrgEntry):
@@ -564,6 +578,38 @@ def copy_values(item) -> CopyValues | None:
         # titled, so Copy Name and Copy Title give the same thing.
         return CopyValues(item.url, item.title, item.title, "Name", item.title)
     return None
+
+
+def write_diff_file(stem: str, text: str) -> str:
+    """Save a diff where Open Diff can hand it to another app: GHManage's
+    folder in the temp folder, one file per diff, written over each time."""
+    folder = os.path.join(tempfile.gettempdir(), "GHManage")
+    os.makedirs(folder, exist_ok=True)
+    safe = re.sub(r"[^\w.-]+", "-", stem).strip("-.") or "changes"
+    path = os.path.join(folder, f"{safe}.diff")
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        f.write(text)
+    return path
+
+
+def open_in_default_app(path: str) -> bool:
+    """Open a file in whatever app the system opens it with. On Windows,
+    Notepad when nothing is set to open .diff files."""
+    try:
+        if sys.platform == "win32":
+            try:
+                os.startfile(path)  # type: ignore[attr-defined]
+            except OSError:
+                subprocess.Popen(["notepad.exe", path])
+        elif sys.platform == "darwin":
+            # TextEdit (-t) when no app claims .diff files.
+            if subprocess.call(["open", path]) != 0:
+                subprocess.Popen(["open", "-t", path])
+        else:
+            subprocess.Popen(["xdg-open", path])
+    except OSError:
+        return False
+    return True
 
 
 def repo_copy_values(name: str) -> CopyValues:
@@ -664,6 +710,9 @@ ID_COPY_IDENT = wx.NewIdRef()
 ID_COPY_CLONE_HTTPS = wx.NewIdRef()
 ID_COPY_CLONE_SSH = wx.NewIdRef()
 ID_COPY_DETAILS = wx.NewIdRef()
+ID_COPY_DIFF = wx.NewIdRef()
+ID_CHANGED_FILES = wx.NewIdRef()
+ID_OPEN_DIFF = wx.NewIdRef()
 
 
 # View modes
@@ -677,6 +726,7 @@ VIEW_WORKFLOW = "workflow"     # workflow runs
 VIEW_ARTIFACTS = "artifacts"   # artifacts of a single workflow run (drill-down)
 VIEW_JOBS = "jobs"             # jobs of a single workflow run (drill-down)
 VIEW_ASSETS = "assets"         # files attached to a single release (drill-down)
+VIEW_FILES = "files"           # files a pull request or commit changed (drill-down)
 VIEW_LABELS = "labels"
 VIEW_FAVORITES = "favorites"
 VIEW_PAGES = "pages"           # GitHub Pages: site config + publish history
@@ -740,7 +790,7 @@ ADDRESS_VIEWS = {
 PENDING_KINDS = ("item", "commit", "release", "run")
 # Views that load everything at once, where View More has nothing to add.
 NO_MORE_VIEWS = (VIEW_FAVORITES, VIEW_MY_WORK, VIEW_ORGS, VIEW_JOBS, VIEW_ARTIFACTS,
-                 VIEW_PAGES, VIEW_PAGEFILES)
+                 VIEW_PAGES, VIEW_PAGEFILES, VIEW_FILES)
 # Views listing repositories; Enter on one opens it here.
 REPO_LIST_VIEWS = (VIEW_STARRED, VIEW_WATCHED, VIEW_ORG, VIEW_SHARED)
 
@@ -822,6 +872,7 @@ VIEW_COLUMNS = {
     VIEW_ARTIFACTS: ARTIFACT_SET,
     VIEW_JOBS: JOB_SET,
     VIEW_ASSETS: ASSET_SET,
+    VIEW_FILES: CHANGED_FILE_SET,
     VIEW_LABELS: LABEL_SET,
     VIEW_FAVORITES: FAVORITES_SET,
     VIEW_PAGES: PAGES_SET,
@@ -2291,6 +2342,12 @@ class GhViewerFrame(wx.Frame):
         self._branches_unread: int = 0  # all-branches commits: branches that failed to load
         self.artifacts_run: WorkflowRun | None = None  # run whose artifacts are shown
         self.jobs_run: WorkflowRun | None = None  # run whose jobs are shown
+        # Changed Files: the pull request (Item) or Commit whose files are
+        # shown, and the list it was opened from, for Backspace.
+        self._files_of: Item | Commit | None = None
+        self._files_back: dict | None = None
+        self._diff_style: str = settings.load_diff_style()
+        self._diff_busy = False
         self.assets_release: Release | None = None  # release whose assets are shown
         # Pages config for the current repo. Shared by both Pages views — the
         # published-file list is derived from it — so it survives the move
@@ -2531,8 +2588,9 @@ class GhViewerFrame(wx.Frame):
         file_menu.Append(ID_GOTO, "Go To Issue…\tCtrl+G")
         file_menu.Append(ID_FILTER, "Quick Filter…\tCtrl+F")
         file_menu.AppendSeparator()
-        file_menu.Append(ID_NEXT_COMMENT, "Next Comment\tAlt+N")
-        file_menu.Append(ID_PREV_COMMENT, "Previous Comment\tAlt+P")
+        # Between comments, or between changes in Changed Files.
+        self._act_next_comment = file_menu.Append(ID_NEXT_COMMENT, "Next Comment\tAlt+N")
+        self._act_prev_comment = file_menu.Append(ID_PREV_COMMENT, "Previous Comment\tAlt+P")
         file_menu.AppendSeparator()
         file_menu.Append(wx.ID_EXIT, "Quit\tCtrl+Q")
         menu_bar.Append(file_menu, "File")
@@ -2554,6 +2612,8 @@ class GhViewerFrame(wx.Frame):
         copy_menu.Append(ID_COPY_TITLE, "Copy Title\tCtrl+Shift+T")
         self._act_copy_ident = copy_menu.Append(ID_COPY_IDENT, "Copy Number\tCtrl+Shift+I")
         copy_menu.Append(ID_COPY_DETAILS, "Copy Details\tCtrl+Shift+D")
+        # A pull request's or commit's whole diff; in Changed Files, the file's.
+        self._act_copy_diff = copy_menu.Append(ID_COPY_DIFF, "Copy Diff")
         # The repository in front of you, from any view: for a terminal or
         # another tool, where an address on its own won't clone.
         copy_menu.AppendSeparator()
@@ -2610,6 +2670,11 @@ class GhViewerFrame(wx.Frame):
         self._act_compare = actions_menu.Append(
             ID_COMPARE_BRANCHES, "Compare Branches…\tCtrl+Shift+B"
         )
+        # A pull request's or a commit's changes. H is the key in the list.
+        self._act_changed_files = actions_menu.Append(
+            ID_CHANGED_FILES, "Changed Files (H)\tCtrl+Shift+H"
+        )
+        self._act_open_diff = actions_menu.Append(ID_OPEN_DIFF, "Open Diff in Default App")
         actions_menu.AppendSeparator()
         # G in Activity and Notifications; here so the command can be found.
         self._act_go_to_repo = actions_menu.Append(
@@ -2700,6 +2765,16 @@ class GhViewerFrame(wx.Frame):
         tab_menu.AppendRadioItem(ID_TAB_BOTH, "Issues & PRs")
         view_menu.AppendSubMenu(tab_menu, "Filter")
 
+        # How Changed Files marks each line; the same choices as The Chat Place.
+        marks_menu = wx.Menu()
+        self._diff_style_items: dict[int, str] = {}
+        for style in diffview.STYLES:
+            item_id = wx.NewIdRef()
+            self._diff_style_items[int(item_id)] = style
+            marks_menu.AppendRadioItem(item_id, diffview.LABELS[style])
+            self.Bind(wx.EVT_MENU, lambda e, st=style: self._set_diff_style(st), id=item_id)
+        view_menu.AppendSubMenu(marks_menu, "Mark Changed Lines With")
+
         view_menu.AppendSeparator()
         self._show_read_item = view_menu.AppendCheckItem(
             ID_SHOW_READ, "Include Read Notifications (I)"
@@ -2769,6 +2844,9 @@ class GhViewerFrame(wx.Frame):
         self.Bind(wx.EVT_MENU, lambda e: self._copy("title"), id=ID_COPY_TITLE)
         self.Bind(wx.EVT_MENU, lambda e: self._copy("ident"), id=ID_COPY_IDENT)
         self.Bind(wx.EVT_MENU, lambda e: self._copy("details"), id=ID_COPY_DETAILS)
+        self.Bind(wx.EVT_MENU, lambda e: self._diff_action("copy"), id=ID_COPY_DIFF)
+        self.Bind(wx.EVT_MENU, lambda e: self._diff_action("open"), id=ID_OPEN_DIFF)
+        self.Bind(wx.EVT_MENU, lambda e: self._show_changed_files(), id=ID_CHANGED_FILES)
         self.Bind(wx.EVT_MENU, lambda e: self._copy_clone_url("https"), id=ID_COPY_CLONE_HTTPS)
         self.Bind(wx.EVT_MENU, lambda e: self._copy_clone_url("ssh"), id=ID_COPY_CLONE_SSH)
 
@@ -2990,6 +3068,8 @@ class GhViewerFrame(wx.Frame):
         # Sort order
         for item_id, order in self._sort_menu_items.items():
             menu_bar.Check(item_id, order == self.sort_order)
+        for item_id, style in self._diff_style_items.items():
+            menu_bar.Check(item_id, style == self._diff_style)
         self._update_actions_menu()
 
     def _update_actions_menu(self) -> None:
@@ -3055,6 +3135,15 @@ class GhViewerFrame(wx.Frame):
         )
         self._act_select_branch.Enable(self.view_mode == VIEW_COMMITS)
         self._act_compare.Enable(self.view_mode == VIEW_BRANCHES)
+        changes = self.view_mode in (VIEW_ISSUES, VIEW_COMMITS)
+        self._act_changed_files.Enable(changes)
+        self._act_copy_diff.Enable(changes or self.view_mode == VIEW_FILES)
+        self._act_open_diff.Enable(changes or self.view_mode == VIEW_FILES)
+        files = self.view_mode == VIEW_FILES
+        self._act_next_comment.SetItemLabel(
+            "Next Change\tAlt+N" if files else "Next Comment\tAlt+N")
+        self._act_prev_comment.SetItemLabel(
+            "Previous Change\tAlt+P" if files else "Previous Comment\tAlt+P")
         # An artifact has no page of its own on github.com to link to.
         linkable = self.view_mode != VIEW_ARTIFACTS
         self._act_copy_link.Enable(linkable)
@@ -3087,6 +3176,9 @@ class GhViewerFrame(wx.Frame):
             self.jobs_run = None
         if mode != VIEW_ASSETS:
             self.assets_release = None
+        if mode != VIEW_FILES:
+            self._files_of = None
+            self._files_back = None
         if mode != VIEW_ISSUES:
             self.label_filter = ""
         if mode not in (VIEW_PAGES, VIEW_PAGEFILES):
@@ -3600,6 +3692,7 @@ class GhViewerFrame(wx.Frame):
         view = self.view_mode
         limit = self.current_limit
         commit_branch = self.commit_branch
+        files_of = getattr(self, "_files_of", None)
         include_read = self._include_read
         org = self._org
         org_logins = [o.login for o in self._orgs]
@@ -3667,6 +3760,14 @@ class GhViewerFrame(wx.Frame):
                     # it may have finished, or been rerun, since.
                     fresh = fetch_workflow_run(self.repo, run.run_id) if run else None
                     wx.CallAfter(self._on_jobs_loaded, token, jobs, fresh)
+                elif view == VIEW_FILES:
+                    if isinstance(files_of, Item):
+                        files = fetch_pr_files(files_of.url)
+                    elif isinstance(files_of, Commit):
+                        files = fetch_commit_files(self.repo, files_of.sha)
+                    else:
+                        files = []
+                    wx.CallAfter(self._on_files_loaded, token, files)
                 elif view == VIEW_ASSETS:
                     if self.assets_release:
                         assets = fetch_release_assets(
@@ -3770,6 +3871,7 @@ class GhViewerFrame(wx.Frame):
         VIEW_ARTIFACTS: "Artifacts",
         VIEW_JOBS: "Jobs",
         VIEW_ASSETS: "Release Assets",
+        VIEW_FILES: "Changed Files",
         VIEW_LABELS: "Labels",
         VIEW_FAVORITES: "Favorites",
         VIEW_PAGES: "GitHub Pages",
@@ -3818,6 +3920,8 @@ class GhViewerFrame(wx.Frame):
         # Include the release being drilled into (assets view)
         if self.view_mode == VIEW_ASSETS and self.assets_release:
             parts.append(self.assets_release.tag or self.assets_release.name)
+        if self.view_mode == VIEW_FILES and self._files_of is not None:
+            parts.append(self._files_of_label())
         # Include the label the issues list is restricted to
         if self.view_mode == VIEW_ISSUES and self.label_filter:
             parts.append(f"label: {self.label_filter}")
@@ -3880,6 +3984,7 @@ class GhViewerFrame(wx.Frame):
             f"{source} — {n_issues} issues, {n_prs} PRs ({self.state_filter}){label_info}. "
             f"Showing up to {self.current_limit} newest.",
             "Ctrl++=view more  R=refresh  M=comment  N=new issue  K=checks  V=review  "
+            "H=changed files  "
             "F=favorite  Ctrl+F=filter"
             f"{label_hint}",
         )
@@ -3978,7 +4083,7 @@ class GhViewerFrame(wx.Frame):
         elif self.view_mode == VIEW_ASSETS:
             compare_hint = "  Enter=download in browser  Backspace=back to releases"
         elif self.view_mode == VIEW_COMMITS:
-            compare_hint = "  Backspace=back to branches"
+            compare_hint = "  H=changed files  Backspace=back to branches"
         elif self.view_mode == VIEW_LABELS:
             compare_hint = (
                 "  Enter=browse issues & PRs with it"
@@ -4305,6 +4410,8 @@ class GhViewerFrame(wx.Frame):
             return 0
 
         def matches(it) -> bool:
+            if kind == "same":
+                return it is ref
             if kind == "item":
                 return isinstance(it, Item) and str(it.number) == ref
             if kind == "commit":
@@ -4318,8 +4425,11 @@ class GhViewerFrame(wx.Frame):
         found = next((it for it in items if matches(it)), None)
         row = self._row_of(found) if found is not None else -1
         if row >= 0:
-            wx.CallLater(150, self._announce, self._describe_landing(found))
+            if kind != "same":
+                wx.CallLater(150, self._announce, self._describe_landing(found))
             return row
+        if kind == "same":
+            return 0
         # After the list has settled on its first row, or that would land on
         # top of the item these select — and only if that list is still the
         # one on screen when they run.
@@ -4417,6 +4527,8 @@ class GhViewerFrame(wx.Frame):
         idx = next((i for i, it in enumerate(source) if it is item), -1)
         if self.view_mode in ITEM_VIEWS:
             self._show_issue_details(idx)
+        elif self.view_mode == VIEW_FILES:
+            self._show_file_details(idx)
         elif self.view_mode == VIEW_FAVORITES:
             self._show_favorite_details(idx)
         else:
@@ -4486,6 +4598,8 @@ class GhViewerFrame(wx.Frame):
                 lines.append(f"Branches: {item.head_branch} → {item.base_branch}")
             if item.changed_files or item.additions or item.deletions:
                 lines.append(f"Changes: +{item.additions} -{item.deletions} ({item.changed_files} files)")
+            if getattr(self, "view_mode", None) == VIEW_ISSUES:
+                lines.append("Press H to read the changed files.")
             if getattr(self, "view_mode", None) == VIEW_ISSUES and item.state == "OPEN":
                 lines.append("Keys: K checks, V review, D "
                              + ("ready for review" if item.is_draft else "back to draft")
@@ -4569,6 +4683,9 @@ class GhViewerFrame(wx.Frame):
             if item.additions or item.deletions:
                 lines.append("")
                 lines.append(f"Total: +{item.additions} -{item.deletions} ({item.files_changed} files)")
+            if getattr(self, "view_mode", None) == VIEW_COMMITS:
+                lines.append("")
+                lines.append("Press H to read the changed files.")
         elif isinstance(item, Tag):
             lines.append(f"Tag: {item.name}")
             lines.append(f"Commit: {item.commit_sha}")
@@ -4874,6 +4991,7 @@ class GhViewerFrame(wx.Frame):
         VIEW_ARTIFACTS: "Name",
         VIEW_JOBS: "Job ID",
         VIEW_ASSETS: "File Name",
+        VIEW_FILES: "Path",
         VIEW_LABELS: "Label Name",
         VIEW_FAVORITES: "Name",
         VIEW_PAGES: "Commit",
@@ -5034,6 +5152,9 @@ class GhViewerFrame(wx.Frame):
         if self.view_mode == VIEW_JOBS and isinstance(item, WorkflowJob):
             self._show_job_log(item)
             return
+        if self.view_mode == VIEW_FILES and isinstance(item, ChangedFile):
+            self._read_changes()
+            return
         # In Artifacts view, Enter downloads the selected artifact
         if self.view_mode == VIEW_ARTIFACTS and isinstance(item, Artifact):
             self._download_artifact_flow(item)
@@ -5115,6 +5236,7 @@ class GhViewerFrame(wx.Frame):
         VIEW_WORKFLOWS: "Run on a Branch…",
         VIEW_WORKFLOW: "List Artifacts",
         VIEW_JOBS: "Read Log",
+        VIEW_FILES: "Read the Changes",
         VIEW_ARTIFACTS: "Download…",
         VIEW_RELEASES: "List Files",
         VIEW_LABELS: "List Issues and PRs with This Label",
@@ -5192,7 +5314,8 @@ class GhViewerFrame(wx.Frame):
         # nothing it could favorite.
         if self.view_mode == VIEW_FAVORITES:
             fav_label = "Remove from Favorites (F)"
-        elif item is None or isinstance(item, OrgEntry) or not getattr(item, "url", ""):
+        elif (item is None or isinstance(item, (OrgEntry, ChangedFile))
+              or not getattr(item, "url", "")):
             fav_label = None
         elif self._favorite_prefix(item):
             fav_label = "Remove from Favorites (F)"
@@ -5553,6 +5676,17 @@ class GhViewerFrame(wx.Frame):
                 and self.view_mode in GO_TO_REPO_VIEWS):
             self._go_to_event_repo()
             return
+        if (key == wx.WXK_BACK and not event.HasAnyModifiers()
+                and self.view_mode == VIEW_FILES and focus is self.details_text):
+            # Out of the lines to the file they belong to; Backspace again
+            # goes back to the pull request or commit.
+            self._focus_list(max(0, self.list_ctrl.GetFirstSelected()))
+            return
+        if (key == ord("H") and not event.HasAnyModifiers()
+                and self.view_mode in (VIEW_ISSUES, VIEW_COMMITS)):
+            # Here so it works from the details panel, where "Press H" is read.
+            self._show_changed_files()
+            return
         if self.view_mode == VIEW_ISSUES and not event.HasAnyModifiers():
             # Pull request keys, here so they work from the details panel,
             # where the line naming them is read.
@@ -5662,6 +5796,8 @@ class GhViewerFrame(wx.Frame):
             self._toggle_favorite()
         elif key == ord("R"):
             self.on_refresh(None)
+        elif key == wx.WXK_BACK and self.view_mode == VIEW_FILES:
+            self._back_from_files()
         elif (key == wx.WXK_BACK and self._return_to
               and self.view_mode == getattr(self, "_return_view", VIEW_ISSUES)):
             self._return_to_list()
@@ -5833,6 +5969,11 @@ class GhViewerFrame(wx.Frame):
             )
             return
 
+        if isinstance(item, ChangedFile):
+            self._announce("A changed file can't be a favorite. Backspace, then F "
+                           "favorites the pull request or commit.")
+            return
+
         # In other views, F toggles favorite on the current item
         url = getattr(item, "url", "") or ""
         if not url:
@@ -5973,25 +6114,28 @@ class GhViewerFrame(wx.Frame):
 
     def _navigate_comment(self, direction: int) -> None:
         """Move to the next (1) or previous (-1) comment in the details box."""
+        noun = "change" if getattr(self, "view_mode", None) == VIEW_FILES else "comment"
         if not self._comment_positions:
-            self._announce("No comments to navigate.")
+            self._announce(f"No {noun}s to navigate.")
             return
         new_idx = self._current_comment + direction
         if new_idx < 0:
-            self._announce("Already at first comment.")
+            self._announce(f"Already at first {noun}.")
             return
         if new_idx >= len(self._comment_positions):
-            self._announce("Already at last comment.")
+            self._announce(f"Already at last {noun}.")
             return
         self._current_comment = new_idx
         line, length = self._comment_positions[new_idx]
         start_pos = self._line_to_position(line)
         end_pos = self._line_to_position(line + length)
+        if noun == "change":
+            end_pos = max(start_pos, end_pos - 1)
         self.details_text.SetFocus()
         self.details_text.SetSelection(start_pos, end_pos)
         self.details_text.ShowPosition(start_pos)
         total = len(self._comment_positions)
-        self._announce(f"Comment {new_idx + 1} of {total}")
+        self._announce(f"{noun.capitalize()} {new_idx + 1} of {total}")
 
     def _line_to_position(self, line: int) -> int:
         """Convert a 0-based line index to a character position in the TextCtrl."""
@@ -6945,6 +7089,9 @@ class GhViewerFrame(wx.Frame):
             return
         self.sort_order = self._sort_menu_items.get(event.GetId(), SORT_ORDERS[0])
         self._update_menu_checks()
+        back = self._files_back if self.view_mode == VIEW_FILES else None
+        if back and back["view"] == VIEW_ISSUES and back["items"]:
+            back["items"] = sort_items(back["items"], self.sort_order)
         if self.items:
             self.items = sort_items(self.items, self.sort_order)
             self._refresh_list_display()
@@ -6999,41 +7146,43 @@ class GhViewerFrame(wx.Frame):
     def on_state_open(self, event: wx.CommandEvent) -> None:
         self.state_filter = "open"
         self._update_menu_checks()
-        if self.repo:
-            self.current_limit = self.page_size
-            self._load_items()
+        self._reload_after_filter()
 
     def on_state_closed(self, event: wx.CommandEvent) -> None:
         self.state_filter = "closed"
         self._update_menu_checks()
-        if self.repo:
-            self.current_limit = self.page_size
-            self._load_items()
+        self._reload_after_filter()
 
     def on_state_all(self, event: wx.CommandEvent) -> None:
         self.state_filter = "all"
         self._update_menu_checks()
-        if self.repo:
-            self.current_limit = self.page_size
-            self._load_items()
+        self._reload_after_filter()
 
     def on_tab_issues(self, event: wx.CommandEvent) -> None:
         self.tab_filter = "issues"
         self._update_menu_checks()
-        if self.repo:
-            self.current_limit = self.page_size
-            self._load_items()
+        self._reload_after_filter()
 
     def on_tab_prs(self, event: wx.CommandEvent) -> None:
         self.tab_filter = "prs"
         self._update_menu_checks()
-        if self.repo:
-            self.current_limit = self.page_size
-            self._load_items()
+        self._reload_after_filter()
 
     def on_tab_both(self, event: wx.CommandEvent) -> None:
         self.tab_filter = "both"
         self._update_menu_checks()
+        self._reload_after_filter()
+
+    def _reload_after_filter(self) -> None:
+        """After View ▸ State or Filter: the list again, with it. In Changed
+        Files, the issues and pull requests are read again on the way back
+        instead, rather than the files now."""
+        if self.view_mode == VIEW_FILES:
+            back = self._files_back
+            if back and back["view"] == VIEW_ISSUES:
+                back["items"] = None
+            self._tell("Issues & PRs will show this when you go back to them.")
+            return
         if self.repo:
             self.current_limit = self.page_size
             self._load_items()
@@ -7568,6 +7717,230 @@ class GhViewerFrame(wx.Frame):
             return False
         self._announce(msg)
         return announce.announce(msg, category, force)
+
+    # ── Changed files ───────────────────────────────────────────────────
+    #
+    # A pull request's or a commit's files, one row each, and the selected
+    # file's changed lines in the details panel, marked as chosen under
+    # View ▸ Mark Changed Lines With (app-kit's difftext, via diffview).
+
+    def _show_changed_files(self) -> None:
+        """H, or Actions ▸ Changed Files: the files the selected pull
+        request or commit changed. Backspace comes back to it."""
+        item = self._focused_item()
+        if self.view_mode == VIEW_ISSUES and isinstance(item, Item):
+            if not item.is_pr:
+                self._tell(f"#{item.number} is an issue. Only pull requests "
+                           "and commits have changed files.")
+                return
+        elif not (self.view_mode == VIEW_COMMITS and isinstance(item, Commit)):
+            self._tell("Select a pull request or a commit first.")
+            return
+        back = {
+            "view": self.view_mode,
+            "items": list(self._view_source()),
+            "item": item,
+            "limit": self.current_limit,
+            "filter_text": self.filter_text,
+            "label_filter": self.label_filter,
+            "commit_branch": self.commit_branch,
+            "branches_unread": self._branches_unread,
+            "return_to": self._return_to,
+            "return_view": getattr(self, "_return_view", VIEW_ISSUES),
+        }
+        self._switch_view(VIEW_FILES, load=False)
+        # Set after the switch, which clears them on the way in to anything else.
+        self._files_of = item
+        self._files_back = back
+        self._update_title()
+        self._load_items()
+
+    def _files_of_label(self) -> str:
+        """What the Changed Files view is showing the files of."""
+        src = self._files_of
+        if isinstance(src, Item):
+            return f"PR #{src.number} {src.title}"
+        if isinstance(src, Commit):
+            return f"commit {src.short_sha} {_first_line(src.message)}".strip()
+        return ""
+
+    def _on_files_loaded(self, token: int, files: list) -> None:
+        if not self._fetch_is_current(token):
+            return  # the user has moved on; these belong to a view they left
+        self.git_items = files
+        self.items = []
+        filtered = self._populate_filtered_list(files)
+        totals = diffview.totals_message(files)
+        if len(files) >= MAX_CHANGED_FILES:
+            totals += f" GitHub lists only the first {MAX_CHANGED_FILES:,}."
+        back = self._files_back["view"] if self._files_back else VIEW_ISSUES
+        self._set_view_status(
+            f"{self._files_of_label()} — {totals}",
+            "Enter=read the changes  Alt+N/Alt+P=next/previous change  "
+            f"Ctrl+F=filter  Backspace=back to {self._view_label(back, lower=True)}",
+        )
+        self._update_title()
+
+        def land() -> None:
+            if not self._fetch_is_current(token):
+                return
+            if filtered:
+                self._focus_list(0)
+            # A status, so it waits for the row focus lands on to be read.
+            announce.announce(totals, announce.STATUS)
+
+        wx.CallLater(100, land)
+
+    def _show_file_details(self, idx: int) -> None:
+        """A changed file's lines, marked in the chosen style."""
+        if idx < 0 or idx >= len(self.git_items):
+            self.details_text.Clear()
+            return
+        text, starts = diffview.file_text(self.git_items[idx], self._diff_style)
+        self.details_text.SetValue(text)
+        # Alt+N and Alt+P move between runs of changes the way they move
+        # between comments: each is its "Lines 10 to 15:" line.
+        self._comment_positions = [(line, 1) for line in starts]
+        self._current_comment = -1
+
+    def _read_changes(self) -> None:
+        """Enter on a changed file: into its lines, from the top."""
+        self.details_text.SetFocus()
+        self.details_text.SetInsertionPoint(0)
+
+    def _back_from_files(self) -> None:
+        """Backspace in Changed Files: the list it was opened from, as it
+        was, on the pull request or commit it was opened on."""
+        back = self._files_back
+        if not back:
+            self._switch_view(VIEW_ISSUES)
+            return
+        view = back["view"]
+        # The switch keeps these only in their own views; set them first.
+        self.commit_branch = back["commit_branch"]
+        self.label_filter = back["label_filter"]
+        self._switch_view(view, load=False)
+        self.filter_text = back["filter_text"]
+        self.current_limit = back["limit"]
+        self._branches_unread = back["branches_unread"]
+        self._return_to = back["return_to"]
+        self._return_view = back["return_view"]
+        items = back["items"]
+        if items is None:
+            # A filter changed while you were away: read the list again,
+            # and land on the pull request again if it is still in it.
+            self._load_items()
+            self._set_pending_target(view, "item", str(back["item"].number))
+            return
+        token = self._begin_fetch()
+        self._pending_target = (token, view, "same", back["item"])
+        if view == VIEW_ISSUES:
+            prs = sum(1 for it in items if isinstance(it, Item) and it.is_pr)
+            self._on_items_loaded(token, items, len(items) - prs, prs)
+        else:
+            self._on_git_items_loaded(token, items, "commits")
+        self._announce(f"Back to {self._view_label(view, lower=True)}")
+
+    def _set_diff_style(self, style: str) -> None:
+        """View ▸ Mark Changed Lines With."""
+        was = self._diff_style
+        self._diff_style = style
+        settings.save_diff_style(style)
+        self._update_menu_checks()
+        if self.view_mode == VIEW_FILES:
+            row = self.list_ctrl.GetFirstSelected()
+            if row >= 0:
+                # Every style gives one line for each line of the diff, so
+                # the caret's line and the change Alt+N is on still match.
+                caret = self.details_text.GetInsertionPoint()
+                line = self.details_text.GetValue().count("\n", 0, caret)
+                current = self._current_comment
+                self._show_details(row)
+                self.details_text.SetInsertionPoint(self._line_to_position(line))
+                self._current_comment = current
+        msg = f"Changed lines marked with {diffview.LABELS[style]}."
+        # Once, on the way from words to symbols, not between the two
+        # symbol styles: as The Chat Place does.
+        if diffview.is_symbol_style(style) and not diffview.is_symbol_style(was):
+            msg += " " + diffview.SYMBOLS_NOTE
+        self._tell(msg)
+
+    def _diff_action(self, action: str) -> None:
+        """Copy ▸ Copy Diff ("copy") and Actions ▸ Open Diff in Default App
+        ("open"): the selected pull request's or commit's whole diff, or in
+        Changed Files the selected file's."""
+        item = self._focused_item()
+        if self.view_mode == VIEW_FILES and isinstance(item, ChangedFile):
+            text = file_diff(item)
+            if not text:
+                self._tell(f"GitHub doesn't show the lines of {item.filename}, "
+                           "so there is no diff.")
+                return
+            stem = f"{self._diff_stem(self._files_of)}-{item.filename.rsplit('/', 1)[-1]}"
+            self._diff_ready(action, text, item.filename, stem)
+            return
+        if self.view_mode == VIEW_ISSUES and isinstance(item, Item) and item.is_pr:
+            what = f"pull request #{item.number}"
+            fetch = lambda url=item.url: fetch_pr_diff(url)  # noqa: E731
+        elif self.view_mode == VIEW_COMMITS and isinstance(item, Commit):
+            what = f"commit {item.short_sha}"
+            fetch = lambda repo=self.repo, sha=item.sha: fetch_commit_diff(repo, sha)  # noqa: E731
+        elif isinstance(item, Item) and not item.is_pr:
+            self._tell(f"#{item.number} is an issue. Only pull requests and commits have a diff.")
+            return
+        else:
+            self._tell("Select a pull request or a commit first.")
+            return
+        if self._diff_busy:
+            self._tell("Still getting the last diff.")
+            return
+        self._diff_busy = True
+        self._announce(f"Getting the diff of {what}…")
+        stem = self._diff_stem(item)
+
+        def worker() -> None:
+            try:
+                text = fetch()
+            except Exception as exc:  # noqa: BLE001 — never leave _diff_busy set
+                wx.CallAfter(self._diff_failed, str(exc))
+                return
+            wx.CallAfter(self._diff_ready, action, text, what, stem)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _diff_stem(self, item) -> str:
+        """A file name, without .diff, for an item's diff."""
+        repo = (self.repo or "").replace("/", "-")
+        if isinstance(item, Item):
+            return f"{repo}-pr-{item.number}"
+        if isinstance(item, Commit):
+            return f"{repo}-{item.short_sha}"
+        return repo or "changes"
+
+    def _diff_failed(self, msg: str) -> None:
+        self._diff_busy = False
+        self._tell(f"Couldn't get the diff: {msg}")
+
+    def _diff_ready(self, action: str, text: str, what: str, stem: str) -> None:
+        self._diff_busy = False
+        if not text.strip():
+            self._tell(f"{what} has no changes to show.")
+            return
+        n = text.count("\n") + (0 if text.endswith("\n") else 1)
+        if action == "copy":
+            if self._set_clipboard(text):
+                self._tell(f"Copied the diff of {what}, {n:,} line{'s' if n != 1 else ''}.")
+            else:
+                self._tell("Couldn't open the clipboard. Try again.")
+            return
+        try:
+            path = write_diff_file(stem, text)
+        except OSError as exc:
+            self._tell(f"Couldn't save the diff: {exc}")
+            return
+        opened = open_in_default_app(path)
+        self._tell(f"Opened the diff of {what}." if opened
+                   else f"Saved the diff of {what} as {path}, but couldn't open it.")
 
     # ── Search ──────────────────────────────────────────────────────────
 

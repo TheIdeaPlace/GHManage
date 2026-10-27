@@ -18,6 +18,8 @@ import os
 import time
 from pathlib import Path
 
+from theideaplace_appkit import difftext
+
 from announce import CATEGORIES
 from columns import ColumnSet, reconcile
 from favorites import _app_data_dir as app_data_dir
@@ -124,6 +126,18 @@ def load_list_mode() -> str:
 def save_list_mode(mode: str) -> None:
     if mode in LIST_MODES:
         _session["list_mode"] = mode
+        _save()
+
+
+def load_diff_style() -> str:
+    """How changed lines are marked (app-kit's difftext styles)."""
+    style = load_settings().get("diff_style")
+    return style if style in difftext.STYLES else difftext.DEFAULT
+
+
+def save_diff_style(style: str) -> None:
+    if style in difftext.STYLES:
+        _session["diff_style"] = style
         _save()
 
 

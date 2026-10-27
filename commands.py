@@ -60,6 +60,8 @@ RUNS = "Workflow runs and jobs"
 NOTIFICATIONS = "Notifications list"
 FEEDS = "Activity, Notifications, My Work and search results"
 PAGES = "GitHub Pages"
+CHANGES = "Issues & PRs list and Commits list"
+FILES = "Changed Files"
 WINDOW = "Anywhere in the window"
 
 LIST_KEYS: list[Command] = [
@@ -81,6 +83,9 @@ LIST_KEYS: list[Command] = [
     Command("Pull request checks", "K", ISSUES),
     Command("Review the pull request", "V", ISSUES),
     Command("Ready for review, or back to draft", "D", ISSUES),
+    Command("The pull request's or commit's changed files", "H", CHANGES),
+    Command("Read the file's changes", "Enter", FILES),
+    Command("Back to the pull request or commit", "Backspace", FILES),
     Command("New label", "Insert", LABELS),
     Command("Delete the label", "Delete", LABELS),
     Command("Show jobs", "J", RUNS),

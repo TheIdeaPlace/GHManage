@@ -1933,6 +1933,128 @@ def fetch_compare(repo: Optional[str], base: str, head: str) -> CompareResult:
     )
 
 
+# ── Changed files ──────────────────────────────────────────────────────
+#
+# What a pull request or a commit changed, file by file, with each file's
+# lines as GitHub gives them: a "patch", the unified diff text of that file
+# without its ---/+++ header. GitHub leaves the patch out for a binary file
+# and for one whose changes are too big to show; those still have a row.
+
+CHANGED_FILE_COLUMNS = ["path", "status", "added", "removed"]
+CHANGED_FILE_DEFAULT_COLUMNS = ["path", "status", "added", "removed"]
+
+# GitHub's word for a file's status, and the one shown. "Deleted" rather
+# than GitHub's "removed": "Removed" is what a removed line is marked with.
+FILE_STATUSES = {
+    "added": "Added",
+    "removed": "Deleted",
+    "modified": "Modified",
+    "renamed": "Renamed",
+    "copied": "Copied",
+    "changed": "Changed",
+    "unchanged": "Unchanged",
+}
+
+# GitHub lists at most this many files of a pull request or a commit.
+MAX_CHANGED_FILES = 3000
+
+
+@dataclass
+class ChangedFile:
+    """One file a pull request or commit changed."""
+    filename: str
+    status: str = "modified"       # GitHub's word: added, removed, modified, renamed…
+    additions: int = 0
+    deletions: int = 0
+    patch: Optional[str] = None    # None when GitHub doesn't show the lines
+    previous_filename: str = ""    # set for a rename
+    url: str = ""                  # the file on GitHub, as it is after the change
+
+    @property
+    def status_display(self) -> str:
+        return FILE_STATUSES.get(self.status, self.status.capitalize())
+
+    def to_row(self, columns: list[str]) -> dict[str, str]:
+        mapping = {
+            "path": self.filename,
+            "status": self.status_display,
+            "added": str(self.additions),
+            "removed": str(self.deletions),
+        }
+        return {c: mapping.get(c, "") for c in columns}
+
+
+def _changed_file(row: dict) -> ChangedFile:
+    patch = row.get("patch")
+    return ChangedFile(
+        filename=row.get("filename") or "",
+        status=row.get("status") or "modified",
+        additions=row.get("additions") or 0,
+        deletions=row.get("deletions") or 0,
+        patch=patch if isinstance(patch, str) else None,
+        previous_filename=row.get("previous_filename") or "",
+        url=row.get("blob_url") or "",
+    )
+
+
+def fetch_pr_files(pr_url: str) -> list[ChangedFile]:
+    """The files a pull request changes, with their lines."""
+    repo, number = _pr_parts(pr_url)
+    rows = _api_pages(f"repos/{repo}/pulls/{number}/files", MAX_CHANGED_FILES)
+    return [_changed_file(r) for r in rows]
+
+
+def fetch_commit_files(repo: Optional[str], sha: str) -> list[ChangedFile]:
+    """The files a commit changes, with their lines.
+
+    The commit endpoint is one object, not a list, so ``_api_pages`` can't
+    page it; its files are paged with the same parameters all the same.
+    """
+    files: list[ChangedFile] = []
+    per_page = 100
+    for page in range(1, MAX_CHANGED_FILES // per_page + 1):
+        rows = _api_json(
+            [f"repos/{{owner}}/{{repo}}/commits/{sha}?per_page={per_page}&page={page}",
+             "-q", ".files // []"],
+            repo,
+        )
+        if not isinstance(rows, list):
+            break
+        files.extend(_changed_file(r) for r in rows if isinstance(r, dict))
+        if len(rows) < per_page:
+            break
+    return files
+
+
+def fetch_pr_diff(pr_url: str) -> str:
+    """A pull request's whole diff, as ``gh pr diff`` prints it."""
+    _pr_parts(pr_url)
+    return _run_gh(["pr", "diff", pr_url, "--color=never"])
+
+
+def fetch_commit_diff(repo: Optional[str], sha: str) -> str:
+    """A commit's whole diff, as ``git show`` would print its changes."""
+    return _api(["-H", "Accept: application/vnd.github.diff",
+                 f"repos/{{owner}}/{{repo}}/commits/{sha}"], repo)
+
+
+def file_diff(f: ChangedFile) -> str:
+    """One file's changes as a diff with its header, ready for a diff
+    viewer or an editor: what ``gh pr diff`` would print for that file.
+    Empty when GitHub didn't give the lines."""
+    old = f.previous_filename or f.filename
+    lines = [f"diff --git a/{old} b/{f.filename}"]
+    if old != f.filename:
+        lines += [f"rename from {old}", f"rename to {f.filename}"]
+    if not f.patch:
+        # A rename that changed no lines is still a diff, as git shows it.
+        return "\n".join(lines) + "\n" if old != f.filename else ""
+    lines.append("--- /dev/null" if f.status == "added" else f"--- a/{old}")
+    lines.append("+++ /dev/null" if f.status == "removed" else f"+++ b/{f.filename}")
+    patch = f.patch.replace("\r\n", "\n")
+    return "\n".join(lines) + "\n" + patch + ("" if patch.endswith("\n") else "\n")
+
+
 # ── GitHub Pages ───────────────────────────────────────────────────────
 #
 # Three things are wanted here and only the first has a straightforward

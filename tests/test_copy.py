@@ -15,7 +15,7 @@ else:
 import ghviewer  # noqa: E402
 from favorites import FavoriteEntry  # noqa: E402
 from gh_data import (  # noqa: E402
-    ActivityEvent, Artifact, Branch, Commit, Item, Label, PagesBuild, PagesFile,
+    ActivityEvent, Artifact, Branch, ChangedFile, Commit, Item, Label, PagesBuild, PagesFile,
     Release, ReleaseAsset, RepoEntry, Tag, Workflow, WorkflowRun,
 )
 
@@ -91,6 +91,7 @@ VIEW_SAMPLES = {
     ghviewer.VIEW_WORKFLOW: WorkflowRun("CI", "", "", "", "", "", url="u", run_id=3),
     ghviewer.VIEW_ARTIFACTS: Artifact(1, "build", 10, False, "", 9),
     ghviewer.VIEW_ASSETS: ReleaseAsset(1, "a.exe", 1, 1, "", url="u"),
+    ghviewer.VIEW_FILES: ChangedFile("docs/a.md", url="u"),
     ghviewer.VIEW_LABELS: Label("bug", url="u"),
     ghviewer.VIEW_FAVORITES: FavoriteEntry("o/r", "issue", "u", "#4 — T"),
     ghviewer.VIEW_PAGES: PagesBuild(1, "built", "abc", "me", "", url="u"),

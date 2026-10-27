@@ -14,6 +14,7 @@ GHManage is a keyboard-driven desktop app for your GitHub repositories, built fo
 - [Issues and Pull Requests](#issues-and-pull-requests)
 - [Labels](#labels)
 - [Branches and Commits](#branches-and-commits)
+- [Changed Files](#changed-files)
 - [Tags and Releases](#tags-and-releases)
 - [Workflows and Workflow Runs](#workflows-and-workflow-runs)
 - [GitHub Pages](#github-pages)
@@ -394,6 +395,7 @@ On a pull request in the issues list:
 | Key | Action |
 |-----|--------|
 | `K` | Its checks: how many passed, failed or are still running, then each one, failures first, with its link |
+| `H` | Its changed files, and each file's changed lines; see [Changed Files](#changed-files) |
 | `V` | Review it: approve, request changes, or comment, with a message |
 | `D` | Mark a draft ready for review, or an open pull request back to a draft, after asking |
 
@@ -471,7 +473,80 @@ To switch branch without going back, use **Actions → Select Branch…** (`Ctrl
 
 **All branches**, first in that list, shows recent commits from every branch together, newest first. A commit on several branches appears once, naming each of them. **View More** (`Ctrl++`) adds older commits, up to the newest 100 of each of the default branch and the 99 most recently changed branches (on a repository with more than 1,000 branches, of the first 1,000 by name); that makes it a view of recent work across branches rather than of older history, for which you pick one branch. For an older commit, the branches named are the ones it is still among the newest commits of, which may not be every branch that has it. If some branches couldn't be read, the status bar says how many.
 
-Each commit shows its short SHA, message, author and date; **View → Columns…** adds the branch (on All branches, the first few branches it is on and how many more), how many files changed and the lines added and removed. The details panel has the full SHA, the branch or every branch it is on, the whole message, and the files changed when GitHub reports them. `Enter` on a commit opens it on GitHub.
+Each commit shows its short SHA, message, author and date; **View → Columns…** adds the branch (on All branches, the first few branches it is on and how many more), how many files changed and the lines added and removed. The details panel has the full SHA, the branch or every branch it is on, the whole message, and the files changed when GitHub reports them. `Enter` on a commit opens it on GitHub, and `H` lists its changed files, with their lines; see [Changed Files](#changed-files).
+
+---
+
+## Changed Files
+
+**Changed Files** lists the files a pull request or a commit changed, and lets you read each file's changed lines, a line at a time, with every line saying whether it was added, removed or left as it was.
+
+To open it, select a pull request in Issues & PRs, or a commit in Commits, and press `H`. **Actions → Changed Files** (`Ctrl+Shift+H`) and the context menu do the same. When the files have loaded, GHManage says how many there are and how many lines were added and removed, for example "3 files changed, 40 lines added, 12 removed." `Backspace` takes you back to the pull request or commit, in the list as you left it.
+
+Each file has a row with its path, what happened to it (Added, Modified, Deleted or Renamed) and how many lines were added and removed. The quick filter (`Ctrl+F`) finds a file by part of its name.
+
+### Reading a file's changes
+
+The details panel shows the selected file. Its first line sums the file up, for example "src/app.py: modified, 2 lines added, 1 removed." For a renamed file, it also says the name the file had before. Then come the changes: each run of changed lines begins with where it is in the file, such as "Lines 10 to 15:", followed by its lines. A few unchanged lines either side of the changes are included so you know where you are.
+
+`Enter` on a file moves into its lines, at the top. Read them with your screen reader's reading keys, as in any text. `Alt+N` and `Alt+P` move to the next and previous run of changes, selecting its "Lines…" line; the status bar says "Change 2 of 5". On a Mac, use `Option+N` and `Option+P`. In this view, the **File** menu's Next Comment and Previous Comment read Next Change and Previous Change.
+
+GitHub doesn't give the lines of a binary file, such as an image, or of a file whose changes are very large. Such a file still has its row, and the details panel says why there are no lines to show. `Ctrl+O` opens the file on GitHub.
+
+### How lines are marked
+
+**View → Mark Changed Lines With** chooses how each line starts. Here is the same change in each style:
+
+Words (Added, Removed, Unchanged), the default:
+
+```
+Lines 1 to 3:
+Unchanged: def foo():
+Removed:     return 1
+Added:     return 2
+```
+
+Short words (Add, Del, Same):
+
+```
+Lines 1 to 3:
+Same def foo():
+Del     return 1
+Add     return 2
+```
+
+Diff symbols (+, -, =):
+
+```
+Lines 1 to 3:
+= def foo():
+-     return 1
++     return 2
+```
+
+Diff symbols with changed lines (!-, !+, +, -, =). A line that was changed, rather than only added or only removed, is shown as its old version marked `!-` and then its new version marked `!+`. When several lines were changed together, each old line is followed by its new one, so you can compare them as you go:
+
+```
+Lines 1 to 3:
+= def foo():
+!-     return 1
+!+     return 2
+```
+
+The mark always comes first and the line's own indentation is kept after it. A blank line reads "blank line", for example "Unchanged: blank line".
+
+Your screen reader speaks symbols only if its punctuation level reads them, so GHManage reminds you of this when you choose a symbol style. If you don't hear the marks, raise your screen reader's punctuation level, or use one of the words styles, which read at any level.
+
+The choice is remembered, and the details panel changes straight away. The Chat Place uses the same four styles, so a change reads the same in both.
+
+### Copying a diff or opening it in another app
+
+**Actions → Copy → Copy Diff** puts a diff on the clipboard, the way `gh pr diff 123 | clip` does:
+
+- on a pull request in Issues & PRs, or a commit in Commits, the whole diff;
+- in Changed Files, the selected file's diff.
+
+**Actions → Open Diff in Default App** saves the same diff as a `.diff` file and opens it in whatever app your computer opens `.diff` files with, such as Visual Studio Code. If no app is set for `.diff` files, Windows asks which app to use, and Notepad is one of the choices. The files are kept in a GHManage folder in your temporary folder.
 
 ---
 
@@ -854,6 +929,7 @@ With a filter on, every key acts on the row you are on: `Enter`, `F`, `C`, `O`, 
 | Copy Title | `Ctrl+Shift+T` | The title: an issue's title, a commit's first line, a release's name |
 | Copy Number, Copy SHA, … | `Ctrl+Shift+I` | The short thing that names the item; see below |
 | Copy Details | `Ctrl+Shift+D` | Everything in the details panel |
+| Copy Diff | | A pull request's or commit's whole diff, as `gh pr diff` prints it; in Changed Files, the selected file's. See [Changed Files](#changed-files) |
 | Copy HTTPS Clone URL | | The repository's address for `git clone`, such as `https://github.com/nvaccess/nvda.git` |
 | Copy SSH Clone URL | | The same over SSH, such as `git@github.com:nvaccess/nvda.git` |
 
@@ -1004,6 +1080,8 @@ Everything that acts on what the list is showing is on the **Actions** menu, whi
 | Open Published Site | | GitHub Pages, once a site is found |
 | Select Branch… | `Ctrl+B` | Commits |
 | Compare Branches… | `Ctrl+Shift+B` | Branches |
+| Changed Files | `Ctrl+Shift+H`, or `H` in the list | Issues & PRs, on a pull request; Commits |
+| Open Diff in Default App | | Issues & PRs, on a pull request; Commits; Changed Files |
 | Go to Event's Repository | `Ctrl+Shift+G` | Activity, and Notifications where it reads **Go to Notification's Repository** |
 | Mark as Read, Unsubscribe from Thread | `M`, `U` in the list | Notifications |
 | Mark All as Read… | | Notifications |
@@ -1051,7 +1129,8 @@ On a Mac, use `Cmd` in place of `Ctrl` for every shortcut that has one, `Option`
 | `Ctrl+Shift+L` | Copy a Markdown link to it |
 | `Ctrl+Shift+T` / `Ctrl+Shift+I` / `Ctrl+Shift+D` | Copy its title / number, SHA or name / details |
 | `Ctrl+Shift+O` | Open a repository, or an issue, pull request, commit, release or run, by its address |
-| `Alt+N` / `Alt+P` | Next / previous comment in the details panel |
+| `Alt+N` / `Alt+P` | Next / previous comment in the details panel, or change in Changed Files |
+| `Ctrl+Shift+H` | The changed files of the selected pull request or commit |
 | `Ctrl+Shift+U` | Watch settings for the repository |
 | `Ctrl+Shift+K` | Switch GitHub account |
 | Applications key or `Shift+F10` | Context menu for the selected item or repository |
@@ -1077,6 +1156,7 @@ On a Mac, use `Cmd` in place of `Ctrl` for every shortcut that has one, `Option`
 | `M` or `Ctrl+M` | Add a comment |
 | `N` or `Ctrl+N` | New issue |
 | `K` / `V` / `D` | On a pull request: checks / review / ready or draft |
+| `H` | On a pull request: its changed files |
 | `Backspace` | Back to the labels, Notifications, My Work, search results, the Activity feed, or the Starred or Watched list, when you came from one |
 
 ### In Branches and Commits
@@ -1086,7 +1166,16 @@ On a Mac, use `Cmd` in place of `Ctrl` for every shortcut that has one, `Option`
 | `Enter` on a branch | Show its commits |
 | `Ctrl+Shift+B` | Compare two branches (Branches view) |
 | `Ctrl+B` | Choose the branch (Commits view) |
+| `H` | The selected commit's changed files |
 | `Backspace` | Commits back to branches |
+
+### In Changed Files
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Into the file's changed lines |
+| `Alt+N` / `Alt+P` | Next / previous change in the details panel |
+| `Backspace` | Back to the pull request or commit |
 
 ### In Releases
 

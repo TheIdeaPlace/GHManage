@@ -20,6 +20,8 @@ for (branches, commits, tags, compare, workflow runs).
 ```
 ghviewer.py   — UI layer (wxPython). All event handlers, menus, dialogs, list population.
 gh_data.py    — Data layer. All `gh` CLI and `gh api` calls, data classes, parsing.
+diffview.py   — A changed file as text to read (no wx). Lines are marked by app-kit's
+                `theideaplace_appkit.difftext`, shared with The Chat Place.
 ```
 
 **Rule:** `ghviewer.py` never calls `gh` or the API directly. `gh_data.py` never imports wx.
@@ -46,6 +48,12 @@ UI thread via `wx.CallAfter`. Never touch wx widgets from a worker thread.
 - `fetch_branches(repo, limit)` — list branches via REST API.
 - `fetch_commits(repo, branch, limit)` — list commits, optionally for a specific branch.
 - `fetch_commit_detail(repo, sha)` — full commit with file changes.
+- `ChangedFile`, `fetch_pr_files(pr_url)`, `fetch_commit_files(repo, sha)` — the Changed Files
+  view (`VIEW_FILES`, H on a PR or commit): each file with its `patch`, which GitHub leaves out
+  for binary and very large files. `fetch_pr_diff` / `fetch_commit_diff` give the whole diff for
+  Copy Diff and Open Diff; `file_diff(f)` one file's, with its header. The marking style
+  (`settings.load_diff_style`) is app-kit's difftext style id. app-kit is pinned to a commit
+  archive in `requirements.txt` and `pyproject.toml`; bump both together.
 - `fetch_tags(repo, limit)` / `fetch_releases(repo, limit)` / `fetch_workflow_runs(repo, limit)`.
 - `fetch_release_assets(repo, release_id, release_tag, limit)` — a release's files with their
   download counts. The releases endpoint already returns assets inline, so the Releases list
@@ -438,7 +446,6 @@ including the checks either side. The short version:
 
 ## Roadmap
 
-- **PR diff view** — show file-level changes for a PR in the details panel.
 - **Branch comparison** — compare two branches or tags, show commits and file changes.
 - **Multi-repo dashboard** — watch multiple repos at once.
 - **Workflow run filtering** — filter workflow runs by branch.

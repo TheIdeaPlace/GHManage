@@ -14,6 +14,7 @@ authors = [{ name = "Kelly Ford" }]
 dependencies = [
     "wxPython>=4.2.0",
     "velopack",
+    "theideaplace-appkit @ https://github.com/TheIdeaPlace/app-kit/archive/ac6f9598cec32a8a89fa8af03a8192cd586dd5bc.zip#subdirectory=python",
 ]
 
 [project.optional-dependencies]
@@ -29,7 +30,7 @@ ghviewer = "ghviewer:main"
 [tool.setuptools]
 py-modules = ["ghviewer", "gh_data", "updater", "version", "favorites", "pinned_repos", "saved_searches",
               "commands", "search_help", "columns", "gh_columns", "settings",
-              "announce", "speech"]
+              "announce", "speech", "diffview"]
 
 [tool.setuptools.dynamic]
 version = { attr = "version.__version__" }

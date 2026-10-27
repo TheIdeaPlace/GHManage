@@ -14,6 +14,7 @@ from gh_data import (
     ARTIFACT_COLUMNS, ARTIFACT_DEFAULT_COLUMNS,
     ASSET_COLUMNS, ASSET_DEFAULT_COLUMNS,
     BRANCH_COLUMNS, BRANCH_DEFAULT_COLUMNS,
+    CHANGED_FILE_COLUMNS, CHANGED_FILE_DEFAULT_COLUMNS,
     COMMIT_COLUMNS, COMMIT_DEFAULT_COLUMNS,
     JOB_COLUMNS, JOB_DEFAULT_COLUMNS,
     LABEL_COLUMNS, LABEL_DEFAULT_COLUMNS,
@@ -90,6 +91,9 @@ CATALOG: dict[str, ColumnDef] = {c.id: c for c in [
     _c("page", "Page", 100),
     _c("url", "Address", 100),
     _c("failed step", "Failed step", 100),
+    # Changed files
+    _c("added", "Added", 70),
+    _c("removed", "Removed", 70),
     # Labels, organizations, repositories
     _c("label", "Label", 180),
     _c("description", "Description", 340),
@@ -137,6 +141,8 @@ COMMIT_SET = _set("commits", "Commits", COMMIT_COLUMNS, COMMIT_DEFAULT_COLUMNS,
                   {"branch": {"heading": "Branches"}})
 TAG_SET = _set("tags", "Tags", TAG_COLUMNS, TAG_DEFAULT_COLUMNS)
 ASSET_SET = _set("assets", "Release assets", ASSET_COLUMNS, ASSET_DEFAULT_COLUMNS)
+CHANGED_FILE_SET = _set("changed_files", "Changed files", CHANGED_FILE_COLUMNS,
+                        CHANGED_FILE_DEFAULT_COLUMNS, {"path": {"heading": "File", "width": 400}})
 RELEASE_SET = _set("releases", "Releases", RELEASE_COLUMNS, RELEASE_DEFAULT_COLUMNS)
 WORKFLOW_RUN_SET = _set("workflow_runs", "Workflow runs", WORKFLOW_COLUMNS,
                         WORKFLOW_DEFAULT_COLUMNS, {"#": {"heading": "Run"}})
@@ -168,5 +174,5 @@ COLUMN_SETS: list[ColumnSet] = [
     ISSUE_SET, LABEL_SET, ORG_SET, REPO_SET, BRANCH_SET, COMMIT_SET, TAG_SET,
     ASSET_SET, RELEASE_SET, WORKFLOW_RUN_SET, ARTIFACT_SET, WORKFLOW_SET,
     PAGES_SET, PAGEFILE_SET, ACTIVITY_SET, NOTIFICATION_SET, SEARCH_ITEM_SET,
-    MY_WORK_SET, JOB_SET, FAVORITES_SET,
+    MY_WORK_SET, JOB_SET, FAVORITES_SET, CHANGED_FILE_SET,
 ]

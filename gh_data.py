@@ -2055,6 +2055,212 @@ def file_diff(f: ChangedFile) -> str:
     return "\n".join(lines) + "\n" + patch + ("" if patch.endswith("\n") else "\n")
 
 
+def fetch_pr_head_sha(pr_url: str) -> str:
+    """The commit a pull request's branch is at now."""
+    _pr_parts(pr_url)
+    return _run_gh(["pr", "view", pr_url, "--json", "headRefOid",
+                    "-q", ".headRefOid"]).strip()
+
+
+# ── A repository's files ───────────────────────────────────────────────
+#
+# A folder is read with the git trees API (``{ref}:{path}``) rather than
+# the contents API: a tree says which entries are links and submodules, which
+# the contents API lists as files, and it has no 1,000-entry cap. A file's
+# text is its blob, by SHA, so it never depends on the ref or the path being
+# spelt right in an address, and the same file on two branches is read once.
+
+REPO_FILE_COLUMNS = ["name", "type", "size", "path"]
+REPO_FILE_DEFAULT_COLUMNS = ["name", "type", "size"]
+
+FILE_KINDS = {"dir": "Folder", "file": "File", "link": "Link", "submodule": "Submodule"}
+_TREE_KINDS = {"tree": "dir", "blob": "file", "commit": "submodule"}
+
+# Files larger than this are not shown in the details panel.
+MAX_FILE_BYTES = 1024 * 1024
+
+
+def _quote(text: str, safe: str = "") -> str:
+    from urllib.parse import quote
+    return quote(text, safe=safe)
+
+
+def github_file_url(repo: str, ref: str, path: str, folder: bool = False) -> str:
+    """A file or folder on github.com at ``ref``."""
+    kind = "tree" if folder else "blob"
+    tail = f"/{_quote(path, '/')}" if path else ""
+    return f"https://github.com/{repo}/{kind}/{_quote(ref, '/')}{tail}"
+
+
+@dataclass
+class RepoFile:
+    """One entry of a folder in a repository."""
+    path: str                  # from the top of the repository
+    kind: str = "file"         # dir, file, link or submodule
+    size: int = 0              # bytes; 0 for folders and submodules
+    sha: str = ""              # the blob, tree or (for a submodule) commit
+    url: str = ""              # on github.com
+
+    @property
+    def name(self) -> str:
+        return self.path.rsplit("/", 1)[-1]
+
+    @property
+    def kind_display(self) -> str:
+        return FILE_KINDS.get(self.kind, self.kind.capitalize())
+
+    @property
+    def is_dir(self) -> bool:
+        return self.kind == "dir"
+
+    def size_human(self) -> str:
+        return _size_human(self.size) if self.kind in ("file", "link") else ""
+
+    def to_row(self, columns: list[str]) -> dict[str, str]:
+        mapping = {
+            "name": self.name,
+            "type": self.kind_display,
+            "size": self.size_human(),
+            "path": self.path,
+        }
+        return {c: mapping.get(c, "") for c in columns}
+
+
+def _sort_files(files: list[RepoFile]) -> list[RepoFile]:
+    """Folders first, then the rest; each by name, ignoring case."""
+    return sorted(files, key=lambda f: (not f.is_dir, f.name.lower(), f.name))
+
+
+def fetch_repo_folder(repo: str, ref: str, path: str = "") -> tuple[list[RepoFile], bool]:
+    """The entries of folder ``path`` ("" for the top) at ``ref``, folders
+    first, and whether GitHub cut the list short."""
+    reply = _api_json([f"repos/{repo}/git/trees/{_quote(f'{ref}:{path}')}"], None)
+    if not isinstance(reply, dict):
+        return [], False
+    files: list[RepoFile] = []
+    for row in reply.get("tree") or []:
+        if not isinstance(row, dict) or not row.get("path"):
+            continue
+        kind = _TREE_KINDS.get(row.get("type", ""), "file")
+        if kind == "file" and row.get("mode") == "120000":
+            kind = "link"
+        full = f"{path}/{row['path']}" if path else row["path"]
+        # GitHub has no page for a submodule at its path; the folder it is
+        # in shows it, linked to its own repository.
+        url = (github_file_url(repo, ref, path, folder=True) if kind == "submodule"
+               else github_file_url(repo, ref, full, folder=kind == "dir"))
+        files.append(RepoFile(
+            path=full, kind=kind, size=row.get("size") or 0, sha=row.get("sha") or "",
+            url=url,
+        ))
+    return _sort_files(files), bool(reply.get("truncated"))
+
+
+def fetch_blob_text(repo: str, sha: str) -> str:
+    """A file's contents as text: UTF-8, with anything that isn't replaced.
+    A link's contents are the path it points to."""
+    text = _api(["-H", "Accept: application/vnd.github.raw", f"repos/{repo}/git/blobs/{sha}"],
+                None)
+    return text[1:] if text.startswith("﻿") else text
+
+
+def fetch_file_history(repo: str, path: str, ref: str, limit: int = 100) -> list[Commit]:
+    """The commits that changed ``path`` on ``ref``, newest first. GitHub
+    doesn't follow a file back past a rename."""
+    rows = _api_pages(f"repos/{repo}/commits?path={_quote(path, '/')}&sha={_quote(ref)}", limit)
+    commits: list[Commit] = []
+    for row in rows:
+        sha = row.get("sha") or ""
+        info = row.get("commit") if isinstance(row.get("commit"), dict) else {}
+        author = info.get("author") if isinstance(info.get("author"), dict) else {}
+        commits.append(Commit(
+            sha=sha,
+            short_sha=sha[:8],
+            message=_first_line(info.get("message") or ""),
+            author=author.get("name") or _login_of(row.get("author")),
+            date=author.get("date") or "",
+            url=row.get("html_url") or "",
+        ))
+    return commits
+
+
+def fetch_commit_file(repo: str, sha: str, path: str) -> Optional[ChangedFile]:
+    """What commit ``sha`` did to ``path``, or None if it isn't among the
+    commit's files."""
+    for f in fetch_commit_files(repo, sha):
+        if f.filename == path:
+            return f
+    return None
+
+
+@dataclass
+class BlameRange:
+    """A run of lines last changed by one commit."""
+    start: int                 # first line, from 1
+    end: int                   # last line, inclusive
+    sha: str = ""
+    short_sha: str = ""
+    headline: str = ""
+    author: str = ""
+    date: str = ""             # ISO 8601
+
+
+_BLAME_QUERY = """query {
+  repository(owner: %s, name: %s) {
+    object(expression: %s) {
+      ... on Commit {
+        blame(path: %s) {
+          ranges {
+            startingLine endingLine
+            commit { oid abbreviatedOid messageHeadline
+                     author { name date user { login } } }
+          }
+        }
+      }
+    }
+  }
+}"""
+
+
+def fetch_blame(repo: str, ref: str, path: str) -> list[BlameRange]:
+    """Who last changed each line of ``path`` at ``ref``, in runs of lines,
+    first line first."""
+    owner, _, name = repo.partition("/")
+    query = _BLAME_QUERY % tuple(json.dumps(v) for v in (owner, name, ref, path))
+    node = _graphql_repository(_graphql(query))
+    obj = node.get("object")
+    if not isinstance(obj, dict):
+        raise GhError(f"{ref} isn't a branch, tag or commit in {repo}")
+    blame = obj.get("blame")
+    if not isinstance(blame, dict):
+        raise GhError(f"GitHub has no blame for {path} at {ref}")
+    ranges: list[BlameRange] = []
+    for r in blame.get("ranges") or []:
+        if not isinstance(r, dict):
+            continue
+        commit = r.get("commit") if isinstance(r.get("commit"), dict) else {}
+        author = commit.get("author") if isinstance(commit.get("author"), dict) else {}
+        user = author.get("user") if isinstance(author.get("user"), dict) else {}
+        ranges.append(BlameRange(
+            start=r.get("startingLine") or 0,
+            end=r.get("endingLine") or 0,
+            sha=commit.get("oid") or "",
+            short_sha=commit.get("abbreviatedOid") or (commit.get("oid") or "")[:7],
+            headline=commit.get("messageHeadline") or "",
+            author=author.get("name") or user.get("login") or "",
+            date=_utc_date(author.get("date") or ""),
+        ))
+    return sorted(ranges, key=lambda b: b.start)
+
+
+def fetch_ref_names(repo: str, limit: int = 300) -> tuple[list[str], list[str]]:
+    """The names of a repository's branches and of its tags, for choosing
+    which to look at. Names only: a branch's latest commit isn't needed."""
+    branches = [r.get("name", "") for r in _api_pages(f"repos/{repo}/branches", limit)]
+    tags = [r.get("name", "") for r in _api_pages(f"repos/{repo}/tags", limit)]
+    return [b for b in branches if b], [t for t in tags if t]
+
+
 # ── GitHub Pages ───────────────────────────────────────────────────────
 #
 # Three things are wanted here and only the first has a straightforward

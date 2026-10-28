@@ -517,6 +517,7 @@ def _loaded_frame(files):
                _files_back={"view": ghviewer.VIEW_ISSUES})
     f._fetch_is_current = lambda token: token == f._fetch_token
     f._populate_filtered_list = lambda items: list(items)
+    f._take_pending_row = lambda items, token: 0
     f.status = []
     f._set_view_status = lambda msg, keys="": f.status.append((msg, keys))
     f._update_title = lambda: None

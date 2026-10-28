@@ -1719,6 +1719,25 @@ def download_artifact(repo: Optional[str], run_id: int, name: str, dest_dir: str
     _run_gh(args)
 
 
+def _glob_literal(name: str) -> str:
+    """``name`` as a gh -p pattern that matches it and nothing else: its
+    wildcards each in a class of their own ("a*.zip" is "a[*].zip")."""
+    return "".join(f"[{c}]" if c in "*?[" else c for c in name)
+
+
+def download_release_asset(repo: Optional[str], tag: str, name: str, dest_dir: str,
+                           replace: bool = False) -> None:
+    """Download one file of the release tagged ``tag`` into ``dest_dir``
+    (``gh release download``). ``replace`` overwrites a file of that name
+    already there; without it, gh refuses. Raises GhError on failure."""
+    args = ["release", "download", tag, "-p", _glob_literal(name), "-D", dest_dir]
+    if replace:
+        args.append("--clobber")
+    if repo:
+        args += ["--repo", repo]
+    _run_gh(args)
+
+
 def delete_workflow_run(repo: Optional[str], run_id: int) -> None:
     """Delete a workflow run by its database id.
 

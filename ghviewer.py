@@ -17,7 +17,7 @@ import unicodedata
 import webbrowser
 from dataclasses import dataclass
 from typing import Callable, Optional
-from urllib.parse import unquote, urlsplit
+from urllib.parse import quote, unquote, urlsplit
 
 import wx
 
@@ -140,6 +140,7 @@ from gh_data import (
     delete_workflow_run,
     dispatch_workflow,
     download_artifact,
+    download_release_asset,
     fetch_branches,
     fetch_branch_names,
     fetch_dispatch_spec,
@@ -762,8 +763,6 @@ ID_DELETE_LABEL = wx.NewIdRef()
 # Actions menu. ID_DELETE_ITEM is one item that deletes whatever the current
 # view can delete, so a single Ctrl+D covers labels and workflow runs alike.
 ID_DELETE_ITEM = wx.NewIdRef()
-ID_ACT_RUN_WORKFLOW = wx.NewIdRef()
-ID_ACT_DOWNLOAD_ARTIFACT = wx.NewIdRef()
 ID_OPEN_PAGES_SITE = wx.NewIdRef()
 ID_FILTER = wx.NewIdRef()
 ID_SELECT_BRANCH = wx.NewIdRef()
@@ -777,8 +776,15 @@ ID_CHECK_UPDATES = wx.NewIdRef()
 ID_NEW_ISSUE = wx.NewIdRef()
 ID_SWITCH_ACCOUNT = wx.NewIdRef()
 ID_SEARCH = wx.NewIdRef()
-# Context menus: Enter's action in the item list, and the repository list's own.
+# Enter's action in the item list: the first entry of the Actions menu and so
+# of the list's context menu. Then the repository list's own context entries.
 ID_CTX_OPEN = wx.NewIdRef()
+# Backspace, Escape and F6 / Shift+F6, on the menus so they can be found (they
+# are keys, not accelerators: see _build_menu).
+ID_BACK = wx.NewIdRef()
+ID_CLEAR_FILTER = wx.NewIdRef()
+ID_NEXT_PANE = wx.NewIdRef()
+ID_PREV_PANE = wx.NewIdRef()
 ID_REPO_OPEN = wx.NewIdRef()
 ID_REPO_BROWSER = wx.NewIdRef()
 ID_SEARCH_REPO = wx.NewIdRef()
@@ -982,6 +988,150 @@ PARENT_VIEW = {
     VIEW_PAGEFILES: VIEW_PAGES,
     VIEW_ORG: VIEW_ORGS,
 }
+
+# What Enter does in each view. Enter goes in, inside GHManage: to a deeper
+# list, into the details panel ("Read"), or an action here (run, download);
+# never the browser, which is Ctrl+O's. One name for it everywhere: the
+# Actions menu's first item ("Show Commits (Enter)"), so the context menu's
+# too, and the status bar's "Enter=show commits" (enter_hint).
+OPEN_LABELS = {
+    VIEW_ISSUES: "Read",
+    VIEW_BRANCHES: "Show Commits",
+    VIEW_COMMITS: "Changed Files",
+    VIEW_TAGS: "Files at This Tag",
+    VIEW_RELEASES: "List Files",
+    VIEW_WORKFLOWS: "Run on a Branch…",
+    VIEW_WORKFLOW: "List Artifacts",
+    VIEW_ARTIFACTS: "Download…",
+    VIEW_JOBS: "Read Log",
+    VIEW_ASSETS: "Download…",
+    VIEW_FILES: "Read the Changes",
+    VIEW_CODE: "Open Folder or File",
+    VIEW_HISTORY: "Changed Files",
+    VIEW_LABELS: "List Issues and PRs with This Label",
+    VIEW_FAVORITES: "Open Here",
+    VIEW_PAGES: "Browse Published Pages",
+    VIEW_PAGEFILES: "Read",
+    VIEW_ACTIVITY: "Open Here",
+    VIEW_STARRED: "Open Here",
+    VIEW_WATCHED: "Open Here",
+    VIEW_NOTIFICATIONS: "Open Here",
+    VIEW_MY_WORK: "Open Here",
+    VIEW_SEARCH_ISSUES: "Open Here",
+    VIEW_SEARCH_REPOS: "Open Here",
+    VIEW_ORGS: "List Its Repositories",
+    VIEW_ORG: "Open Here",
+    VIEW_SHARED: "Open Here",
+    VIEW_SECURITY: "Read",
+    VIEW_DISCUSSIONS: "Read",
+    VIEW_MILESTONES: "List Its Issues and PRs",
+    VIEW_INSIGHTS: "Read",
+    VIEW_GISTS: "Read",
+}
+# Where Enter reads: focus moves into the details panel, at the top, and
+# Backspace there comes back to the row. Enter in the panel itself does
+# nothing more in these; in the other views it does what it does in the list,
+# so "Press Enter to…" in their details is true where it is read.
+READ_VIEWS = (VIEW_ISSUES, VIEW_DISCUSSIONS, VIEW_SECURITY, VIEW_INSIGHTS, VIEW_GISTS,
+              VIEW_PAGEFILES, VIEW_FILES)
+# Ctrl+O opens the selected thing on GitHub (Actions ▸ Open on GitHub). These
+# views open something else, named on the menu; None: there is no page.
+CTRL_O_LABEL = "Open on GitHub"
+CTRL_O_LABELS = {
+    VIEW_PAGES: "Open Its Commit on GitHub",
+    VIEW_PAGEFILES: "Open on the Web",
+    VIEW_ASSETS: "Open Its Release on GitHub",
+    VIEW_ARTIFACTS: None,
+}
+# Said when Enter is pressed on something GHManage has no view for.
+NO_VIEW_SAID = "GHManage has no view for that; Ctrl+O opens it on GitHub."
+
+
+def enter_label(view: str) -> str:
+    """The name of what Enter does in ``view``, as the menus give it."""
+    return OPEN_LABELS.get(view, "Open Here")
+
+
+def enter_hint(view: str) -> str:
+    """Enter's status bar hint: "Enter=show commits"."""
+    return "Enter=" + commands.hint_words(enter_label(view))
+
+
+def ctrl_o_label(view: str) -> str | None:
+    """What Ctrl+O is called in ``view``, or None where it has nothing to open."""
+    return CTRL_O_LABELS.get(view, CTRL_O_LABEL)
+
+
+def ctrl_o_hint(view: str) -> str:
+    """Ctrl+O's status bar hint, or "" where it has nothing to open."""
+    label = ctrl_o_label(view)
+    return "Ctrl+O=" + commands.hint_words(label) if label else ""
+
+
+def keys_hint(*parts: str) -> str:
+    """Status bar key hints, two spaces apart, the empty ones left out."""
+    return "  ".join(p.strip() for p in parts if p and p.strip())
+
+
+def address_view(target: "GitHubTarget | None") -> str | None:
+    """The view a GitHub address opens in here (Enter in Favorites,
+    Notifications and Activity), or None where GHManage has none for it."""
+    if target is None or not target.repo:
+        return None
+    if target.kind == "repo":
+        return VIEW_ISSUES
+    if target.kind == "view":
+        return target.ref
+    return ADDRESS_VIEWS.get(target.kind)
+
+
+def opens_here(url: str) -> bool:
+    """Whether Enter on something at ``url`` opens it in a view here."""
+    return bool(url) and address_view(parse_github_url(url)) is not None
+
+
+def on_the_web(url: str) -> str:
+    """"on GitHub", or "on the web" for an address somewhere else (a
+    published page)."""
+    host = (urlsplit(url).hostname or "").lower()
+    return "on GitHub" if host == "github.com" or host.endswith(".github.com") else "on the web"
+
+
+def no_view_said(url: str = "") -> str:
+    """Said for Enter on something GHManage has no view for."""
+    if url and on_the_web(url) == "on the web":
+        return "GHManage has no view for that; Ctrl+O opens it on the web."
+    return NO_VIEW_SAID
+
+
+def fork_said(number: int, repo: str, parent: str) -> str:
+    """Said for Enter on an issue or pull request in a fork, which can't open
+    here: the fork's Issues view shows its upstream's."""
+    return (f"#{number} is in {repo}, a fork; GHManage shows that repository's issues "
+            f"from {parent}. Ctrl+O opens it on GitHub.")
+
+
+# Favorites found in their list by name (the favorite's title), where their
+# address doesn't say which view: (view, pending kind).
+FAVORITE_BY_NAME = {
+    "tag": (VIEW_TAGS, "tag"),
+    "label": (VIEW_LABELS, "label"),
+    "workflow": (VIEW_WORKFLOWS, "workflow"),
+}
+# Notifications whose subject has a list here but no address of its own.
+NOTIFICATION_VIEWS = {
+    "RepositoryVulnerabilityAlert": VIEW_SECURITY,
+    "RepositoryDependabotAlertsThread": VIEW_SECURITY,
+}
+
+
+def favorite_opens_here(fav) -> bool:
+    """Whether Enter on the favorite ``fav`` opens it in a view here."""
+    if fav.item_type == "repository" and fav.repo:
+        return True
+    if fav.item_type in FAVORITE_BY_NAME and fav.repo and fav.title:
+        return True
+    return opens_here(fav.url)
 
 # The columns each view can show (gh_columns). Views listing the same kind
 # of thing share a set: every list of repositories has the same columns.
@@ -2729,11 +2879,16 @@ class GhViewerFrame(wx.Frame):
         file_menu.Append(ID_SWITCH_ACCOUNT, "Switch GitHub Account…\tCtrl+Shift+K")
         file_menu.AppendSeparator()
         file_menu.Append(ID_REFRESH, "Refresh (R)\tCtrl+R")
+        # Backspace in the list, named for where it goes (_back_label). Not an
+        # accelerator, which would take Backspace from every text box.
+        self._act_back = file_menu.Append(ID_BACK, "Back (Backspace)")
         file_menu.Append(ID_VIEW_MORE, "View More\tCtrl++")
         file_menu.AppendSeparator()
         file_menu.Append(ID_SEARCH, "Search GitHub…\tCtrl+Shift+F")
         file_menu.Append(ID_GOTO, "Go To Issue…\tCtrl+G")
         file_menu.Append(ID_FILTER, "Quick Filter…\tCtrl+F")
+        # Escape in the list; greyed out with no filter on.
+        self._act_clear_filter = file_menu.Append(ID_CLEAR_FILTER, "Clear Quick Filter (Escape)")
         file_menu.AppendSeparator()
         # Between comments, or between changes in Changed Files.
         self._act_next_comment = file_menu.Append(ID_NEXT_COMMENT, "Next Comment\tAlt+N")
@@ -2747,7 +2902,13 @@ class GhViewerFrame(wx.Frame):
         # and enabled per view in `_update_actions_menu`, so the menu is a
         # reliable answer to "what can I do here?" rather than a list to sift.
         actions_menu = wx.Menu()
-        actions_menu.Append(ID_OPEN_BROWSER, "Open in Browser\tCtrl+O")
+        # First, what Enter does here, named for the view ("Show Commits
+        # (Enter)", "Read (Enter)"; OPEN_LABELS). Enter is the list's own key,
+        # never an accelerator. Being first here, it leads the context menu.
+        self._act_enter = actions_menu.Append(ID_CTX_OPEN, "Open Here (Enter)")
+        # The way out to GitHub, in every view; renamed where it opens
+        # something else (CTRL_O_LABELS) and greyed out where there's no page.
+        self._act_open_web = actions_menu.Append(ID_OPEN_BROWSER, "Open on GitHub\tCtrl+O")
         # Copy acts on the item in the list, or on the repository when the
         # repository list has focus. The fourth entry is renamed per view for
         # what it copies there: Copy Number, Copy SHA, Copy Tag…
@@ -2794,16 +2955,11 @@ class GhViewerFrame(wx.Frame):
         # Ctrl+I and Ctrl+D are safe as accelerators; a bare Delete accelerator
         # would not be, since it would swallow the Delete key inside the list.
         # The bare Insert and Delete keys are handled in `on_char_hook`.
-        self._act_new = actions_menu.Append(ID_NEW_LABEL, "New Label…\tCtrl+I")
+        self._act_new = actions_menu.Append(ID_NEW_LABEL, "New Label… (Insert)\tCtrl+I")
         self._act_delete = actions_menu.Append(ID_DELETE_ITEM, "Delete\tCtrl+D")
         actions_menu.AppendSeparator()
-        self._act_run_workflow = actions_menu.Append(
-            ID_ACT_RUN_WORKFLOW, "Run Workflow on Branch…"
-        )
-        self._act_download = actions_menu.Append(
-            ID_ACT_DOWNLOAD_ARTIFACT, "Download Artifact…"
-        )
-        # Workflow runs. J, L, E and X are the keys in the list.
+        # Workflow runs. J, L, E and X are the keys in the list. Running a
+        # workflow and downloading an artifact are Enter's, first on the menu.
         self._act_run_jobs = actions_menu.Append(ID_RUN_JOBS, "Show Jobs (J)")
         self._act_run_failed = actions_menu.Append(ID_RUN_FAILED, "Show What Failed (L)")
         self._act_run_rerun = actions_menu.Append(ID_RUN_RERUN, "Rerun… (E)")
@@ -2936,6 +3092,11 @@ class GhViewerFrame(wx.Frame):
             self.Bind(wx.EVT_MENU, lambda e, st=style: self._set_diff_style(st), id=item_id)
         view_menu.AppendSubMenu(marks_menu, "Mark Changed Lines With")
 
+        view_menu.AppendSeparator()
+        # F6 and Shift+F6 are handled in on_char_hook, so they work from every
+        # pane; here so they can be found.
+        view_menu.Append(ID_NEXT_PANE, "Next Pane (F6)")
+        view_menu.Append(ID_PREV_PANE, "Previous Pane (Shift+F6)")
         view_menu.AppendSeparator()
         self._show_read_item = view_menu.AppendCheckItem(
             ID_SHOW_READ, "Include Read Notifications (I)"
@@ -3287,21 +3448,35 @@ class GhViewerFrame(wx.Frame):
         for entry in (self._act_mark_read, self._act_unsubscribe, self._act_mark_all_read):
             entry.Enable(notifications)
 
+        # Delete is the key in these views as well as Ctrl+D.
         if self.view_mode == VIEW_LABELS:
-            self._act_delete.SetItemLabel("Delete Label…\tCtrl+D")
+            self._act_delete.SetItemLabel("Delete Label… (Delete)\tCtrl+D")
             self._act_delete.Enable(True)
         elif self.view_mode == VIEW_WORKFLOW:
-            self._act_delete.SetItemLabel("Delete Workflow Run…\tCtrl+D")
+            self._act_delete.SetItemLabel("Delete Workflow Run… (Delete)\tCtrl+D")
             self._act_delete.Enable(True)
         elif self.view_mode == VIEW_NOTIFICATIONS:
-            self._act_delete.SetItemLabel("Mark as Done\tCtrl+D")
+            self._act_delete.SetItemLabel("Mark as Done (Delete)\tCtrl+D")
             self._act_delete.Enable(True)
         else:
             self._act_delete.SetItemLabel("Delete\tCtrl+D")
             self._act_delete.Enable(False)
 
-        self._act_run_workflow.Enable(self.view_mode == VIEW_WORKFLOWS)
-        self._act_download.Enable(self.view_mode == VIEW_ARTIFACTS)
+        # Enter's action, named for this view; greyed with nothing selected,
+        # or on an artifact GitHub no longer has.
+        item = self._focused_item()
+        self._act_enter.SetItemLabel(f"{enter_label(self.view_mode)} (Enter)")
+        self._act_enter.Enable(item is not None
+                               and not (isinstance(item, Artifact) and item.expired))
+        web = ctrl_o_label(self.view_mode)
+        self._act_open_web.SetItemLabel(f"{web or CTRL_O_LABEL}\tCtrl+O")
+        self._act_open_web.Enable(web is not None)
+        back = self._back_label()
+        self._act_back.SetItemLabel(
+            f"{back.replace('&', '&&')} (Backspace)" if back else "Back (Backspace)")
+        self._act_back.Enable(back is not None)
+        self._act_clear_filter.Enable(bool(self.filter_text))
+
         runs = self.view_mode in (VIEW_WORKFLOW, VIEW_JOBS)
         self._act_run_jobs.Enable(self.view_mode == VIEW_WORKFLOW)
         for entry in (self._act_run_failed, self._act_run_rerun, self._act_run_cancel):
@@ -3469,8 +3644,13 @@ class GhViewerFrame(wx.Frame):
         self.Bind(wx.EVT_MENU, self.on_new_label, id=ID_NEW_LABEL)
         self.Bind(wx.EVT_MENU, self.on_delete_label, id=ID_DELETE_LABEL)
         self.Bind(wx.EVT_MENU, self.on_delete_item, id=ID_DELETE_ITEM)
-        self.Bind(wx.EVT_MENU, self.on_act_run_workflow, id=ID_ACT_RUN_WORKFLOW)
-        self.Bind(wx.EVT_MENU, self.on_act_download_artifact, id=ID_ACT_DOWNLOAD_ARTIFACT)
+        self.Bind(wx.EVT_MENU, lambda e: self._go_back(), id=ID_BACK)
+        self.Bind(wx.EVT_MENU, lambda e: self._clear_filter(), id=ID_CLEAR_FILTER)
+        self.Bind(wx.EVT_MENU, lambda e: self._cycle_pane(backward=False), id=ID_NEXT_PANE)
+        self.Bind(wx.EVT_MENU, lambda e: self._cycle_pane(backward=True), id=ID_PREV_PANE)
+        # Labels and enables follow the selection and the focus, so bring them
+        # up to date as a menu opens, not only when the view changes.
+        self.Bind(wx.EVT_MENU_OPEN, self._on_menu_open)
         self.Bind(wx.EVT_MENU, self.on_open_pages_site, id=ID_OPEN_PAGES_SITE)
         self.Bind(wx.EVT_MENU, self.on_select_branch, id=ID_SELECT_BRANCH)
         self.Bind(wx.EVT_MENU, self.on_compare_branches, id=ID_COMPARE_BRANCHES)
@@ -4167,11 +4347,12 @@ class GhViewerFrame(wx.Frame):
     def _view_label(self, view: str, lower: bool = False) -> str:
         """A view's name for titles and messages. An organization's carries
         its name, which keeps its capitals when the rest is lowered."""
-        if view == VIEW_ORG and self._org:
-            return f"{self._org} {'repositories' if lower else 'Repositories'}"
+        org = getattr(self, "_org", "")
+        if view == VIEW_ORG and org:
+            return f"{org} {'repositories' if lower else 'Repositories'}"
         if view == VIEW_SHARED and lower:
             return "repositories shared with you"  # "back to shared with me" isn't English
-        label = self._VIEW_LABELS.get(view, view.title())
+        label = GhViewerFrame._VIEW_LABELS.get(view, view.title())
         return label.lower() if lower else label
 
     def _view_entry(self, view: str):
@@ -4758,6 +4939,13 @@ class GhViewerFrame(wx.Frame):
                 return isinstance(it, Discussion) and it.title == ref
             if kind == "milestone":
                 return isinstance(it, Milestone) and str(it.number) == ref
+            # Favorites found by name (FAVORITE_BY_NAME).
+            if kind == "tag":
+                return isinstance(it, Tag) and it.name == ref
+            if kind == "label":
+                return isinstance(it, Label) and it.name == ref
+            if kind == "workflow":
+                return isinstance(it, Workflow) and it.name == ref
             return False
 
         found = next((it for it in items if matches(it)), None)
@@ -4777,7 +4965,8 @@ class GhViewerFrame(wx.Frame):
             wx.CallLater(150, self._if_still_current, token, self._goto_discussion, int(ref))
         elif kind == "commit":
             wx.CallLater(150, self._if_still_current, token, self._goto_commit, ref)
-        elif kind in ("release", "run", "discussion", "discussion_title", "milestone"):
+        elif kind in ("release", "run", "discussion", "discussion_title", "milestone",
+                      "tag", "label", "workflow"):
             # (what it is, the newest of its kind, its kind)
             what, newest, plural = {
                 "release": (f"Release {ref}", "newest releases", "releases"),
@@ -4787,6 +4976,9 @@ class GhViewerFrame(wx.Frame):
                 "discussion_title": (f"The discussion “{ref}”",
                                      "most recently active discussions", "discussions"),
                 "milestone": ("That milestone", "milestones listed", "milestones"),
+                "tag": (f"Tag {ref}", "newest tags", "tags"),
+                "label": (f"The label {ref}", "labels listed", "labels"),
+                "workflow": (f"The workflow {ref}", "workflows listed", "workflows"),
             }[kind]
             if found is not None:
                 said = f"{what} is hidden by the quick filter. Escape clears it."
@@ -4794,9 +4986,10 @@ class GhViewerFrame(wx.Frame):
                 said = f"{what} isn't among the {len(items)} {newest}."
             else:
                 said = f"{what} wasn't found: there are no {plural} to show."
-            if kind in ("discussion_title", "milestone"):
+            if kind in ("discussion_title", "milestone", "tag", "label", "workflow"):
                 # Enter was pressed to land on it: say aloud that it didn't.
-                if getattr(self, "state_filter", "all") != "all":
+                if (kind in ("discussion_title", "milestone")
+                        and getattr(self, "state_filter", "all") != "all"):
                     said += " A closed one shows with View, State, All."
                 wx.CallLater(150, self._tell, said)
             else:
@@ -4835,6 +5028,12 @@ class GhViewerFrame(wx.Frame):
             return f"Opened discussion #{item.number} — {item.title}"
         if isinstance(item, Milestone):
             return f"Milestone {item.title}"
+        if isinstance(item, Tag):
+            return f"Tag {item.name}"
+        if isinstance(item, Label):
+            return f"Label {item.name}"
+        if isinstance(item, Workflow):
+            return f"Workflow {item.name}"
         return "Opened"
 
     def _goto_discussion(self, number: int) -> None:
@@ -5335,15 +5534,6 @@ class GhViewerFrame(wx.Frame):
             self.details_text.Clear()
             return
         self.details_text.SetValue(alertview.alert_details(item))
-
-    def _open_alert(self, alert: SecurityAlert) -> None:
-        """Enter or Ctrl+O on a security alert: its page on GitHub."""
-        name = f"{alert.kind_display} alert {alert.number}".strip()
-        if not alert.url:
-            self._tell(f"{name} has no page to open.")
-            return
-        webbrowser.open(alert.url)
-        self._announce(f"Opened {name} in browser")
 
     def _show_favorite_details(self, idx: int) -> None:
         """Show details for a favorited item in the details panel."""
@@ -5916,13 +6106,13 @@ class GhViewerFrame(wx.Frame):
         A load in progress passes no keys, which takes the last view's keys off
         the bar — they may not work in the view that is on its way.
         """
-        if (keys and getattr(self, "_return_to", None)
-                and self.view_mode == getattr(self, "_return_view", VIEW_ISSUES)):
-            # Backspace goes back to the list this was opened from, whatever
-            # it would do in this view otherwise (Commits > Branches).
-            back = f"Backspace=back to {self._view_label(self._return_to[0], lower=True)}"
-            keys = "  ".join([k for k in keys.split("  ") if k and not k.startswith("Backspace=")]
-                             + [back])
+        if keys:
+            # Backspace's hint is where it goes from here, as File ▸ Back says
+            # (_back_label): back to the list this was opened from, say,
+            # whatever it would do in this view otherwise (Commits > Branches).
+            back = GhViewerFrame._back_label(self, lower=True)
+            keys = keys_hint(*[k for k in keys.split("  ") if not k.startswith("Backspace=")],
+                             f"Backspace={back}" if back else "")
         self.status_bar.set_item("message", message)
         self.status_bar.set_item("keys", keys)
         self._update_filter_status()
@@ -5947,9 +6137,23 @@ class GhViewerFrame(wx.Frame):
                                         _view_columns(self.view_mode).defs(self.columns)))
 
     def on_item_activated(self, event) -> None:  # wx.ListEvent / DataViewEvent
-        """Double-click or Enter — context-dependent action."""
+        """Double-click or Enter: in, inside GHManage (OPEN_LABELS names it
+        per view). A deeper list where there is one; else into the item, in
+        the details panel; or an action here. Never the browser: that is
+        Ctrl+O's (on_open_browser)."""
         item = self._focused_item()
         if not item:
+            return
+        if self.view_mode in READ_VIEWS and self.view_mode != VIEW_FILES:
+            # Issues, discussions, alerts, insights, gists, published pages:
+            # into the details panel, at the top. Backspace comes back.
+            self._read_item()
+            return
+        if self.view_mode == VIEW_TAGS and isinstance(item, Tag):
+            self._open_tag_files(item)
+            return
+        if self.view_mode == VIEW_ASSETS and isinstance(item, ReleaseAsset):
+            self._download_asset_flow(item)
             return
         # In Branches view, Enter switches to Commits for that branch
         if self.view_mode == VIEW_BRANCHES and isinstance(item, Branch):
@@ -6020,22 +6224,10 @@ class GhViewerFrame(wx.Frame):
             self._switch_view(VIEW_PAGEFILES)
             self._announce(f"Browsing the pages published at {self.pages_site.url}")
             return
-        # In Published Pages view, Enter opens that page in the browser
-        if self.view_mode == VIEW_PAGEFILES and isinstance(item, PagesFile):
-            webbrowser.open(item.url)
-            self._announce(f"Opened {item.path} in browser")
-            return
-        # In Favorites view, Enter opens a repository here and the rest in
-        # the browser
+        # In Favorites, Enter opens it here, in its own view; Backspace
+        # comes back to the favorite.
         if self.view_mode == VIEW_FAVORITES and isinstance(item, FavoriteEntry):
-            if item.item_type == "repository" and item.repo:
-                self._open_repo_from_list(item.repo, item)
-                return
-            if item.url:
-                webbrowser.open(item.url)
-                self._announce(f"Opened {item.title} in browser")
-            else:
-                self._announce("No URL for this favorite")
+            self._open_favorite(item)
             return
         if self.view_mode == VIEW_ORGS and isinstance(item, OrgEntry):
             self._select_org(item.login)
@@ -6058,50 +6250,15 @@ class GhViewerFrame(wx.Frame):
         if self.view_mode == VIEW_ACTIVITY and isinstance(item, ActivityEvent):
             self._open_event(item)
             return
-        if isinstance(item, SecurityAlert):
-            self._open_alert(item)
-            return
-        # All other views: open in browser
-        url = getattr(item, "url", "") or ""
-        if url:
-            webbrowser.open(url)
-            label = getattr(item, "number", None) or getattr(item, "name", "") or getattr(item, "short_sha", "")
-            self._announce(f"Opened {label or getattr(item, 'title', '')} in browser")
-        else:
-            self._announce("No URL for this item")
+        # Anything else: into it, in the details panel. Never the browser.
+        self._read_item()
 
-    # What Enter does in each view, for the first entry of the list's context
-    # menu. None where Enter opens the browser, which the Actions menu's own
-    # Open in Browser already offers.
-    _OPEN_LABELS = {
-        VIEW_BRANCHES: "Show Commits",
-        VIEW_COMMITS: "Changed Files",
-        VIEW_WORKFLOWS: "Run on a Branch…",
-        VIEW_WORKFLOW: "List Artifacts",
-        VIEW_JOBS: "Read Log",
-        VIEW_FILES: "Read the Changes",
-        VIEW_HISTORY: "Changed Files",
-        VIEW_CODE: "Open",
-        VIEW_ARTIFACTS: "Download…",
-        VIEW_RELEASES: "List Files",
-        VIEW_LABELS: "List Issues and PRs with This Label",
-        VIEW_MILESTONES: "List Its Issues and PRs",
-        VIEW_PAGES: "Browse Published Pages",
-        VIEW_NOTIFICATIONS: "Open",
-        VIEW_ACTIVITY: "Open",
-        VIEW_MY_WORK: "Open Here",
-        VIEW_SEARCH_ISSUES: "Open Here",
-        VIEW_SEARCH_REPOS: "Open Here",
-        VIEW_STARRED: "Open Here",
-        VIEW_WATCHED: "Open Here",
-        VIEW_ORGS: "List Its Repositories",
-        VIEW_ORG: "Open Here",
-        VIEW_SHARED: "Open Here",
-    }
+    # Kept for the context menu's tests and callers: see OPEN_LABELS.
+    _OPEN_LABELS = OPEN_LABELS
 
     def _context_entries(self) -> list:
-        """The item list's context menu, as data: Enter's action first, then
-        everything the Actions menu offers in this view.
+        """The item list's context menu, as data: everything the Actions
+        menu offers in this view, which starts with Enter's action.
 
         Built from the Actions menu itself rather than listed again, so the two
         can't drift apart — a new action there is in the context menu too, and
@@ -6111,20 +6268,11 @@ class GhViewerFrame(wx.Frame):
         self._update_actions_menu()  # the enables must be this view's, now
         entries: list = []
         item = self._focused_item()
-        label = self._OPEN_LABELS.get(self.view_mode)
-        if isinstance(item, Artifact) and item.expired:
-            label = None  # gone from GitHub; Enter would only say so
-        # Actions entries that do what the Enter entry already does.
-        same_as_enter = {ID_ACT_RUN_WORKFLOW, ID_ACT_DOWNLOAD_ARTIFACT}
-        if self.view_mode in (VIEW_COMMITS, VIEW_HISTORY):
+        # Actions entries that do what the Enter entry already does: in
+        # Commits and File History, Enter is Changed Files.
+        same_as_enter = set()
+        if self.view_mode in (VIEW_COMMITS, VIEW_HISTORY) and item is not None:
             same_as_enter.add(ID_CHANGED_FILES)
-        if label and item is not None:
-            entries.append(("item", ID_CTX_OPEN, f"{label}\tEnter"))
-            entries.append(("sep",))
-        else:
-            same_as_enter = set()
-        if isinstance(item, Artifact) and item.expired:
-            same_as_enter = {ID_ACT_DOWNLOAD_ARTIFACT}
 
         def walk(menu) -> list:
             out: list = []
@@ -6147,6 +6295,9 @@ class GhViewerFrame(wx.Frame):
             return out
 
         entries += walk(self._actions_menu)
+        if entries[:1] and entries[0][0] == "item" and entries[0][1] == ID_CTX_OPEN:
+            # Enter's own entry stands apart from the rest.
+            entries.insert(1, ("sep",))
         while entries and entries[-1] == ("sep",):
             entries.pop()
         if isinstance(item, RepoEntry):
@@ -6240,7 +6391,7 @@ class GhViewerFrame(wx.Frame):
         if is_repo_entry(data):
             entries = [
                 ("item", ID_REPO_OPEN, "Open\tEnter"),
-                ("item", ID_REPO_BROWSER, "Open on GitHub"),
+                ("item", ID_REPO_BROWSER, "Open on GitHub\tCtrl+O"),
                 go_to_submenu(),
                 ("sep",),
                 ("item", ID_NEW_ISSUE, "New Issue…\tCtrl+N"),
@@ -6323,7 +6474,7 @@ class GhViewerFrame(wx.Frame):
         idx = self.repo_list.GetSelection()
         name = self.repo_list.GetClientData(idx) if idx != wx.NOT_FOUND else None
         if not is_repo_entry(name):
-            self._announce("Select a repository first.")
+            self._tell("Select a repository first.")
             return
         if action == "browser":
             url = f"https://github.com/{name}"
@@ -6475,17 +6626,56 @@ class GhViewerFrame(wx.Frame):
     def _do_download_artifact(self, art: "Artifact", dest: str) -> None:
         """Download ``art`` into ``dest`` in the background."""
         run_id = art.run_id or (self.artifacts_run.run_id if self.artifacts_run else 0)
-        self._announce(f"Downloading '{art.name}'…")
+        repo = self.repo
+        self._tell(f"Downloading '{art.name}'…")
 
         def worker() -> None:
             try:
-                download_artifact(self.repo, run_id, art.name, dest)
-                wx.CallAfter(
-                    self._announce,
-                    f"Downloaded '{art.name}' into {dest}.",
-                )
+                download_artifact(repo, run_id, art.name, dest)
+                said = f"Downloaded '{art.name}' into {dest}."
             except GhError as exc:
-                wx.CallAfter(self._on_items_error, str(exc))
+                said = f"Couldn't download '{art.name}': {exc}"
+            wx.CallAfter(self._tell, said)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _download_asset_flow(self, asset: ReleaseAsset) -> None:
+        """Enter on a release's file: download it into a folder you pick,
+        as Enter on an artifact does."""
+        if not self.repo or not asset.release_tag:
+            self._tell(f"Couldn't tell which release {asset.name} is in.")
+            return
+        dlg = wx.DirDialog(self, f"Choose a folder to download {asset.name} into",
+                           style=wx.DD_DEFAULT_STYLE)
+        try:
+            if dlg.ShowModal() != wx.ID_OK:
+                self._announce("Download cancelled.")
+                return
+            dest = dlg.GetPath()
+        finally:
+            dlg.Destroy()
+        replace = False
+        if os.path.exists(os.path.join(dest, asset.name)):
+            if wx.MessageBox(f"{asset.name} is already in {dest}. Replace it?",
+                             "Download", wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION,
+                             self) != wx.YES:
+                self._announce("Download cancelled.")
+                return
+            replace = True
+        self._do_download_asset(asset, dest, replace)
+
+    def _do_download_asset(self, asset: ReleaseAsset, dest: str, replace: bool) -> None:
+        """Download ``asset`` into ``dest`` in the background, and say how it went."""
+        repo = self.repo
+        self._tell(f"Downloading {asset.name}…")
+
+        def worker() -> None:
+            try:
+                download_release_asset(repo, asset.release_tag, asset.name, dest, replace)
+                said = f"Downloaded {asset.name} into {dest}."
+            except GhError as exc:
+                said = f"Couldn't download {asset.name}: {exc}"
+            wx.CallAfter(self._tell, said)
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -6508,6 +6698,13 @@ class GhViewerFrame(wx.Frame):
         if key == wx.WXK_F6 and event.GetModifiers() in (wx.MOD_NONE, wx.MOD_SHIFT):
             self._cycle_pane(backward=event.ShiftDown())
             return
+        if key == ord("O") and event.GetModifiers() == wx.MOD_CONTROL:
+            # Ctrl+O here as well as on the menu: it acts on the pane with
+            # focus, the repository list included, and where there's no page
+            # (an artifact) its menu item is greyed out, which would leave
+            # the key silent; this says so aloud instead.
+            self.on_open_browser(None)
+            return
         # Not from the repository list: Delete there reads as "remove this
         # repo", and acting on the item list from another pane is a surprise.
         # Nor from the status bar, which is not about any item in the list.
@@ -6516,7 +6713,18 @@ class GhViewerFrame(wx.Frame):
         if focus is self.repo_list or in_status_bar:
             event.Skip()
             return
-        if key == wx.WXK_INSERT and self.view_mode == VIEW_LABELS:
+        # The keys below are bare keys. With a modifier they are something
+        # else: Ctrl+Insert copies, Shift+Delete cuts.
+        plain = not event.HasAnyModifiers()
+        if focus is self.details_text and plain:
+            if key == wx.WXK_BACK:
+                # Out of the details panel to its row in the list: the way
+                # back from Enter, which brought you in.
+                self._back_to_row()
+                return
+            if key in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER) and self._enter_from_details():
+                return
+        if key == wx.WXK_INSERT and plain and self.view_mode == VIEW_LABELS:
             self._do_new_label()
             return
         # G here rather than in the list's handler so it also works from the
@@ -6524,13 +6732,6 @@ class GhViewerFrame(wx.Frame):
         if (key == ord("G") and not event.HasAnyModifiers()
                 and self.view_mode in GO_TO_REPO_VIEWS):
             self._go_to_event_repo()
-            return
-        if (key == wx.WXK_BACK and not event.HasAnyModifiers()
-                and self.view_mode in (VIEW_FILES, VIEW_CODE, VIEW_HISTORY)
-                and focus is self.details_text):
-            # Out of the lines to the file they belong to; Backspace again
-            # goes back to the pull request or commit.
-            self._focus_list(max(0, self.list_ctrl.GetFirstSelected()))
             return
         if (key == ord("H") and not event.HasAnyModifiers()
                 and self.view_mode in (VIEW_ISSUES, VIEW_COMMITS, VIEW_HISTORY)):
@@ -6575,7 +6776,8 @@ class GhViewerFrame(wx.Frame):
                 return
         if self.view_mode in (VIEW_WORKFLOW, VIEW_JOBS) and not event.HasAnyModifiers():
             action = {
-                ord("J"): self._show_run_jobs,
+                # Not in Jobs, which is where J takes you.
+                ord("J"): self._show_run_jobs if self.view_mode == VIEW_WORKFLOW else None,
                 ord("L"): self._show_what_failed,
                 ord("E"): self._rerun_run,
                 ord("X"): self._cancel_run,
@@ -6592,11 +6794,32 @@ class GhViewerFrame(wx.Frame):
             if action:
                 action()
                 return
-        if key == wx.WXK_DELETE and self.view_mode in (VIEW_LABELS, VIEW_WORKFLOW,
-                                                       VIEW_NOTIFICATIONS):
+        if key == wx.WXK_DELETE and plain and self.view_mode in (VIEW_LABELS, VIEW_WORKFLOW,
+                                                                 VIEW_NOTIFICATIONS):
             self._delete_focused_item()
             return
         event.Skip()
+
+    def _back_to_row(self) -> None:
+        """Backspace in the details panel: back to the list, on the row it
+        is about."""
+        if self.list_ctrl.GetItemCount():
+            self._focus_list(max(0, self.list_ctrl.GetFirstSelected()))
+        else:
+            self.list_ctrl.SetFocus()
+
+    def _enter_from_details(self) -> bool:
+        """Enter in the details panel does what it does in the list, so the
+        "Press Enter to…" read there is true where it is read. Not where Enter
+        reads (READ_VIEWS, a file in Files): you are reading already, and
+        it would only move the caret. True when it acted."""
+        item = self._focused_item()
+        if item is None or self.view_mode in READ_VIEWS:
+            return False
+        if self.view_mode == VIEW_CODE and isinstance(item, RepoFile) and not item.is_dir:
+            return False
+        self.on_item_activated(None)
+        return True
 
     def _focus_panes(self) -> list[wx.Window]:
         """The F6 loop, in order. The status bar is always the last stop."""
@@ -6671,32 +6894,11 @@ class GhViewerFrame(wx.Frame):
             self._toggle_favorite()
         elif key == ord("R"):
             self.on_refresh(None)
-        elif key == wx.WXK_BACK and self.view_mode == VIEW_FILES:
-            self._back_from_files()
-        elif key == wx.WXK_BACK and self.view_mode == VIEW_CODE:
-            self._code_up()
-        elif key == wx.WXK_BACK and self.view_mode == VIEW_HISTORY:
-            self._back_from_history()
-        elif (key == wx.WXK_BACK and self._return_to
-              and self.view_mode == getattr(self, "_return_view", VIEW_ISSUES)):
-            self._return_to_list()
-        elif key == wx.WXK_BACK and self.view_mode in PARENT_VIEW:
-            # Backspace steps back up a drill-down (artifacts -> runs, commits -> branches)
-            parent = PARENT_VIEW[self.view_mode]
-            if self.view_mode == VIEW_ORG:
-                # Back on the organization you came from, not at the top.
-                logins = [o.login for o in self._orgs]
-                self._pending_focus_row = logins.index(self._org) if self._org in logins else 0
-            self._switch_view(parent)
-            self._announce(f"Back to {self._VIEW_LABELS.get(parent, parent).lower()}")
-        elif (key == wx.WXK_BACK and self.view_mode == VIEW_ISSUES
-              and getattr(self, "milestone_filter", None) is not None):
-            self._back_to_milestones()
-        elif key == wx.WXK_BACK and self.view_mode == VIEW_ISSUES and self.label_filter:
-            # Issues restricted to a label is a drill-down too, even though the
-            # view mode is the same one you reach with Ctrl+1.
-            self._switch_view(VIEW_LABELS)
-            self._announce("Back to labels")
+        elif key == wx.WXK_BACK:
+            # Where it goes is File ▸ Back's label (_back_label); with nowhere
+            # to go, the list keeps the key.
+            if not self._go_back():
+                event.Skip()
         elif key == ord("S") and self.view_mode in (VIEW_PAGES, VIEW_PAGEFILES):
             self._open_pages_site()
         elif self.view_mode == VIEW_ISSUES:
@@ -6714,6 +6916,80 @@ class GhViewerFrame(wx.Frame):
         else:
             event.Skip()
 
+    def _back_label(self, lower: bool = False) -> str | None:
+        """Where Backspace in the list goes from here, as File ▸ Back names
+        it ("Back to Branches", "Up a Folder"), or None where it goes nowhere.
+        ``lower`` for the status bar: "back to branches". Kept in step with
+        _go_back, which does it."""
+        view = getattr(self, "view_mode", None)
+        return_to = getattr(self, "_return_to", None)
+        returns = bool(return_to) and view == getattr(self, "_return_view", VIEW_ISSUES)
+
+        def to(target: str) -> str:
+            name = GhViewerFrame._view_label(self, target, lower=lower)
+            return f"{'back' if lower else 'Back'} to {name}"
+
+        if view == VIEW_FILES:
+            files_back = getattr(self, "_files_back", None)
+            return to(files_back["view"] if files_back else VIEW_ISSUES)
+        if view == VIEW_CODE:
+            stack, path = getattr(self, "_code_stack", []), getattr(self, "_code_path", "")
+            code_back = getattr(self, "_code_back", None)
+            if stack or (path and not code_back):
+                return "up a folder" if lower else "Up a Folder"
+            if code_back:
+                return to(code_back.get("view", VIEW_FILES))
+            return to(return_to[0]) if returns else None
+        if view == VIEW_HISTORY:
+            return to(VIEW_CODE)
+        if returns:
+            return to(return_to[0])
+        if view in PARENT_VIEW:
+            return to(PARENT_VIEW[view])
+        if view == VIEW_ISSUES and getattr(self, "milestone_filter", None) is not None:
+            return to(VIEW_MILESTONES)
+        if view == VIEW_ISSUES and getattr(self, "label_filter", ""):
+            return to(VIEW_LABELS)
+        return None
+
+    def _go_back(self) -> bool:
+        """Backspace in the list, or File ▸ Back: out to where Enter came in
+        from. False when there is nowhere to go back to."""
+        view = self.view_mode
+        if view == VIEW_FILES:
+            self._back_from_files()
+        elif view == VIEW_CODE:
+            self._code_up()  # at the top, it says so
+        elif view == VIEW_HISTORY:
+            self._back_from_history()
+        elif self._return_to and view == getattr(self, "_return_view", VIEW_ISSUES):
+            self._return_to_list()
+        elif view in PARENT_VIEW:
+            # Backspace steps back up a drill-down (artifacts -> runs, commits -> branches)
+            parent = PARENT_VIEW[view]
+            if view == VIEW_ORG:
+                # Back on the organization you came from, not at the top.
+                logins = [o.login for o in self._orgs]
+                self._pending_focus_row = logins.index(self._org) if self._org in logins else 0
+            self._switch_view(parent)
+            self._announce(f"Back to {self._view_label(parent, lower=True)}")
+        elif view == VIEW_ISSUES and getattr(self, "milestone_filter", None) is not None:
+            self._back_to_milestones()
+        elif view == VIEW_ISSUES and self.label_filter:
+            # Issues restricted to a label is a drill-down too, even though the
+            # view mode is the same one you reach with Ctrl+1.
+            self._switch_view(VIEW_LABELS)
+            self._announce("Back to labels")
+        else:
+            return False
+        return True
+
+    def _on_menu_open(self, event) -> None:
+        """A menu is opening: its labels and enables for what is selected and
+        focused now."""
+        self._update_actions_menu()
+        event.Skip()
+
     def on_open_pages_site(self, event: wx.CommandEvent) -> None:
         self._open_pages_site()
 
@@ -6726,25 +7002,22 @@ class GhViewerFrame(wx.Frame):
         self._announce(f"Opened {self.pages_site.url} in browser")
 
     def _open_event(self, item: ActivityEvent, in_browser: bool = False) -> None:
-        """Enter in Activity: what the event is about, here when GHManage has
-        a view for it, with Backspace back to the event; otherwise, and for
-        Open in Browser (Ctrl+O), on GitHub."""
-        if not in_browser and item.subject_kind in ("issue", "PR") and item.number and item.repo:
+        """Enter in Activity: what the event is about, here, in its view,
+        with Backspace back to the event; said aloud where GHManage has no
+        view for it. Open on GitHub (Ctrl+O, ``in_browser``): its page there."""
+        if in_browser:
+            if not item.url:
+                self._tell("This event has no page to open.")
+                return
+            webbrowser.open(item.url)
+            self._announce(f"Opened {item.action} in {item.repo} on GitHub")
+            return
+        if item.subject_kind in ("issue", "PR") and item.number and item.repo:
             self._open_item_here(item)
             return
-        target = parse_github_url(item.url) if item.url and not in_browser else None
-        view = ADDRESS_VIEWS.get(target.kind) if target else None
-        if view and target.repo and target.kind != "item":
-            branch = target.ref if target.kind == "branch" else ""
-            self._open_repo_from_list(target.repo, item, view, branch=branch)
-            if target.kind in PENDING_KINDS:
-                self._set_pending_target(view, target.kind, target.ref)
-            return
-        if not item.url:
-            self._announce("No URL for this event")
-            return
-        webbrowser.open(item.url)
-        self._announce(f"Opened {item.action} in {item.repo} in browser")
+        target = parse_github_url(item.url) if item.url else None
+        if not self._open_address_here(target, item):
+            self._tell(NO_VIEW_SAID)
 
     def on_go_to_event_repo(self, event: wx.CommandEvent) -> None:
         self._go_to_event_repo()
@@ -7150,9 +7423,20 @@ class GhViewerFrame(wx.Frame):
         self.current_limit += self.page_size
         self._load_items()
 
-    def on_open_browser(self, event: wx.CommandEvent) -> None:
+    def on_open_browser(self, event) -> None:
+        """Ctrl+O, Actions ▸ Open on GitHub: the selected thing's page on
+        GitHub, or a published page on the web. From the pane with focus, as
+        Copy and F are: in the repository list, the repository."""
+        if self._pane_index(self._current_focus()) == 0:
+            self._repo_entry_action("browser")
+            return
         item = self._focused_item()
-        if not item:
+        if item is None:
+            self._tell("Select something in the list to open on GitHub.")
+            return
+        if isinstance(item, Artifact):
+            # Greyed out on the menu; said here for the key.
+            self._tell("An artifact has no page on GitHub. Enter downloads it.")
             return
         if isinstance(item, ActivityEvent):
             self._open_event(item, in_browser=True)
@@ -7160,19 +7444,39 @@ class GhViewerFrame(wx.Frame):
         if isinstance(item, Notification):
             self._open_notification(item, in_browser=True)
             return
-        if isinstance(item, SecurityAlert):
-            self._open_alert(item)
+        url, name = self._web_target(item)
+        if not url:
+            self._tell(f"{name} has no page to open.")
             return
-        url = getattr(item, "url", "") or ""
-        if url:
-            webbrowser.open(url)
-            if isinstance(item, FavoriteEntry):
-                self._announce(f"Opened {item.title} in browser")
+        webbrowser.open(url)
+        self._announce(f"Opened {name} {on_the_web(url)}")
+
+    def _web_target(self, item) -> tuple[str, str]:
+        """What Ctrl+O opens for ``item``, and its name: its own page, but a
+        release file's release (its own address only downloads it again)."""
+        if isinstance(item, ReleaseAsset):
+            release = getattr(self, "assets_release", None)
+            if release is not None and release.url and release.tag == item.release_tag:
+                url = release.url
+            elif item.release_tag and self.repo:
+                url = f"https://github.com/{self.repo}/releases/tag/{quote(item.release_tag)}"
             else:
-                label = getattr(item, "number", None) or getattr(item, "name", "") or getattr(item, "short_sha", "")
-                self._announce(f"Opened {label or getattr(item, 'title', '')} in browser")
-        else:
-            self._announce("No URL for this item")
+                url = ""
+            return url, f"release {item.release_tag}".strip()
+        if isinstance(item, PagesBuild):
+            return item.url, f"commit {item.commit[:8]}".strip()
+        if isinstance(item, PagesFile):
+            return item.url, item.path
+        if isinstance(item, SecurityAlert):
+            return item.url, f"{item.kind_display} alert {item.number}".strip()
+        if isinstance(item, FavoriteEntry):
+            return item.url, item.title
+        if isinstance(item, (Item, Discussion)):
+            return item.url, f"#{item.number}"
+        label = (getattr(item, "name", "") or getattr(item, "short_sha", "")
+                 or getattr(item, "title", "") or getattr(item, "path", "")
+                 or getattr(item, "login", "") or "it")
+        return getattr(item, "url", "") or "", label
 
     def on_close_item(self, event: wx.CommandEvent) -> None:
         self._do_close()
@@ -8474,34 +8778,65 @@ class GhViewerFrame(wx.Frame):
         return None
 
     def _open_notification(self, note: Notification, in_browser: bool = False) -> None:
-        """Enter: an issue or pull request opens here, anything else on GitHub.
+        """Enter: what the notification is about, here, in its view, with
+        Backspace back to it; said aloud where GHManage has no view for it.
+        Ctrl+O (``in_browser``): its page on GitHub.
 
         Either way it is marked read, as reading it on github.com would.
         """
         if note.unread:
             self._run_notification_change(note, "read")
-        if note.is_item and not in_browser:
-            self._open_item_here(note)
-            return
-        if note.subject_type == "Discussion" and note.repo and not in_browser:
-            self._open_discussion_here(note)
-            return
         if note.subject_type == "Release" and note.api_url:
             # Its own page needs its tag, which only GitHub can tell us.
-            self._announce(f"Opening {note.title}…")
+            if in_browser:
+                self._announce(f"Opening {note.title}…")
+            else:
+                self._tell(f"Opening {note.title}…")
 
             def worker() -> None:
-                url = release_page(note.api_url) or note.url
-                wx.CallAfter(webbrowser.open, url)
-                wx.CallAfter(self._announce, f"Opened {note.title} in browser")
+                url = release_page(note.api_url)
+                wx.CallAfter(self._on_release_page, note, url, in_browser)
 
             threading.Thread(target=worker, daemon=True).start()
             return
-        if note.url:
-            webbrowser.open(note.url)
-            self._announce(f"Opened {note.title} in browser")
-        else:
-            self._announce("No address for this notification.")
+        if in_browser:
+            if note.url:
+                webbrowser.open(note.url)
+                self._announce(f"Opened {note.title} on GitHub")
+            else:
+                self._tell("No address for this notification.")
+            return
+        if note.is_item:
+            self._open_item_here(note)
+            return
+        if note.subject_type == "Discussion" and note.repo:
+            self._open_discussion_here(note)
+            return
+        view = NOTIFICATION_VIEWS.get(note.subject_type)
+        if view and note.repo:
+            # Security alerts: no one alert to land on, but their list.
+            self._open_repo_from_list(note.repo, note, view)
+            return
+        target = parse_github_url(note.url) if note.url else None
+        if not self._open_address_here(target, note):
+            self._tell(NO_VIEW_SAID)
+
+    def _on_release_page(self, note: Notification, url: str, in_browser: bool) -> None:
+        """A release notification's page has been asked for: open it on
+        GitHub (Ctrl+O), or the release here, in Releases (Enter)."""
+        if in_browser:
+            webbrowser.open(url or note.url)
+            self._announce(f"Opened {note.title} on GitHub")
+            return
+        here = self._focused_item()
+        if (self.view_mode != VIEW_NOTIFICATIONS or not isinstance(here, Notification)
+                or here.id != note.id):
+            return  # you moved on while GitHub was asked
+        target = parse_github_url(url) if url else None
+        if target is None or target.kind != "release":
+            # Not told which: the repository's releases, newest first.
+            target = GitHubTarget(note.repo, "view", VIEW_RELEASES)
+        self._open_address_here(target, note)
 
     def _open_discussion_here(self, note: Notification) -> None:
         """A discussion's notification: its repository's Discussions, on it,
@@ -8827,6 +9162,12 @@ class GhViewerFrame(wx.Frame):
         self._comment_positions = list(view.stops)
         self._current_comment = -1
 
+    def _read_item(self) -> None:
+        """Enter where it reads (READ_VIEWS): into the details panel, at the
+        top, where the item's text, comments or lines are. Backspace there
+        comes back to the row."""
+        self._read_changes()
+
     def _read_changes(self) -> None:
         """Enter on a changed file, or Read README: into the details panel's
         lines, from the top. The caret goes first, so the screen reader reads
@@ -9109,10 +9450,38 @@ class GhViewerFrame(wx.Frame):
         self._code_land = left
         self._load_code()
 
+    def _open_tag_files(self, tag: Tag) -> None:
+        """Enter on a tag: Files at that tag, from the top. Backspace there
+        comes back to Tags, on the tag."""
+        snap = {
+            "view": VIEW_TAGS, "items": list(self.git_items), "item": tag,
+            "filter_text": self.filter_text, "limit": self.current_limit,
+            "return_to": getattr(self, "_return_to", None),
+            "return_view": getattr(self, "_return_view", VIEW_ISSUES),
+        }
+        self._switch_view(VIEW_CODE, load=False)
+        # Set after the switch, which starts Files afresh.
+        self._code_ref, self._code_at = tag.name, f"at tag {tag.name}"
+        self._code_path, self._code_stack, self._code_land = "", [], ""
+        self._code_back = snap
+        self._update_title()
+        self._load_items()
+
     def _back_from_code(self) -> None:
-        """Backspace from the folder W opened: Changed Files as it was, on
-        the file."""
+        """Backspace from the top of what Enter on a tag, or W, opened:
+        Tags or Changed Files as they were, on the tag or the file."""
         snap = self._code_back
+        if snap.get("view") == VIEW_TAGS:
+            self._switch_view(VIEW_TAGS, load=False)
+            # Set after the switch, which clears the way back to a list.
+            self.filter_text = snap["filter_text"]
+            self.current_limit = snap["limit"]
+            self._return_to, self._return_view = snap["return_to"], snap["return_view"]
+            token = self._begin_fetch()
+            self._pending_target = (token, VIEW_TAGS, "same", snap["item"])
+            self._on_git_items_loaded(token, snap["items"], "tags")
+            self._announce("Back to tags")
+            return
         self._switch_view(VIEW_FILES, load=False)
         # Set after the switch, which clears them on the way in to anything else.
         self._files_of = snap["files_of"]
@@ -9653,45 +10022,87 @@ class GhViewerFrame(wx.Frame):
 
     # ── Search ──────────────────────────────────────────────────────────
 
-    def _open_item_here(self, item) -> None:
-        """An issue or PR from a list across repos, opened in its repo's issues.
+    def _open_item_here(self, item, repo: str = "", number: int = 0) -> None:
+        """An issue or PR from a list across repos (``item``, or #``number``
+        in ``repo`` when the row is a favorite or an event), opened in its
+        repo's issues, with Backspace back to the row.
 
         Not when its repository is a fork: the Issues view of a fork shows
         its upstream's issues (forks usually have none of their own), where
-        #N is something else entirely. Those open on GitHub instead. Whether
-        a repo is a fork costs a gh call, so the answer is kept.
+        #N is something else entirely. That is said aloud, with the way to
+        it on GitHub. Whether a repo is a fork costs a gh call, so the answer
+        is kept.
         """
-        if not item.repo:
-            self._announce("No repository for this item.")
+        repo = repo or getattr(item, "repo", "")
+        number = number or getattr(item, "number", 0)
+        if not repo or not number:
+            self._tell("No repository for this item.")
             return
-        repo, number = item.repo, item.number
         cache = self.__dict__.setdefault("_fork_parent", {})
         if repo in cache:
-            self._open_item_checked(item, cache[repo])
+            self._open_item_checked(item, cache[repo], repo, number)
             return
         self._tell(f"Opening #{number} in {repo}…")
 
         def worker() -> None:
-            wx.CallAfter(self._on_fork_checked, item, parent_repo(repo))
+            wx.CallAfter(self._on_fork_checked, item, parent_repo(repo), repo, number)
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _on_fork_checked(self, item, parent) -> None:
+    def _on_fork_checked(self, item, parent, repo: str = "", number: int = 0) -> None:
+        repo = repo or item.repo
         # parent_repo says None for "not a fork" and for "couldn't ask"; only
         # a fork is certain enough to keep for the rest of the session.
         if parent:
-            self.__dict__.setdefault("_fork_parent", {})[item.repo] = parent
-        self._open_item_checked(item, parent)
+            self.__dict__.setdefault("_fork_parent", {})[repo] = parent
+        self._open_item_checked(item, parent, repo, number)
 
-    def _open_item_checked(self, item, parent) -> None:
+    def _open_item_checked(self, item, parent, repo: str = "", number: int = 0) -> None:
+        repo, number = repo or item.repo, number or item.number
         if parent:
-            webbrowser.open(item.url)
-            self._announce(f"#{item.number} is in {item.repo}, a fork, whose issues GHManage "
-                           f"shows from {parent}; opened it in your browser instead.")
+            self._tell(fork_said(number, repo, parent))
             return
-        self._open_repo_from_list(item.repo, item)
-        self._set_pending_target(VIEW_ISSUES, "item", str(item.number))
+        self._open_repo_from_list(repo, item)
+        self._set_pending_target(VIEW_ISSUES, "item", str(number))
         self._speak_landing = True
+
+    def _open_address_here(self, target: "GitHubTarget | None", item) -> bool:
+        """Open what a GitHub address points at in its view here, from the
+        row ``item`` of a list across repositories (Favorites, Notifications,
+        Activity), landing on it, with Backspace back to the row. False when
+        GHManage has no view for it."""
+        view = address_view(target)
+        if view is None:
+            return False
+        if target.kind == "item":
+            self._open_item_here(item, target.repo, int(target.ref))
+            return True
+        branch = target.ref if target.kind == "branch" else ""
+        self._open_repo_from_list(target.repo, item, view, branch=branch)
+        if target.kind in PENDING_KINDS:
+            self._set_pending_target(view, target.kind, target.ref)
+            self._speak_landing = True
+        return True
+
+    def _open_favorite(self, fav: FavoriteEntry) -> None:
+        """Enter in Favorites: the favorite in its own view here, landing on
+        it, with Backspace back to Favorites; said aloud where GHManage has no
+        view for it."""
+        if fav.item_type == "repository" and fav.repo:
+            self._open_repo_from_list(fav.repo, fav)
+            return
+        named = FAVORITE_BY_NAME.get(fav.item_type)
+        if named and fav.repo and fav.title:
+            # A tag, label or workflow: its list, on it by name.
+            view, kind = named
+            self._open_repo_from_list(fav.repo, fav, view)
+            self._set_pending_target(view, kind, fav.title)
+            self._speak_landing = True
+            return
+        target = parse_github_url(fav.url) if fav.url else None
+        if self._open_address_here(target, fav):
+            return
+        self._tell(no_view_said(fav.url))
 
     def _saved_search(self, name: str) -> SavedSearch | None:
         return next((s for s in self.saved_searches if s.name == name), None)
@@ -10385,20 +10796,6 @@ class GhViewerFrame(wx.Frame):
     def on_delete_item(self, event: wx.CommandEvent) -> None:
         """Actions ▸ Delete (Ctrl+D) — deletes whatever this view can delete."""
         self._delete_focused_item()
-
-    def on_act_run_workflow(self, event: wx.CommandEvent) -> None:
-        item = self._focused_item()
-        if isinstance(item, Workflow):
-            self._run_workflow_flow(item)
-        else:
-            self._announce("Select a workflow first.")
-
-    def on_act_download_artifact(self, event: wx.CommandEvent) -> None:
-        item = self._focused_item()
-        if isinstance(item, Artifact):
-            self._download_artifact_flow(item)
-        else:
-            self._announce("Select an artifact first.")
 
     def _delete_focused_item(self) -> None:
         """Route Delete/Ctrl+D to the deletion this view supports.

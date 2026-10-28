@@ -54,7 +54,7 @@ def _frame(view, item, actions):
 
 def test_entries_mirror_the_enabled_actions():
     actions = FakeMenu(
-        FakeItem(1, "Open in Browser\tCtrl+O"),
+        FakeItem(1, "Open on GitHub\tCtrl+O"),
         FakeItem(2, "Copy", sub=FakeMenu(FakeItem(3, "Copy Link"), FakeItem(4, "Copy X", enabled=False))),
         SEP,
         FakeItem(5, "Close Issue/PR", enabled=False),
@@ -66,7 +66,7 @@ def test_entries_mirror_the_enabled_actions():
     )
     f = _frame(ghviewer.VIEW_ISSUES, Item(1, "T", "OPEN", "u", False), actions)
     assert Frame._context_entries(f) == [
-        ("item", 1, "Open in Browser\tCtrl+O"),
+        ("item", 1, "Open on GitHub\tCtrl+O"),
         ("sub", "Copy", [("item", 3, "Copy Link")]),
         ("sep",),
         ("item", 6, "New Issue…"),
@@ -75,12 +75,14 @@ def test_entries_mirror_the_enabled_actions():
     ]
 
 
-def test_enter_s_action_comes_first_where_it_is_not_the_browser():
-    actions = FakeMenu(FakeItem(1, "Open in Browser"))
+def test_enter_s_action_comes_first_and_stands_apart():
+    # It is the Actions menu's first item, so the context menu's too.
+    actions = FakeMenu(FakeItem(ghviewer.ID_CTX_OPEN, "Show Commits (Enter)"),
+                       FakeItem(1, "Open on GitHub\tCtrl+O"))
     f = _frame(ghviewer.VIEW_BRANCHES, Branch("main", "s", "m", "a", "d"), actions)
     entries = Frame._context_entries(f)
-    assert entries[0] == ("item", ghviewer.ID_CTX_OPEN, "Show Commits\tEnter")
-    assert entries[1] == ("sep",)
+    assert entries[:3] == [("item", ghviewer.ID_CTX_OPEN, "Show Commits (Enter)"), ("sep",),
+                           ("item", 1, "Open on GitHub\tCtrl+O")]
 
 
 def test_no_open_entry_without_a_selection():
@@ -196,23 +198,16 @@ class RepoList:
 
 def test_repo_actions_on_a_category_entry_say_so():
     f = SimpleNamespace(repo_list=RepoList(ghviewer.MY_WORK_ENTRY), announced=[])
-    f._announce = f.announced.append
+    f._tell = f.announced.append
     Frame._repo_entry_action(f, "browser")
     assert f.announced == ["Select a repository first."]
 
 
-def test_no_duplicate_of_enter_from_the_actions_menu():
-    from gh_data import Workflow
-    actions = FakeMenu(FakeItem(ghviewer.ID_ACT_RUN_WORKFLOW, "Run Workflow on Branch…"),
-                       FakeItem(9, "Open in Browser"))
-    f = _frame(ghviewer.VIEW_WORKFLOWS, Workflow(1, "CI", "ci.yml", "active"), actions)
-    labels = [e[2] for e in Frame._context_entries(f) if e[0] == "item"]
-    assert labels == ["Run on a Branch…\tEnter", "Open in Browser", "View More\tCtrl++"]
-
-
-def test_an_expired_artifact_offers_no_download():
+def test_a_greyed_out_enter_item_is_left_out():
+    # Nothing selected, or an expired artifact: Enter's item is greyed out on
+    # the Actions menu (_update_actions_menu), so it isn't offered here.
     from gh_data import Artifact
-    actions = FakeMenu(FakeItem(ghviewer.ID_ACT_DOWNLOAD_ARTIFACT, "Download Artifact…"),
+    actions = FakeMenu(FakeItem(ghviewer.ID_CTX_OPEN, "Download… (Enter)", enabled=False),
                        FakeItem(9, "Copy"))
     f = _frame(ghviewer.VIEW_ARTIFACTS, Artifact(1, "build", 10, True, "", 9), actions)
     assert Frame._context_entries(f) == [("item", 9, "Copy")]   # all there is: no View More
@@ -286,9 +281,10 @@ def test_never_two_separators_together_or_at_either_end():
 def test_a_commit_s_menu_leads_with_changed_files_once():
     # Enter on a commit opens its changed files, so the Actions entry that
     # does the same is not listed again below it.
-    actions = FakeMenu(FakeItem(1, "Open in Browser"),
+    actions = FakeMenu(FakeItem(ghviewer.ID_CTX_OPEN, "Changed Files (Enter)"),
+                       FakeItem(1, "Open on GitHub\tCtrl+O"),
                        FakeItem(int(ghviewer.ID_CHANGED_FILES), "Changed Files (H)"))
     commit = ghviewer.Commit("a" * 40, "aaaaaaaa", "m", "me", "", url="u")
     entries = Frame._context_entries(_frame(ghviewer.VIEW_COMMITS, commit, actions))
-    assert entries[0] == ("item", ghviewer.ID_CTX_OPEN, "Changed Files\tEnter")
+    assert entries[0] == ("item", ghviewer.ID_CTX_OPEN, "Changed Files (Enter)")
     assert [e for e in entries if e[0] == "item" and "Changed Files" in e[2]] == [entries[0]]

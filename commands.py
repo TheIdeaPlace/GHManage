@@ -52,6 +52,14 @@ def matching(commands: list[Command], text: str) -> list[Command]:
     return sorted(hits, key=lambda c: not c.name.lower().startswith(typed))
 
 
+def hint_words(label: str) -> str:
+    """A menu label as the status bar's key hints say it: "Show Commits" is
+    "show commits", "Run on a Branch…" is "run on a branch". Words that are
+    capitals inside as well (PRs, GitHub, README) are names and keep them."""
+    words = label.replace("…", "").split()
+    return " ".join(w.lower() if w[1:] == w[1:].lower() else w for w in words)
+
+
 REPO_LIST = "Repository list"
 ANY_LIST = "Any list"
 ISSUES = "Issues & PRs list"

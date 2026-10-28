@@ -286,33 +286,112 @@ def test_enter_on_an_issue_opens_it_here_and_marks_it_read():
     assert opened == [note]
 
 
-def test_enter_on_a_ci_run_opens_the_browser(monkeypatch):
+def _opening_frame(note):
+    """A Notifications frame that records where Enter opens things here."""
+    f = _frame([note])
+    f.opened = []
+    f._tell = lambda msg, *a, **k: f.announced.append(msg)
+    f._open_repo_from_list = lambda repo, item, view=ghviewer.VIEW_ISSUES, branch="": (
+        f.opened.append(("repo", repo, view)))
+    f._set_pending_target = lambda view, kind, ref: f.opened.append(("target", kind, ref))
+    f._open_item_here = lambda item, repo="", number=0: f.opened.append(("item", item))
+    f._open_address_here = lambda target, item: Frame._open_address_here(f, target, item)
+    f._focused_item = lambda: note
+    return f
+
+
+def test_enter_on_a_ci_run_opens_its_runs_here_never_the_browser(monkeypatch):
     note = Notification("1", "CI failed", "o/r", unread=False, subject_type="CheckSuite",
                         url="https://github.com/o/r/actions")
-    f = _frame([note])
+    f = _opening_frame(note)
     opened = []
     monkeypatch.setattr(ghviewer.webbrowser, "open", opened.append)
     f._run_notification_change = lambda *a, **k: pytest.fail("already read")
     Frame._open_notification(f, note)
-    assert opened == ["https://github.com/o/r/actions"]
+    assert opened == []
+    assert f.opened == [("repo", "o/r", ghviewer.VIEW_WORKFLOW)]
 
 
-def test_enter_on_a_release_finds_its_page(monkeypatch):
-    note = Notification("1", "v2", "o/r", unread=False, subject_type="Release",
-                        api_url="https://api.github.com/repos/o/r/releases/5",
-                        url="https://github.com/o/r/releases")
-    f = _frame([note])
+def test_enter_on_a_security_alert_opens_the_repository_s_alerts_here():
+    note = Notification("1", "Alert", "o/r", unread=False,
+                        subject_type="RepositoryDependabotAlertsThread",
+                        url="https://github.com/o/r/security/dependabot")
+    f = _opening_frame(note)
+    Frame._open_notification(f, note)
+    assert f.opened == [("repo", "o/r", ghviewer.VIEW_SECURITY)]
+
+
+def test_enter_on_something_with_no_view_says_so_aloud(monkeypatch):
+    note = Notification("1", "Invite", "o/r", unread=False, subject_type="RepositoryInvitation",
+                        url="https://github.com/o/r/invitations")
+    f = _opening_frame(note)
     opened = []
     monkeypatch.setattr(ghviewer.webbrowser, "open", opened.append)
-    monkeypatch.setattr(ghviewer, "release_page", lambda u: "https://github.com/o/r/releases/tag/v2")
+    Frame._open_notification(f, note)
+    assert opened == [] and f.opened == []
+    assert f.announced[-1] == ghviewer.NO_VIEW_SAID
+
+
+def _sync_threads(monkeypatch):
     monkeypatch.setattr(ghviewer.wx, "CallAfter", lambda fn, *a: fn(*a))
 
     class Thread:
         def __init__(self, target, daemon=True): self.target = target
         def start(self): self.target()
     monkeypatch.setattr(ghviewer.threading, "Thread", Thread)
+
+
+RELEASE_NOTE = dict(id="1", title="v2", repo="o/r", unread=False, subject_type="Release",
+                    api_url="https://api.github.com/repos/o/r/releases/5",
+                    url="https://github.com/o/r/releases")
+
+
+def test_enter_on_a_release_opens_it_in_releases_here(monkeypatch):
+    note = Notification(**RELEASE_NOTE)
+    f = _opening_frame(note)
+    f._on_release_page = lambda n, url, b: Frame._on_release_page(f, n, url, b)
+    opened = []
+    monkeypatch.setattr(ghviewer.webbrowser, "open", opened.append)
+    monkeypatch.setattr(ghviewer, "release_page", lambda u: "https://github.com/o/r/releases/tag/v2")
+    _sync_threads(monkeypatch)
     Frame._open_notification(f, note)
-    assert opened == ["https://github.com/o/r/releases/tag/v2"]
+    assert opened == []
+    assert f.opened == [("repo", "o/r", ghviewer.VIEW_RELEASES), ("target", "release", "v2")]
+    assert f.announced[0] == "Opening v2…"
+
+
+def test_a_release_whose_page_github_won_t_give_opens_the_releases(monkeypatch):
+    note = Notification(**RELEASE_NOTE)
+    f = _opening_frame(note)
+    f._on_release_page = lambda n, url, b: Frame._on_release_page(f, n, url, b)
+    monkeypatch.setattr(ghviewer, "release_page", lambda u: "")
+    _sync_threads(monkeypatch)
+    Frame._open_notification(f, note)
+    assert f.opened == [("repo", "o/r", ghviewer.VIEW_RELEASES)]
+
+
+def test_a_release_page_that_arrives_after_you_moved_on_opens_nothing(monkeypatch):
+    note = Notification(**RELEASE_NOTE)
+    f = _opening_frame(note)
+    f._on_release_page = lambda n, url, b: Frame._on_release_page(f, n, url, b)
+    f._focused_item = lambda: Notification("2", "other", "o/r")
+    monkeypatch.setattr(ghviewer, "release_page", lambda u: "https://github.com/o/r/releases/tag/v2")
+    _sync_threads(monkeypatch)
+    Frame._open_notification(f, note)
+    assert f.opened == []
+
+
+def test_ctrl_o_on_a_release_opens_its_page_on_github(monkeypatch):
+    note = Notification(**RELEASE_NOTE)
+    f = _opening_frame(note)
+    f._on_release_page = lambda n, url, b: Frame._on_release_page(f, n, url, b)
+    opened = []
+    monkeypatch.setattr(ghviewer.webbrowser, "open", opened.append)
+    monkeypatch.setattr(ghviewer, "release_page", lambda u: "https://github.com/o/r/releases/tag/v2")
+    _sync_threads(monkeypatch)
+    Frame._open_notification(f, note, in_browser=True)
+    assert opened == ["https://github.com/o/r/releases/tag/v2"] and f.opened == []
+    assert f.announced[-1] == "Opened v2 on GitHub"
 
 
 def test_changes_go_through_a_patchable_function(monkeypatch):

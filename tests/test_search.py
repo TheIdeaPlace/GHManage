@@ -226,25 +226,30 @@ def test_enter_on_a_search_result_opens_it_in_its_repo():
     f._fetch_token = 4
     f._open_repo_from_list = lambda repo, it: f.events.append((repo, it.number))
     f._set_pending_target = lambda *a: Frame._set_pending_target(f, *a)
-    f._open_item_checked = lambda it, parent: Frame._open_item_checked(f, it, parent)
+    f._open_item_checked = lambda it, parent, *a: Frame._open_item_checked(f, it, parent, *a)
     f._fork_parent = {"nvaccess/nvda": None}   # known not to be a fork
     Frame._open_item_here(f, item)
     assert f.events == [("nvaccess/nvda", 9)]
     assert f._pending_target == (4, ghviewer.VIEW_ISSUES, "item", "9")
 
 
-def test_an_item_in_a_fork_opens_on_github(monkeypatch):
+def test_an_item_in_a_fork_says_why_it_can_t_open_here(monkeypatch):
     # The Issues view of a fork shows its upstream's issues; #9 there is
-    # something else, so it must not be "found" there.
+    # something else, so it must not be "found" there. Nor does Enter open
+    # the browser: it says why, and that Ctrl+O does.
     opened = []
     monkeypatch.setattr(ghviewer.webbrowser, "open", opened.append)
     item = gh_data.parse_search_item(_issue(9, repo="me/fork"))
     f = _frame()
+    told = []
+    f._tell = lambda msg, *a, **k: told.append(msg)
     f._open_repo_from_list = lambda *a: pytest.fail("not in the fork's issues")
-    f._open_item_checked = lambda it, parent: Frame._open_item_checked(f, it, parent)
+    f._open_item_checked = lambda it, parent, *a: Frame._open_item_checked(f, it, parent, *a)
     f._fork_parent = {"me/fork": "up/r"}
     Frame._open_item_here(f, item)
-    assert opened == [item.url] and "a fork" in f.announced[-1]
+    assert opened == []
+    assert told == ["#9 is in me/fork, a fork; GHManage shows that repository's issues "
+                    "from up/r. Ctrl+O opens it on GitHub."]
 
 
 def test_my_work_keeps_what_loaded_when_one_search_fails(fake_gh):

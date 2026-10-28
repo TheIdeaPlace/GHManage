@@ -60,12 +60,14 @@ def _frame(**attrs):
         _comment_positions=[], _current_comment=-1,
         _announce=announced.append, announced=announced,
     )
+    frame._tell = lambda msg, *a, **k: announced.append(msg)
     frame._line_to_position = lambda line: Frame._line_to_position(frame, line)
     frame._open_repo_from_list = lambda repo, item: Frame._open_repo_from_list(frame, repo, item)
     frame._VIEW_LABELS = Frame._VIEW_LABELS
     frame._view_source = lambda: Frame._view_source(frame)
     frame._orgs, frame._org, frame._show_shared = [], "", False
-    for name in ("_view_label", "_view_entry", "_category_entries"):
+    for name in ("_view_label", "_view_entry", "_category_entries", "_open_address_here",
+                 "_open_favorite", "_go_back", "_back_label"):
         setattr(frame, name, getattr(Frame, name).__get__(frame))
     for k, v in attrs.items():
         setattr(frame, k, v)
@@ -1643,7 +1645,8 @@ def _subject_event(**kw):
 def _event_frame():
     f = _frame(view_mode=ghviewer.VIEW_ACTIVITY)
     f.opened, f.browsed = [], []
-    f._open_item_here = lambda item: f.opened.append(("item", item.repo, item.number))
+    f._open_item_here = lambda item, repo="", number=0: f.opened.append(
+        ("item", repo or item.repo, number or item.number))
     f._open_repo_from_list = lambda repo, item, view=ghviewer.VIEW_ISSUES, branch="": (
         f.opened.append(("repo", repo, view) + ((branch,) if branch else ())))
     f._set_pending_target = lambda view, kind, ref: f.opened.append(("target", kind, ref))
@@ -1668,13 +1671,14 @@ def test_enter_on_a_release_or_commit_event_opens_its_view_here(url, view, kind,
     assert f.opened == [("repo", "o/r", view), ("target", kind, ref)]
 
 
-def test_enter_on_an_event_with_no_view_here_opens_github(monkeypatch):
+def test_enter_on_an_event_with_no_view_here_says_so_and_never_opens_the_browser(monkeypatch):
     opened = []
     monkeypatch.setattr(ghviewer.webbrowser, "open", opened.append)
     f = _event_frame()
     url = "https://github.com/o/r/compare/aaa...bbb"
     Frame._open_event(f, _subject_event(event_type="PushEvent", action="pushed 2 commits", url=url))
-    assert f.opened == [] and opened == [url]
+    assert f.opened == [] and opened == []
+    assert f.announced[-1] == ghviewer.NO_VIEW_SAID
 
 
 def test_backspace_returns_from_the_view_an_event_opened_in():

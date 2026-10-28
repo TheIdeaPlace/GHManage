@@ -528,15 +528,20 @@ def test_selecting_an_alert_shows_its_details():
 
 
 @needs_wx
-def test_enter_opens_the_alert_on_github(monkeypatch):
+def test_ctrl_o_opens_the_alert_on_github(monkeypatch):
     opened = []
     monkeypatch.setattr(ghviewer.webbrowser, "open", opened.append)
     announced, told = [], []
-    frame = SimpleNamespace(_announce=announced.append, _tell=told.append)
-    Frame._open_alert(frame, gh_data._code_alert(CODE))
+    alert = gh_data._code_alert(CODE)
+    frame = SimpleNamespace(_announce=announced.append, _tell=told.append, repo="o/r",
+                            _pane_index=lambda w: 1, _current_focus=lambda: None)
+    frame._focused_item = lambda: alert
+    frame._web_target = lambda it: Frame._web_target(frame, it)
+    Frame.on_open_browser(frame, None)
     assert opened == ["https://github.com/o/r/security/code-scanning/1"]
-    assert announced == ["Opened Code scanning alert 1 in browser"]
-    Frame._open_alert(frame, SecurityAlert(ALERT_CODE, 3, "open"))
+    assert announced == ["Opened Code scanning alert 1 on GitHub"]
+    alert = SecurityAlert(ALERT_CODE, 3, "open")
+    Frame.on_open_browser(frame, None)
     assert told == ["Code scanning alert 3 has no page to open."]
 
 

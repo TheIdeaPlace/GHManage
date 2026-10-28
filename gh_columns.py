@@ -26,6 +26,7 @@ from gh_data import (
     RELEASE_COLUMNS, RELEASE_DEFAULT_COLUMNS,
     REPO_FILE_COLUMNS, REPO_FILE_DEFAULT_COLUMNS,
     REPO_COLUMNS, REPO_DEFAULT_COLUMNS,
+    SECURITY_COLUMNS, SECURITY_DEFAULT_COLUMNS,
     SEARCH_ITEM_COLUMNS, SEARCH_ITEM_DEFAULT_COLUMNS,
     TAG_COLUMNS, TAG_DEFAULT_COLUMNS,
     WORKFLOW_COLUMNS, WORKFLOW_DEFAULT_COLUMNS,
@@ -112,6 +113,11 @@ CATALOG: dict[str, ColumnDef] = {c.id: c for c in [
     _c("action", "Action", 100),
     _c("reason", "Reason", 100),
     _c("subtitle", "Subtitle", 250),
+    # Security alerts
+    _c("severity", "Severity", 80),
+    _c("package", "Package or rule", 200),
+    _c("summary", "Summary", 340),
+    _c("where", "Where", 240),
 ]}
 
 
@@ -171,6 +177,11 @@ SEARCH_ITEM_SET = _set("search_items", "Issue and pull request search",
 MY_WORK_SET = _set("my_work", "My Work", MY_WORK_COLUMNS, MY_WORK_DEFAULT_COLUMNS,
                    _SEARCH_WIDTHS)
 JOB_SET = _set("jobs", "Jobs", JOB_COLUMNS, JOB_DEFAULT_COLUMNS)
+# Dependabot, code scanning and secret scanning together; the Kind says
+# which, so Full mode needn't name it.
+SECURITY_SET = _set("security_alerts", "Security alerts", SECURITY_COLUMNS,
+                    SECURITY_DEFAULT_COLUMNS, {
+    "kind": {"width": 120, "kind": STATE}, "number": {"width": 60}})
 FAVORITES_SET = _set("favorites", "Favorites", FAVORITES_COLUMNS,
                      FAVORITES_DEFAULT_COLUMNS)
 
@@ -178,5 +189,5 @@ COLUMN_SETS: list[ColumnSet] = [
     ISSUE_SET, LABEL_SET, ORG_SET, REPO_SET, BRANCH_SET, COMMIT_SET, TAG_SET,
     ASSET_SET, RELEASE_SET, WORKFLOW_RUN_SET, ARTIFACT_SET, WORKFLOW_SET,
     PAGES_SET, PAGEFILE_SET, ACTIVITY_SET, NOTIFICATION_SET, SEARCH_ITEM_SET,
-    MY_WORK_SET, JOB_SET, FAVORITES_SET, CHANGED_FILE_SET, REPO_FILE_SET,
+    MY_WORK_SET, JOB_SET, FAVORITES_SET, CHANGED_FILE_SET, REPO_FILE_SET, SECURITY_SET,
 ]

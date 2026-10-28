@@ -112,7 +112,9 @@ VIEW_SAMPLES = {
 
 def test_every_view_has_a_noun():
     assert set(Frame._COPY_IDENT_NOUNS) == set(ghviewer.VIEW_COLUMNS)
-    assert set(VIEW_SAMPLES) | {ghviewer.VIEW_ACTIVITY, ghviewer.VIEW_NOTIFICATIONS} == set(ghviewer.VIEW_COLUMNS)
+    # These three mix kinds of thing, each with its own noun; the menu names them all.
+    mixed = {ghviewer.VIEW_ACTIVITY, ghviewer.VIEW_NOTIFICATIONS, ghviewer.VIEW_SECURITY}
+    assert set(VIEW_SAMPLES) | mixed == set(ghviewer.VIEW_COLUMNS)
 
 
 @pytest.mark.parametrize("view", sorted(VIEW_SAMPLES))

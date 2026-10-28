@@ -4681,7 +4681,7 @@ class GhViewerFrame(wx.Frame):
             wx.CallLater(150, self._if_still_current, token, self._goto_discussion, int(ref))
         elif kind == "commit":
             wx.CallLater(150, self._if_still_current, token, self._goto_commit, ref)
-        elif kind in ("release", "run", "discussion", "discussion_title"):
+        elif kind in ("release", "run", "discussion", "discussion_title", "milestone"):
             # (what it is, the newest of its kind, its kind)
             what, newest, plural = {
                 "release": (f"Release {ref}", "newest releases", "releases"),
@@ -4690,6 +4690,7 @@ class GhViewerFrame(wx.Frame):
                                "discussions"),
                 "discussion_title": (f"The discussion “{ref}”",
                                      "most recently active discussions", "discussions"),
+                "milestone": (f"Milestone {ref}", "milestones listed", "milestones"),
             }[kind]
             if found is not None:
                 said = f"{what} is hidden by the quick filter. Escape clears it."
@@ -4879,7 +4880,8 @@ class GhViewerFrame(wx.Frame):
             wx.CallLater(100, self._focus_list, row)
 
     def _on_milestones_loaded(self, token: int, milestones: list, state: str) -> None:
-        """Milestones: GitHub's order, nearest due date first."""
+        """Milestones: GitHub's order, nearest due date first, then those
+        without one."""
         if not self._fetch_is_current(token):
             return  # the user has moved on; these belong to a view they left
         self.git_items = milestones
@@ -7770,8 +7772,8 @@ class GhViewerFrame(wx.Frame):
             return
         if self.view_mode == VIEW_MILESTONES:
             self._update_menu_checks()
-            self._tell("Milestones are listed nearest due date first, "
-                       "so they aren't sorted.")
+            self._tell("Milestones are listed in GitHub's order, nearest due date "
+                       "first, so they aren't sorted.")
             return
         self.sort_order = self._sort_menu_items.get(event.GetId(), SORT_ORDERS[0])
         self._update_menu_checks()

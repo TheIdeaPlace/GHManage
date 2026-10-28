@@ -50,7 +50,4 @@ def milestone_details(m: Milestone) -> str:
 def status_message(repo: str, milestones: list[Milestone], state: str) -> str:
     which = {"open": "open ", "closed": "closed "}.get(state, "")
     n = len(milestones)
-    message = f"{repo} — {n} {which}milestone{'' if n == 1 else 's'}"
-    if n > 1:
-        message += ", nearest due date first"
-    return message + "."
+    return f"{repo} — {n} {which}milestone{'' if n == 1 else 's'}."

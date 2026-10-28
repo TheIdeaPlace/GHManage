@@ -62,6 +62,7 @@ from gh_data import (
     fetch_security_alerts,
     Discussion,
     add_discussion_comment,
+    fetch_discussion,
     fetch_discussion_comments,
     fetch_discussions,
     ALL_BRANCHES,
@@ -4641,6 +4642,8 @@ class GhViewerFrame(wx.Frame):
         # one on screen when they run.
         if kind == "item":
             wx.CallLater(150, self._if_still_current, token, self._goto_issue, int(ref))
+        elif kind == "discussion" and found is None:
+            wx.CallLater(150, self._if_still_current, token, self._goto_discussion, int(ref))
         elif kind == "commit":
             wx.CallLater(150, self._if_still_current, token, self._goto_commit, ref)
         elif kind in ("release", "run", "discussion", "discussion_title"):
@@ -4659,7 +4662,13 @@ class GhViewerFrame(wx.Frame):
                 said = f"{what} isn't among the {len(items)} {newest}."
             else:
                 said = f"{what} wasn't found: there are no {plural} to show."
-            wx.CallLater(150, self._announce, said)
+            if kind == "discussion_title":
+                # Enter was pressed to land on it: say aloud that it didn't.
+                if getattr(self, "state_filter", "all") != "all":
+                    said += " A closed one shows with View, State, All."
+                wx.CallLater(150, self._tell, said)
+            else:
+                wx.CallLater(150, self._announce, said)
         return 0
 
     def _if_still_current(self, token: int, fn, *args) -> None:
@@ -4679,6 +4688,43 @@ class GhViewerFrame(wx.Frame):
         if isinstance(item, Discussion):
             return f"Opened discussion #{item.number} — {item.title}"
         return "Opened"
+
+    def _goto_discussion(self, number: int) -> None:
+        """Show a discussion that isn't in the list (closed, or not among the
+        most recently active): fetched, and put at the top."""
+        if self.view_mode != VIEW_DISCUSSIONS or not self.repo:
+            return
+        self._announce(f"Discussion #{number} isn't in this list, fetching…")
+        repo, token = self.repo, self._fetch_token
+
+        def worker() -> None:
+            try:
+                found = fetch_discussion(repo, number)
+            except GhError as exc:
+                wx.CallAfter(self._on_discussion_fetched, None, repo, token, str(exc), number)
+                return
+            wx.CallAfter(self._on_discussion_fetched, found, repo, token, "", number)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_discussion_fetched(self, found, repo: str, token: int, err: str,
+                               number: int) -> None:
+        if (self.view_mode != VIEW_DISCUSSIONS or self.repo != repo
+                or token != self._fetch_token):
+            return  # moved on, or the list was read again since
+        if found is None:
+            self._tell(f"Couldn't open discussion #{number}: {err}")
+            return
+        self.filter_text = ""
+        self.git_items = [found] + [d for d in self.git_items
+                                    if getattr(d, "number", None) != found.number]
+        self._populate_filtered_list(self.git_items, use_favorite_prefix=True)
+        self._focus_list(0)
+        where = "closed, so" if found.closed else "not among the most recently active, so"
+        said = (f"Opened discussion #{found.number} — {found.title}. It is {where} "
+                "it is shown first.")
+        self._announce(said)
+        announce.announce(said, announce.STATUS)
 
     def _goto_commit(self, sha: str) -> None:
         """Show a commit that isn't in the list: fetched, and put at the top."""
@@ -4782,8 +4828,12 @@ class GhViewerFrame(wx.Frame):
         if not items:
             self.details_text.SetValue(discussionview.empty_text(result, self.repo, state))
             announce.announce(message, announce.STATUS)
-            # A notification or event about a discussion was on its way here.
-            self._take_pending_row(items, token)
+            if result.enabled:
+                # A notification or event about a discussion was on its way
+                # here: a closed one is still fetched by its number.
+                self._take_pending_row(items, token)
+            else:
+                self._pending_target = None  # turned off says it all
             return
         row = self._take_pending_row(items, token)
         if filtered:
@@ -4828,6 +4878,7 @@ class GhViewerFrame(wx.Frame):
         """Read a discussion's comments once the selection has rested on it,
         so arrowing down the list doesn't read every discussion passed."""
         repo = self.repo
+        version = item.comments_version
 
         def worker() -> None:
             try:
@@ -4835,7 +4886,7 @@ class GhViewerFrame(wx.Frame):
                 err = ""
             except GhError as exc:
                 comments, cut, err = None, False, str(exc)
-            wx.CallAfter(self._on_discussion_comments, gen, item, comments, cut, err)
+            wx.CallAfter(self._on_discussion_comments, gen, item, comments, cut, err, version)
 
         def start() -> None:
             if gen == self._detail_gen:
@@ -4844,17 +4895,27 @@ class GhViewerFrame(wx.Frame):
         wx.CallLater(250, start)
 
     def _on_discussion_comments(self, gen: int, item: Discussion, comments, cut: bool,
-                                err: str) -> None:
+                                err: str, version: int = 0) -> None:
+        if version != item.comments_version:
+            return  # read again since (after M posted); that reading is newer
         if comments is not None:
             item.comments, item.comments_cut = comments, cut
         if not self._shows(VIEW_DISCUSSIONS, item, gen):
             return
+        reading = self.FindFocus() is self.details_text
         if comments is None:
+            caret = self.details_text.GetInsertionPoint()
             text = self.details_text.GetValue()
-            self.details_text.SetValue(
-                text.rsplit("\n", 1)[0] + f"\nCouldn't read the comments: {err}")
-            return
-        self._render_discussion(item, keep_place=self.FindFocus() is self.details_text)
+            said = f"Couldn't read the comments: {err}"
+            self.details_text.SetValue(text.rsplit("\n", 1)[0] + "\n" + said)
+            self.details_text.SetInsertionPoint(caret)
+        else:
+            self._render_discussion(item, keep_place=reading)
+            n = len(comments)
+            said = f"{n} comment{'' if n == 1 else 's'} read." if n else ""
+        if reading and said:
+            # A focused text box's new value isn't read: say it arrived.
+            announce.announce(said, announce.STATUS)
 
     def _comment_on_discussion(self) -> None:
         """M, or Actions > Add Comment, in Discussions: a comment on the
@@ -4887,6 +4948,9 @@ class GhViewerFrame(wx.Frame):
         self._discussion_comment_busy = True
         self._announce(f"Adding a comment to discussion #{item.number}…")
         repo = self.repo
+        # Any read of the comments still on its way is older than the one
+        # after this post.
+        item.comments_version += 1
 
         def worker() -> None:
             # Any failure, not only gh's, comes back to clear the busy flag.
@@ -4916,16 +4980,21 @@ class GhViewerFrame(wx.Frame):
         msg = f"Comment added to discussion #{item.number}."
         if comments is None:
             item.comment_count += 1
+            # What was read is out of date: read it again when next shown.
+            item.comments = None
             msg += f" Couldn't read the comments again: {err}"
         else:
             item.comments, item.comments_cut = comments, cut
-            item.comment_count = max(item.comment_count + 1, len(comments))
+            item.comment_count = (max(item.comment_count + 1, len(comments)) if cut
+                                  else len(comments))
         if self.view_mode == VIEW_DISCUSSIONS:
             row = self._row_of(item)
             if row >= 0:
                 self._redraw_row(row, item)
             if self._focused_item() is item:
                 self._render_discussion(item, keep_place=True)
+                if item.comments is None:
+                    self._fetch_discussion_comments_later(item, self._detail_gen)
         self._tell(msg)
 
     def _show_security_details(self, idx: int) -> None:
@@ -6153,7 +6222,8 @@ class GhViewerFrame(wx.Frame):
             return
         if (key == ord("M") and not event.HasAnyModifiers()
                 and self.view_mode == VIEW_DISCUSSIONS):
-            # Here so it works from the details panel, where "Press M" is read.
+            # Here so it works from the details panel too, where the
+            # discussion being commented on is read.
             self._comment_on_discussion()
             return
         if self.view_mode == VIEW_ISSUES and not event.HasAnyModifiers():

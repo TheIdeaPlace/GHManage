@@ -104,7 +104,8 @@ def discussion_details(d: Discussion) -> tuple[str, list[tuple[int, int, str]]]:
     with_replies = f", with {_plural(replies, 'reply', 'replies')}" if replies else ""
     lines.append(f"Comments ({len(d.comments)}{with_replies}):")
     lines.append(RULE)
-    total = len(d.comments)
+    # Cut short, the count is GitHub's, not the number read.
+    total = max(len(d.comments), d.comment_count) if d.comments_cut else len(d.comments)
     for i, c in enumerate(d.comments, 1):
         lines.append("")
         start = len(lines)

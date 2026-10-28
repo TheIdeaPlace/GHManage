@@ -105,6 +105,11 @@ UI thread via `wx.CallAfter`. Never touch wx widgets from a worker thread.
   title (pending kind `discussion_title`; GitHub often gives discussions no subject URL);
   Activity and Open Address reach it through `parse_github_url` kind "discussion" in
   `ADDRESS_VIEWS`/`PENDING_KINDS`.
+  One not in the list (closed, or older) is fetched by number (`fetch_discussion`,
+  `_goto_discussion`) and put first, like `_goto_commit`. `Discussion.comments_version`
+  stops a comment read begun before M posted from replacing the read after it. A field
+  GitHub refuses in a partial reply (`discussions: null` with `errors`) raises, never
+  reads as an empty list.
 - `fetch_tags(repo, limit)` / `fetch_releases(repo, limit)` / `fetch_workflow_runs(repo, limit)`.
 - `fetch_release_assets(repo, release_id, release_tag, limit)` — a release's files with their
   download counts. The releases endpoint already returns assets inline, so the Releases list

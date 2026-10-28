@@ -4508,6 +4508,9 @@ class Discussion:
     # Read when it is selected: None until then.
     comments: Optional[list[DiscussionComment]] = None
     comments_cut: bool = False  # more comments than were read
+    # Bumped by each newer reading of the comments (after M posts), so an
+    # older read still on its way can't put back a list without the new one.
+    comments_version: int = field(default=0, compare=False)
 
     @property
     def answered_display(self) -> str:
@@ -4518,7 +4521,7 @@ class Discussion:
     @property
     def state_display(self) -> str:
         if self.closed:
-            return "Closed"
+            return "Closed, locked" if self.locked else "Closed"
         return "Locked" if self.locked else "Open"
 
     def to_row(self, columns: list[str]) -> dict[str, str]:
@@ -4602,6 +4605,13 @@ def _parse_discussion(node: dict, repo: str) -> Discussion:
     )
 
 
+def _graphql_error(reply: dict, fallback: str) -> GhError:
+    """GhError with GitHub's first error message, else ``fallback``."""
+    errors = reply.get("errors") or []
+    message = errors[0].get("message", "") if errors and isinstance(errors[0], dict) else ""
+    return GhError(message or fallback)
+
+
 def _discussion_states(state: str) -> list[str] | None:
     """View > State as GraphQL's DiscussionState list; None for all."""
     return {"open": ["OPEN"], "closed": ["CLOSED"]}.get(state)
@@ -4622,10 +4632,15 @@ def fetch_discussions(repo: str, state: str = "open", limit: int = 100) -> Discu
         variables = {"owner": owner, "name": name,
                      "first": min(_DISCUSSION_PAGE, limit - len(found)),
                      "after": after, "states": _discussion_states(state)}
-        node = _graphql_repository(_graphql(_DISCUSSIONS_QUERY, variables))
+        reply = _graphql(_DISCUSSIONS_QUERY, variables)
+        node = _graphql_repository(reply)
         if not node.get("hasDiscussionsEnabled"):
             return Discussions(items=[], enabled=False)
-        conn = node.get("discussions") if isinstance(node.get("discussions"), dict) else {}
+        conn = node.get("discussions")
+        if not isinstance(conn, dict):
+            # Partial data: the repository came back but its discussions
+            # didn't (a token without Discussions access, a timeout).
+            raise _graphql_error(reply, f"GitHub didn't list {repo}'s discussions")
         total = conn.get("totalCount") or 0
         for raw in conn.get("nodes") or []:
             if isinstance(raw, dict):
@@ -4684,11 +4699,14 @@ def fetch_discussion_comments(repo: str, number: int) -> tuple[list[DiscussionCo
     for _ in range(DISCUSSION_COMMENT_PAGES):
         variables = {"owner": owner, "name": name, "number": number, "after": after,
                      "replies": DISCUSSION_REPLIES}
-        node = _graphql_repository(_graphql(_DISCUSSION_COMMENTS_QUERY, variables))
+        reply = _graphql(_DISCUSSION_COMMENTS_QUERY, variables)
+        node = _graphql_repository(reply)
         discussion = node.get("discussion")
         if not isinstance(discussion, dict):
-            raise GhError(f"Discussion #{number} wasn't found in {repo}")
-        conn = discussion.get("comments") if isinstance(discussion.get("comments"), dict) else {}
+            raise _graphql_error(reply, f"Discussion #{number} wasn't found in {repo}")
+        conn = discussion.get("comments")
+        if not isinstance(conn, dict):
+            raise _graphql_error(reply, f"GitHub didn't give discussion #{number}'s comments")
         comments.extend(_parse_discussion_comment(c) for c in conn.get("nodes") or []
                         if isinstance(c, dict))
         page = conn.get("pageInfo") if isinstance(conn.get("pageInfo"), dict) else {}
@@ -4696,6 +4714,25 @@ def fetch_discussion_comments(repo: str, number: int) -> tuple[list[DiscussionCo
         if not page.get("hasNextPage") or not after:
             return comments, False
     return comments, True
+
+
+_DISCUSSION_QUERY = """
+query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    discussion(number: $number) { %s }
+  }
+}""" % _DISCUSSION_FIELDS
+
+
+def fetch_discussion(repo: str, number: int) -> Discussion:
+    """One discussion by number, for one that isn't in the list (closed, or
+    not among the most recently active)."""
+    owner, _, name = repo.partition("/")
+    reply = _graphql(_DISCUSSION_QUERY, {"owner": owner, "name": name, "number": number})
+    node = _graphql_repository(reply).get("discussion")
+    if not isinstance(node, dict):
+        raise _graphql_error(reply, f"Discussion #{number} wasn't found in {repo}")
+    return _parse_discussion(node, repo)
 
 
 _ADD_DISCUSSION_COMMENT = """
@@ -4714,8 +4751,6 @@ def add_discussion_comment(discussion: Discussion, body: str) -> str:
     data = reply.get("data") if isinstance(reply.get("data"), dict) else {}
     added = data.get("addDiscussionComment")
     if not isinstance(added, dict):
-        errors = reply.get("errors") or []
-        message = errors[0].get("message", "") if errors and isinstance(errors[0], dict) else ""
-        raise GhError(message or "GitHub didn't take the comment")
+        raise _graphql_error(reply, "GitHub didn't take the comment")
     comment = added.get("comment") if isinstance(added.get("comment"), dict) else {}
     return comment.get("url") or ""

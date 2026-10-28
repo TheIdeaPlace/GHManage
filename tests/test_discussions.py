@@ -255,7 +255,8 @@ def test_an_answered_comment_and_a_cut_list():
                     comments_cut=True)
     text, _ = discussionview.discussion_details(d)
     assert "Answered: Yes by bob in comment 1" in text
-    assert "1 of 1 — a (), the answer:" in text
+    # Cut short, "of" is GitHub's count of comments, not the number read.
+    assert "Comment 1 of 2 — a (), the answer:" in text
     assert text.endswith("More comments on GitHub: press Enter to open the discussion there.")
 
 
@@ -615,21 +616,121 @@ def test_enter_on_a_discussion_notification_comes_here_ctrl_o_goes_to_github(mon
 @needs_wx
 def test_landing_on_a_discussion_by_number_or_title(monkeypatch):
     later = []
-    monkeypatch.setattr(ghviewer.wx, "CallLater", lambda ms, fn, *a: later.append(a))
+    monkeypatch.setattr(ghviewer.wx, "CallLater", lambda ms, fn, *a: later.append((fn, a)))
     items = [_discussion(number=3, title="A"), _discussion(number=9, title="B")]
     v = ghviewer.VIEW_DISCUSSIONS
+    told, fetch = [], []
 
     def frame(kind, ref):
         return SimpleNamespace(_pending_target=(1, v, kind, ref), view_mode=v,
                                _row_of=lambda it: items.index(it),
                                _describe_landing=Frame._describe_landing,
-                               _announce=lambda m: None)
+                               _announce=lambda m: None, _tell=told.append,
+                               _if_still_current="check", _goto_discussion=fetch.append,
+                               state_filter="open")
     assert Frame._take_pending_row(frame("discussion", "9"), items, 1) == 1
-    assert later[-1] == ("Opened discussion #9 — B",)
+    assert later[-1][1] == ("Opened discussion #9 — B",)
     assert Frame._take_pending_row(frame("discussion_title", "A"), items, 1) == 0
-    assert Frame._take_pending_row(frame("discussion", "44"), items, 1) == 0
-    assert later[-1] == ("Discussion #44 isn't among the 2 most recently active "
-                         "discussions.",)
-    Frame._take_pending_row(frame("discussion_title", "Gone"), [], 1)
-    assert later[-1] == ("The discussion “Gone” wasn't found: there are no discussions "
-                         "to show.",)
+    # Not in the list (closed, or older): fetched by its number.
+    f = frame("discussion", "44")
+    assert Frame._take_pending_row(f, items, 1) == 0
+    assert later[-1] == ("check", (1, f._goto_discussion, 44))
+    # By title it can't be fetched: said aloud.
+    f = frame("discussion_title", "Gone")
+    Frame._take_pending_row(f, [], 1)
+    fn, args = later[-1]
+    assert fn == told.append and args == (
+        "The discussion “Gone” wasn't found: there are no discussions to show. "
+        "A closed one shows with View, State, All.",)
+
+
+@needs_wx
+def test_a_discussion_not_in_the_list_is_fetched_and_put_first(monkeypatch):
+    spoken = []
+    monkeypatch.setattr(announce, "announce", lambda text, cat=None, force=False:
+                        spoken.append(text))
+    old = _discussion(number=3, title="A")
+    closed = _discussion(number=44, title="Shut", closed=True)
+    focused = []
+    frame = _frame(git_items=[old], _fetch_token=5, filter_text="x",
+                   _focus_list=focused.append)
+    Frame._on_discussion_fetched(frame, closed, "o/r", 4, "", 44)  # a later load since
+    assert frame.git_items == [old]
+    Frame._on_discussion_fetched(frame, closed, "o/r", 5, "", 44)
+    assert frame.git_items == [closed, old] and focused == [0] and frame.filter_text == ""
+    assert spoken[-1] == ("Opened discussion #44 — Shut. It is closed, so it is shown first.")
+    Frame._on_discussion_fetched(frame, None, "o/r", 5, "Not found", 45)
+    assert frame.told[-1] == "Couldn't open discussion #45: Not found"
+
+
+def test_one_discussion_by_number(graphql):
+    graphql.replies = [{"data": {"repository": {"discussion": _node(44, closed=True)}}}]
+    d = gh_data.fetch_discussion("o/r", 44)
+    assert d.number == 44 and d.closed and d.repo == "o/r"
+    assert graphql.calls[0][1] == {"owner": "o", "name": "r", "number": 44}
+    graphql.replies = [{"data": {"repository": {"discussion": None}}}]
+    with pytest.raises(GhError, match="#44 wasn't found"):
+        gh_data.fetch_discussion("o/r", 44)
+
+
+def test_a_field_github_refused_is_an_error_not_an_empty_list(graphql):
+    err = [{"message": "Resource not accessible by personal access token"}]
+    graphql.replies = [{"data": {"repository": {"hasDiscussionsEnabled": True,
+                                                "discussions": None}}, "errors": err}]
+    with pytest.raises(GhError, match="not accessible"):
+        gh_data.fetch_discussions("o/r")
+    graphql.replies = [{"data": {"repository": {"discussion": {"comments": None}}},
+                        "errors": err}]
+    with pytest.raises(GhError, match="not accessible"):
+        gh_data.fetch_discussion_comments("o/r", 7)
+
+
+def test_closed_and_locked():
+    assert _discussion(closed=True, locked=True).state_display == "Closed, locked"
+
+
+@needs_wx
+def test_an_older_read_of_the_comments_cannot_undo_a_newer_one():
+    d = _discussion(comments=[DiscussionComment("me", "new")])
+    d.comments_version = 1  # M posted and read them again
+    frame = _frame()
+    frame._shows = lambda view, item, gen: True
+    Frame._on_discussion_comments(frame, 1, d, [], False, "", 0)  # began before the post
+    assert d.comments == [DiscussionComment("me", "new")]
+
+
+@needs_wx
+def test_comments_arriving_while_reading_are_said(monkeypatch):
+    spoken = []
+    monkeypatch.setattr(announce, "announce", lambda text, cat=None, force=False:
+                        spoken.append(text))
+    d = _discussion()
+    frame = _frame()
+    frame._shows = lambda view, item, gen: True
+    frame.FindFocus = lambda: frame.details_text
+    Frame._render_discussion(frame, d)
+    frame.details_text.point = 5
+    Frame._on_discussion_comments(frame, 1, d, None, False, "HTTP 502")
+    assert spoken == ["Couldn't read the comments: HTTP 502"]
+    assert frame.details_text.point == 5  # the caret stays
+    Frame._on_discussion_comments(frame, 1, d, [DiscussionComment("a", "x")], False, "")
+    assert spoken[-1] == "1 comment read."
+
+
+@needs_wx
+def test_posted_but_not_read_again_reads_them_when_shown():
+    d = _discussion(comments=[DiscussionComment("a", "x")])
+    fetch = []
+    frame = _frame(_focused_item=lambda: d, _row_of=lambda item: -1,
+                   _fetch_discussion_comments_later=lambda item, gen: fetch.append(item),
+                   _discussion_comment_busy=True)
+    Frame._on_discussion_comment_done(frame, d, True, None, False, "timeout")
+    assert d.comments is None and d.comment_count == 3 and fetch == [d]
+    assert frame.told == ["Comment added to discussion #7. Couldn't read the comments "
+                          "again: timeout"]
+
+
+def test_m_is_in_the_shortcuts_for_discussions():
+    import commands
+    keys = [(c.keys, c.where) for c in commands.LIST_KEYS]
+    assert ("M", commands.DISCUSSIONS) in keys

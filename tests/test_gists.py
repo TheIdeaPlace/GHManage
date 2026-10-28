@@ -257,7 +257,7 @@ def test_files_arriving_while_you_read_are_said(monkeypatch):
     f._focused = g
     f.FindFocus = lambda: f.details_text
     Frame._on_gist_fetched(f, 1, g, _fetched(), "")
-    assert spoken == ["2 files read. Alt+N moves to the first."]
+    assert spoken == ["Files here: 2. Alt+N moves to the first."]
 
 
 def test_files_that_could_not_be_read_say_why(monkeypatch):
@@ -291,3 +291,47 @@ def test_the_gist_in_front_is_no_repository():
     f._focused_item = lambda: Gist("abc")
     assert Frame._repo_in_front(SimpleNamespace(
         _repo_in_front_from=lambda: Frame._repo_in_front_from(f))) is None
+
+
+def test_a_failed_read_is_on_the_status_bar_while_you_are_in_the_list():
+    g = Gist("abc", "Notes", files=[GistFile("a.md")])
+    f = _frame(git_items=[g])
+    f._focused = g
+    Frame._render_gist(f, g)
+    Frame._on_gist_fetched(f, 1, g, None, "HTTP 502")
+    assert f.events[-1] == "Couldn't get the files of Notes: HTTP 502"
+
+
+def _more_frame(n, limit):
+    f = _frame(current_limit=limit, page_size=100, git_items=[Gist(str(i)) for i in range(n)],
+               _activity_more=False, _notif_more=False, _pending_focus_row=0)
+    f._shown = list(f.git_items)
+    f._load_items = lambda: f.events.append(("load", f.current_limit, f._pending_focus_row))
+    return f
+
+
+def test_view_more_loads_the_next_page_and_lands_on_it():
+    f = _more_frame(100, 100)
+    Frame.on_view_more(f, None)
+    assert f.events == [("load", 200, 100)]
+
+
+def test_view_more_with_every_gist_listed_says_so():
+    f = _more_frame(3, 100)
+    Frame.on_view_more(f, None)
+    assert f.events == ["That is all your gists."]
+
+
+def test_a_gist_too_long_to_show_whole_names_the_rest(monkeypatch):
+    monkeypatch.setattr(gistview, "MAX_GIST_CHARS", 10)
+    g = _loaded(GistFile("a", content="12345678\n"), GistFile("b", content="123456\n"))
+    text, stops = gistview.gist_text(g)
+    lines = text.split("\n")
+    assert len(stops) == 2 and lines[stops[0] + 1] == "12345678"
+    assert lines[stops[1] + 1].startswith("Not shown: this gist is too long")
+
+
+def test_the_context_menu_does_not_offer_to_favorite_a_gist():
+    import inspect
+    src = inspect.getsource(Frame._context_entries)
+    assert "Gist, InsightRow" in src

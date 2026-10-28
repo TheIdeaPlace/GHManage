@@ -3864,6 +3864,8 @@ class GhViewerFrame(wx.Frame):
             self._set_view_status("Loading your organizations…")
         elif self.view_mode in REPO_LIST_VIEWS:
             self._set_view_status(f"Loading {self._view_label(self.view_mode, lower=True)}…")
+        elif self.view_mode == VIEW_GISTS:
+            self._set_view_status("Loading your gists…")
         else:
             self._set_view_status(f"Loading {view_label} for {self.repo}…")
         self.list_ctrl.DeleteAllItems()
@@ -5067,6 +5069,7 @@ class GhViewerFrame(wx.Frame):
             said = f"Couldn't get the files of {item.title}: {err}"
             text = self.details_text.GetValue()
             self.details_text.SetValue(text.rsplit("\n", 1)[0] + "\n" + said)
+            self._announce(said)  # on the status bar, not spoken over the list
             if reading:
                 announce.announce(said, announce.STATUS)
             return
@@ -5076,8 +5079,8 @@ class GhViewerFrame(wx.Frame):
             # A focused text box's new value isn't read: say it arrived.
             self.details_text.SetInsertionPoint(min(caret, self.details_text.GetLastPosition()))
             n = len(item.files)
-            announce.announce(f"{n} file{'' if n == 1 else 's'} read. "
-                              "Alt+N moves to the first.", announce.STATUS)
+            announce.announce(f"Files here: {n}. Alt+N moves to "
+                              f"{'it' if n == 1 else 'the first'}.", announce.STATUS)
 
     def _on_insights_loaded(self, token: int, insights) -> None:
         """Insights: a row a figure, Section first; what is missing (no push
@@ -6030,7 +6033,7 @@ class GhViewerFrame(wx.Frame):
         if url:
             webbrowser.open(url)
             label = getattr(item, "number", None) or getattr(item, "name", "") or getattr(item, "short_sha", "")
-            self._announce(f"Opened {label} in browser")
+            self._announce(f"Opened {label or getattr(item, 'title', '')} in browser")
         else:
             self._announce("No URL for this item")
 
@@ -6126,7 +6129,7 @@ class GhViewerFrame(wx.Frame):
         # nothing it could favorite.
         if self.view_mode == VIEW_FAVORITES:
             fav_label = "Remove from Favorites (F)"
-        elif (item is None or isinstance(item, (OrgEntry, ChangedFile))
+        elif (item is None or isinstance(item, (OrgEntry, ChangedFile, Gist, InsightRow))
               or not getattr(item, "url", "")):
             fav_label = None
         elif self._favorite_prefix(item):
@@ -7096,6 +7099,11 @@ class GhViewerFrame(wx.Frame):
                 self._announce(f"That is all {whose}{label}.")
                 return
             self._pending_focus_row = len(self._shown)
+        elif self.view_mode == VIEW_GISTS:
+            if len(self.git_items) < self.current_limit:
+                self._announce("That is all your gists.")
+                return
+            self._pending_focus_row = len(self._shown)
         elif not self.repo:
             return
         elif (self.view_mode == VIEW_COMMITS and self.commit_branch == ALL_BRANCHES
@@ -7129,7 +7137,7 @@ class GhViewerFrame(wx.Frame):
                 self._announce(f"Opened {item.title} in browser")
             else:
                 label = getattr(item, "number", None) or getattr(item, "name", "") or getattr(item, "short_sha", "")
-                self._announce(f"Opened {label} in browser")
+                self._announce(f"Opened {label or getattr(item, 'title', '')} in browser")
         else:
             self._announce("No URL for this item")
 

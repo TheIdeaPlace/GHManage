@@ -293,7 +293,7 @@ It is in this order:
 
 The first eight are always there, so the same keystrokes from the top of the list always reach them. The first four are where they were before Notifications, My Work and My Organizations arrived. When the list first loads, the status bar says how many repositories it found: "Loaded 42 repositories. Select one to view issues and PRs."
 
-The notification, starred, watched and gist counts are asked for once the list is up, so they appear a moment after the names, without moving you from the entry you are on. If GitHub can't be asked, the entry shows just its name rather than a number that might be wrong. Opening Starred or Watched, or pressing `R` in it, brings its count up to date, so a repository you starred on the web since GHManage started is counted then.
+The notification, starred, watched and gist counts are asked for once the list is up, so they appear a moment after the names, without moving you from the entry you are on. If GitHub can't be asked, the entry shows just its name rather than a number that might be wrong. Opening Starred, Watched or Gists, or pressing `R` in it, brings its count up to date, so a repository you starred on the web since GHManage started is counted then.
 
 Opening a repository shows its **Issues & PRs**. Use `Ctrl+2` through `Ctrl+0` to reach its other views.
 
@@ -1068,7 +1068,7 @@ These keep the repository you were in, so `Ctrl+1` takes you back to it.
 
 Each row shows the gist's description (or, without one, its first file's name, as GitHub names it), its files, whether it is Public or Secret, and when it was last updated; **View → Columns…** adds its comments and when it was created.
 
-Selecting a gist shows it in the details panel: its description, whether it is public or secret, how many files it has, when it was updated and created, its comments and address. A moment after the selection rests on it, its files' text follows, each file headed by its name, language and size, for example "File 2 of 3: notes.md — Markdown, 1.2 KB", then the file a line of the file to a line of the panel. `Alt+N` and `Alt+P` move from file to file. If you are already reading the panel when the files arrive, GHManage says how many were read.
+Selecting a gist shows it in the details panel: its description, whether it is public or secret, how many files it has, when it was updated and created, how many comments it has, and its address. A moment after the selection rests on it, its files' text follows, each file headed by its name, language and size, for example "File 2 of 3: notes.md — Markdown, 1.2 KB", then the file a line of the file to a line of the panel. `Alt+N` and `Alt+P` move from file to file. If you are already reading the panel when the files arrive, GHManage says how many there are. A gist too long to show in full (over about 2 MB of text) shows its first files and names the rest.
 
 GitHub sends up to a megabyte of each file. A larger one shows its start and says GitHub sent only the start of it; a very large one, or one that isn't text, says so instead of showing it; and a gist with more files than GitHub lists says that too. In each case `Ctrl+O` opens the gist on GitHub, with all of it.
 

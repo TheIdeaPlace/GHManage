@@ -11,6 +11,9 @@ import codeview
 from gh_data import Gist, GistFile, _local_time
 
 RULE = "─" * 60
+# Past this much text in all, the rest of a gist's files are named, not shown:
+# a text box of many megabytes stalls the window and the screen reader.
+MAX_GIST_CHARS = 2_000_000
 
 
 def _size(n: int) -> str:
@@ -62,10 +65,17 @@ def gist_text(g: Gist) -> tuple[str, list[int]]:
         lines.append("")
         lines.append("Getting the files' text…")
         return "\n".join(lines), positions
+    shown = 0
     for i, f in enumerate(g.files, 1):
         lines.append("")
         positions.append(len(lines))
         lines.append(file_heading(f, i, n))
+        size = len(f.content or "")
+        if shown and shown + size > MAX_GIST_CHARS:
+            lines.append("Not shown: this gist is too long to show in full here. "
+                         "Ctrl+O opens it on GitHub.")
+            continue
+        shown += size
         lines.extend(file_body(f))
     if g.files_truncated:
         lines.append("")

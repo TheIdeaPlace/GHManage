@@ -8583,9 +8583,11 @@ class GhViewerFrame(wx.Frame):
         self._current_comment = -1
 
     def _read_changes(self) -> None:
-        """Enter on a changed file: into its lines, from the top."""
-        self.details_text.SetFocus()
+        """Enter on a changed file, or Read README: into the details panel's
+        lines, from the top. The caret goes first, so the screen reader reads
+        line 1 as focus arrives, not the line the caret was on."""
         self.details_text.SetInsertionPoint(0)
+        self.details_text.SetFocus()
 
     def _back_from_files(self) -> None:
         """Backspace in Changed Files: the list it was opened from, as it
@@ -8909,6 +8911,8 @@ class GhViewerFrame(wx.Frame):
             self.details_text.Clear()
             return
         item = self.git_items[idx]
+        if getattr(self, "_readme_focus", None) is not item:
+            self._readme_focus = None  # moved off the README: stay in the list
         if self._code_blame is not None and self._code_blame is not item:
             self._code_blame = None
             self._update_actions_menu()  # Alt+N is "Next Heading" again
@@ -8966,14 +8970,21 @@ class GhViewerFrame(wx.Frame):
             self._keep_blob(item.sha, text)
         if not self._shows(VIEW_CODE, item, gen):
             return
+        # Read README waiting on this text: one go only.
+        readme = getattr(self, "_readme_focus", None) is item
+        self._readme_focus = None
         if text is None:
             self.details_text.SetValue(f"{item.path}: couldn't get the text. {err}")
+            if readme:
+                self._tell(f"Couldn't get the text of {item.path}: {err}")
             return
-        reading = self.FindFocus() is self.details_text
+        focus = self.FindFocus()
+        reading = focus is self.details_text
         self._render_code(item)
-        if getattr(self, "_readme_focus", None) is item:
-            self._readme_focus = None
-            self._read_from_top()
+        if readme and focus is self.list_ctrl:
+            # Still on the row Read README landed on: into the text. Not when
+            # focus went into the text already (read below) or to another pane.
+            self._read_changes()
         elif reading:
             # Enter went into the panel while it was on its way: the top,
             # and say it is here, as a focused text box's new value isn't read.
@@ -8985,15 +8996,9 @@ class GhViewerFrame(wx.Frame):
         """Read README has landed on ``item``: into its text, at the top,
         now if it is here, else when it arrives (``_on_blob_fetched``)."""
         if item.sha in self._blob_cache or codeview.too_big(item):
-            self._read_from_top()
+            self._read_changes()
         else:
             self._readme_focus = item
-
-    def _read_from_top(self) -> None:
-        """Focus in the details panel, on its first line, which the screen
-        reader reads as focus arrives."""
-        self.details_text.SetFocus()
-        self.details_text.SetInsertionPoint(0)
 
     def _read_readme(self) -> None:
         """Actions ▸ Read README (Ctrl+Shift+R): the README of the repository
@@ -9009,9 +9014,17 @@ class GhViewerFrame(wx.Frame):
         self._announce(f"Getting the README of {repo}…")
         if source == "row":
             self._open_repo_from_list(repo, self._focused_item(), VIEW_CODE)
-        else:
-            self._select_repo(repo, VIEW_CODE)
-            self._select_in_repo_list(repo)
+            return
+        # Already in Files of a repository opened from a list (Starred): keep
+        # the way back to it, which choosing the repository again would drop.
+        back = None
+        if (repo == self.repo and getattr(self, "view_mode", None) == VIEW_CODE
+                and getattr(self, "_return_view", None) == VIEW_CODE):
+            back = getattr(self, "_return_to", None)
+        self._select_repo(repo, VIEW_CODE)
+        if back:
+            self._return_to, self._return_view = back, VIEW_CODE
+        self._select_in_repo_list(repo)
 
     def _code_file(self, doing: str) -> RepoFile | None:
         """The file selected in Files, or None having said why not."""

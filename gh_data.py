@@ -2286,12 +2286,12 @@ def fetch_readme_path(repo: str) -> str | None:
     ``docs/README.rst``, ``.github/README.md``…), as GitHub picks it for the
     repository's page; None when it has none."""
     try:
-        info = _api_json([f"repos/{repo}/readme"], None)
+        # Only the path: the reply also carries the whole file, base64.
+        path = _api([f"repos/{repo}/readme", "-q", ".path"], None).strip()
     except GhError as exc:
         if _is_not_found(exc):
             return None
         raise
-    path = info.get("path") if isinstance(info, dict) else None
     return path or None
 
 

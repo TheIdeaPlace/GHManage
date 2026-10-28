@@ -226,7 +226,9 @@ UI thread via `wx.CallAfter`. Never touch wx widgets from a worker thread.
   of Files takes `_code_readme` (one load only; `_reset_code` doesn't clear it), asks
   `fetch_readme_path`, opens that folder and passes the path to `_on_code_loaded(readme=)`,
   which lands on it and, via `_read_readme_text`, puts focus in the details panel at the top:
-  at once when the text is cached, else when `_on_blob_fetched` draws it (`_readme_focus`).
+  at once when the text is cached, else when `_on_blob_fetched` draws it (`_readme_focus`,
+  honoured once, only while focus is still on the list; moving off the row clears it in
+  `_show_code_details`; a failed read is spoken).
   No README: the top, and the note says so.
 - Details that arrive later (a file's text, a history commit's patch) are fetched 250 ms after
   the row is selected, carry `_detail_gen` (bumped in every `_show_details`), and are drawn only

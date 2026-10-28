@@ -15,9 +15,10 @@ from gh_data import GhError, RepoFile
 
 
 def test_the_readme_is_where_github_says(fake_gh):
-    fake_gh.route("repos/o/r/readme", {"path": "docs/README.md", "sha": "s"})
+    fake_gh.route("repos/o/r/readme", "docs/README.md\n")
     assert gh_data.fetch_readme_path("o/r") == "docs/README.md"
-    assert fake_gh.calls == [["api", "repos/o/r/readme"]]
+    # Only the path, not the file's content that comes with it.
+    assert fake_gh.calls == [["api", "repos/o/r/readme", "-q", ".path"]]
 
 
 def test_a_repository_without_one(fake_gh):
@@ -132,7 +133,7 @@ def _arrive(f, monkeypatch, readme="docs/README.md", note=""):
     f._focus_list = lambda row: f.events.append(("focus", row))
     f._fetch_is_current = lambda token: True
     f._read_readme_text = lambda item: Frame._read_readme_text(f, item)
-    f._read_from_top = lambda: Frame._read_from_top(f)
+    f._read_changes = lambda: Frame._read_changes(f)
     Frame._on_code_loaded(f, 1, "main", "docs", ENTRIES, False, note, readme)
     later[0]()
 
@@ -146,7 +147,8 @@ def test_it_lands_on_the_readme_and_reads_it_when_the_text_arrives(monkeypatch):
     assert not [e for e in f.events if e[0] == "said"]
     f._shows = lambda view, item, gen: True
     f._keep_blob = lambda sha, text: f._blob_cache.__setitem__(sha, text)
-    f.FindFocus = lambda: None
+    f.list_ctrl = "list"
+    f.FindFocus = lambda: f.list_ctrl
     f._render_code = lambda item: f.details_text.SetValue("docs/README.md: 1 line.\n# Hi")
     Frame._on_blob_fetched(f, 0, README, "# Hi\n", "")
     assert f.details_text.focused and f.details_text.insertion == 0
@@ -239,3 +241,72 @@ def _load_frame():
     f._on_fetch_error = lambda t, m: f.told.append(m)
     f._on_items_error = lambda m: f.told.append(m)
     return f
+
+
+def _waiting(monkeypatch, focus="list"):
+    """Landed on the README; its text not here yet; focus on ``focus``."""
+    f = _frame()
+    _arrive(f, monkeypatch)
+    f._shows = lambda view, item, gen: True
+    f._keep_blob = lambda sha, text: f._blob_cache.__setitem__(sha, text)
+    f.list_ctrl = "list"
+    f.FindFocus = lambda: {"list": f.list_ctrl, "details": f.details_text}.get(focus, focus)
+    f._render_code = lambda item: f.details_text.SetValue("docs/README.md: 1 line.\n# Hi")
+    return f
+
+
+def test_moving_off_the_readme_before_its_text_comes_stays_in_the_list(monkeypatch):
+    f = _waiting(monkeypatch)
+    f._update_actions_menu = lambda: None
+    f.git_items = ENTRIES
+    Frame._show_code_details(f, 1)            # arrowed down to guide.md
+    assert f._readme_focus is None
+    Frame._on_blob_fetched(f, 0, README, "# Hi\n", "")   # back on it later
+    assert not f.details_text.focused
+
+
+def test_focus_gone_to_another_pane_is_left_there(monkeypatch):
+    f = _waiting(monkeypatch, focus="repo list")
+    Frame._on_blob_fetched(f, 0, README, "# Hi\n", "")
+    assert not f.details_text.focused and f._readme_focus is None
+
+
+def test_focus_already_in_the_text_hears_its_first_line(monkeypatch):
+    f = _waiting(monkeypatch, focus="details")
+    Frame._on_blob_fetched(f, 0, README, "# Hi\n", "")
+    assert f.details_text.insertion == 0
+    assert ("said", "docs/README.md: 1 line.", "status") in f.events
+
+
+def test_a_readme_that_could_not_be_read_says_why(monkeypatch):
+    f = _waiting(monkeypatch)
+    Frame._on_blob_fetched(f, 0, README, None, "HTTP 502")
+    assert f.told[-1] == "Couldn't get the text of docs/README.md: HTTP 502"
+    assert f._readme_focus is None and not f.details_text.focused
+
+
+def test_reading_it_again_in_files_keeps_the_way_back_to_starred():
+    f = _frame(CODE)
+    back = ("starred", [], False, None, 100)
+    f._return_to, f._return_view = back, CODE
+
+    def select(repo, view):
+        f._return_to = None  # as choosing a repository does
+        f.events.append(("open", repo, view))
+    f._select_repo = select
+    Frame._read_readme(f)
+    assert f._return_to == back and f._return_view == CODE
+
+
+def test_the_repository_is_selected_in_the_repository_list():
+    f = _frame(ghviewer.VIEW_ISSUES, pane=0)
+    Frame._read_readme(f)
+    assert f.events[-1] == ("listed", "o/listed")
+
+
+def test_choosing_the_repository_leaves_the_readme_wanted():
+    # _select_repo resets Files on the way; the load after it still lands.
+    f = _frame()
+    f._code_readme = "o/r"
+    Frame._reset_code(f)
+    assert f._code_readme == "o/r"

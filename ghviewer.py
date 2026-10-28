@@ -695,6 +695,16 @@ def open_in_default_app(path: str) -> bool:
     return True
 
 
+def opening_label(kind: str, ref: str) -> str:
+    """What an address opens, said while its list loads: "#14845",
+    "commit abc1234", "release v1.2", "run 42"."""
+    if kind == "item":
+        return f"#{ref}"
+    if kind == "commit":
+        return f"commit {ref[:7]}"
+    return f"{kind} {ref}"
+
+
 def repo_copy_values(name: str) -> CopyValues:
     """Copy values for a repository named in the repository list."""
     return CopyValues(f"https://github.com/{name}", name, name, "Repository Name", name)
@@ -3811,6 +3821,8 @@ class GhViewerFrame(wx.Frame):
         handlers ignore results that are no longer the current one.
         """
         self._fetch_token += 1
+        # A landing to be said belongs to the load that was just replaced.
+        self._speak_landing = False
         return self._fetch_token
 
     def _fetch_is_current(self, token: int) -> bool:
@@ -4726,6 +4738,7 @@ class GhViewerFrame(wx.Frame):
         self._pending_target = None
         target_token, view, kind, ref = target
         if target_token != token or view != self.view_mode:
+            self._speak_landing = False
             return 0
 
         def matches(it) -> bool:
@@ -4751,7 +4764,7 @@ class GhViewerFrame(wx.Frame):
         row = self._row_of(found) if found is not None else -1
         if row >= 0:
             if kind != "same":
-                wx.CallLater(150, self._announce, self._describe_landing(found))
+                wx.CallLater(150, self._say_landing, self._describe_landing(found))
             return row
         if kind == "same":
             return 0
@@ -4787,8 +4800,22 @@ class GhViewerFrame(wx.Frame):
                     said += " A closed one shows with View, State, All."
                 wx.CallLater(150, self._tell, said)
             else:
-                wx.CallLater(150, self._announce, said)
+                wx.CallLater(150, self._say_landing, said)
         return 0
+
+    def _say_landing(self, msg: str, final: bool = True) -> None:
+        """Where opening an address, or an item from Activity, Notifications
+        or search, ended up. Said when it came from one of those (which set
+        ``_speak_landing``): a big repository takes seconds to load, and
+        without it all you hear is a list. Queued behind the row focus lands
+        on. Anywhere else, the status bar, as before. ``final=False`` for a
+        "fetching…" on the way there."""
+        if not getattr(self, "_speak_landing", False):
+            self._announce(msg)
+            return
+        if final:
+            self._speak_landing = False
+        self._tell(msg, announce.STATUS)
 
     def _if_still_current(self, token: int, fn, *args) -> None:
         if self._fetch_is_current(token):
@@ -4852,7 +4879,8 @@ class GhViewerFrame(wx.Frame):
         if self.view_mode != VIEW_COMMITS or not self.repo:
             return
         where = "any branch" if self.commit_branch == ALL_BRANCHES else "this branch"
-        self._announce(f"Commit {sha[:7]} isn't among the newest on {where}, fetching…")
+        self._say_landing(f"Commit {sha[:7]} isn't among the newest on {where}, fetching…",
+                          final=False)
         repo, token = self.repo, self._fetch_token
 
         def worker() -> None:
@@ -4874,7 +4902,7 @@ class GhViewerFrame(wx.Frame):
         self.git_items = [commit] + [c for c in self.git_items if c.sha != commit.sha]
         self._populate_filtered_list(self.git_items, use_favorite_prefix=True)
         self._focus_list(0)
-        self._announce(
+        self._say_landing(
             f"Opened commit {commit.short_sha} — {_first_line(commit.message)}. "
             "It is not among the latest commits listed, so it is shown first."
         )
@@ -4896,7 +4924,11 @@ class GhViewerFrame(wx.Frame):
         if self.view_mode == VIEW_NOTIFICATIONS and self._notif_more is None:
             self._notif_more = False
         self._pending_target = None  # its load failed; don't let it fire later
+        said = getattr(self, "_speak_landing", False)
         self._on_items_error(msg)
+        if said:
+            # "Opening…" was said: so is why it didn't.
+            self._say_landing(f"Error: {msg}")
 
     # ── Details panel ──────────────────────────────────────────────────
 
@@ -7245,7 +7277,14 @@ class GhViewerFrame(wx.Frame):
         self._select_repo(repo, view)
         if target.kind in PENDING_KINDS:
             self._set_pending_target(view, target.kind, target.ref)
+            self._speak_landing = True
         self._select_in_repo_list(repo)
+        if target.kind in PENDING_KINDS:
+            # A big repository's list takes seconds; say what is coming rather
+            # than leave the old list to be heard meanwhile. Later than the
+            # focus going back from the dialog, which would cut it off.
+            wx.CallLater(150, self._tell,
+                         f"Opening {opening_label(target.kind, target.ref)} in {repo}…")
 
     def _select_in_repo_list(self, repo: str) -> None:
         """Select ``repo`` in the repository list when it is there, else nothing.
@@ -7636,12 +7675,12 @@ class GhViewerFrame(wx.Frame):
                 self._show_details(row)
                 # Move focus to the details box so user can read/navigate comments
                 wx.CallLater(100, self.details_text.SetFocus)
-                self._announce(f"Jumped to #{number} — {item.title}")
+                self._say_landing(f"Jumped to #{number} — {item.title}")
                 return
         if self.view_mode != VIEW_ISSUES or not self.repo:
             return  # left the issues list before this ran (it may be scheduled)
         # Not in the current list — fetch it on-demand in the background
-        self._announce(f"#{number} not in current list, fetching…")
+        self._say_landing(f"#{number} not in current list, fetching…", final=False)
         # Read here, on the UI thread: by the time the worker runs, another
         # repository may be open, and its #number is a different item.
         repo = self.repo
@@ -7665,7 +7704,7 @@ class GhViewerFrame(wx.Frame):
 
     def _goto_error(self, number: int, msg: str) -> None:
         """Show an error dialog when a Go To fetch fails."""
-        self._announce(f"Error fetching #{number}: {msg}")
+        self._say_landing(f"Error fetching #{number}: {msg}")
         wx.MessageBox(
             f"Could not fetch #{number}:\n{msg}",
             "Go To Error",
@@ -7680,10 +7719,10 @@ class GhViewerFrame(wx.Frame):
         # moved on while the fetch was running, that list is not what is on
         # screen any more.
         if self.view_mode != VIEW_ISSUES or (repo is not None and repo != self.repo):
-            self._announce(f"Left the issues list before #{number} arrived.")
+            self._say_landing(f"Left the issues list before #{number} arrived.")
             return
         if item is None:
-            self._announce(f"#{number} not found in {self.repo}.")
+            self._say_landing(f"#{number} not found in {self.repo}.")
             wx.MessageBox(
                 f"#{number} does not exist as an issue or PR in {self.repo}.",
                 "Not Found",
@@ -7696,7 +7735,7 @@ class GhViewerFrame(wx.Frame):
         self.items = sort_items(self.items, self.sort_order)
         idx = next((i for i, it in enumerate(self.items) if it.number == number), -1)
         if idx < 0:
-            self._announce(f"#{number} could not be added to the list.")
+            self._say_landing(f"#{number} could not be added to the list.")
             return
         # Rebuild the list ctrl to reflect the new sorted order. The filter
         # goes: the item asked for by number has to be in the list.
@@ -7708,7 +7747,7 @@ class GhViewerFrame(wx.Frame):
         self.list_ctrl.Focus(row)
         self._show_details(row)
         wx.CallLater(100, self.details_text.SetFocus)
-        self._announce(f"Jumped to #{number} — {item.title}")
+        self._say_landing(f"Jumped to #{number} — {item.title}")
 
     def on_select_branch(self, event: wx.CommandEvent) -> None:
         """Ctrl+B — select which branch to view commits for; in Files, which
@@ -9630,7 +9669,7 @@ class GhViewerFrame(wx.Frame):
         if repo in cache:
             self._open_item_checked(item, cache[repo])
             return
-        self._announce(f"Opening #{number} in {repo}…")
+        self._tell(f"Opening #{number} in {repo}…")
 
         def worker() -> None:
             wx.CallAfter(self._on_fork_checked, item, parent_repo(repo))
@@ -9652,6 +9691,7 @@ class GhViewerFrame(wx.Frame):
             return
         self._open_repo_from_list(item.repo, item)
         self._set_pending_target(VIEW_ISSUES, "item", str(item.number))
+        self._speak_landing = True
 
     def _saved_search(self, name: str) -> SavedSearch | None:
         return next((s for s in self.saved_searches if s.name == name), None)

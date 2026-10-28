@@ -140,6 +140,10 @@ between files. `Enter` opens it on GitHub, and Copy Link and Copy Details work.
 - Branches, and the branch pickers (Select Branch, Compare Branches, Run
   Workflow), failed to load on a repository with more than 30 branches. They now
   list them, and the pickers open faster.
+- Opening the address of an issue, pull request, commit, release or run now says
+  what it is opening ("Opening #14845 in cli/cli…"), and says it again when it
+  gets there. On a big repository the list takes several seconds to load, and
+  before, all you heard was a list.
 
 ## Before you start
 

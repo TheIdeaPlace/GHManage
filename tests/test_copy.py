@@ -108,6 +108,7 @@ VIEW_SAMPLES = {
     ghviewer.VIEW_SEARCH_ISSUES: Item(1, "T", "open", "u", False, repo="o/r"),
     ghviewer.VIEW_SEARCH_REPOS: RepoEntry("o/r", url="u"),
     ghviewer.VIEW_DISCUSSIONS: ghviewer.Discussion(3, "T", url="u"),
+    ghviewer.VIEW_MILESTONES: ghviewer.Milestone(3, "v1", url="u"),
 }
 
 

@@ -119,6 +119,10 @@ class Item:
     additions: int = 0
     deletions: int = 0
     changed_files: int = 0
+    # False when GitHub couldn't give the size of the change in time (a
+    # list of very large pull requests, see fetch_prs): Changes and Files
+    # are then blank rather than "+0/-0".
+    has_stats: bool = True
     base_branch: str = ""
     head_branch: str = ""
     # Set when the item came from a search across repositories, which list
@@ -152,8 +156,9 @@ class Item:
             "comments": str(self.comments),
             "draft": "Yes" if self.is_draft else "No",
             "review": self.review_status,
-            "+/-": f"+{self.additions}/-{self.deletions}" if self.is_pr else "",
-            "files": str(self.changed_files) if self.is_pr else "",
+            "+/-": (f"+{self.additions}/-{self.deletions}"
+                    if self.is_pr and self.has_stats else ""),
+            "files": str(self.changed_files) if self.is_pr and self.has_stats else "",
             "base": self.base_branch if self.is_pr else "",
             "head": self.head_branch if self.is_pr else "",
             "repo": self.repo,
@@ -215,6 +220,11 @@ def sort_items(items: list[Item], sort_order: str) -> list[Item]:
 # JSON fields to request from gh for issues
 ISSUE_FIELDS = "number,title,state,url,author,createdAt,updatedAt,body,labels,assignees,comments"
 PR_FIELDS = "number,title,state,url,author,createdAt,updatedAt,body,labels,assignees,comments,isDraft,mergedAt,reviewDecision,additions,deletions,changedFiles,baseRefName,headRefName"
+# The size of each change is what makes GitHub time out (HTTP 502) on a
+# page of very large pull requests (nvaccess/nvda's translation merges);
+# without it the same page comes back.
+PR_STAT_FIELDS = ("additions", "deletions", "changedFiles")
+PR_LIGHT_FIELDS = ",".join(f for f in PR_FIELDS.split(",") if f not in PR_STAT_FIELDS)
 
 
 def _parse_author(row: dict) -> str:
@@ -307,6 +317,7 @@ def _parse_prs(raw: str) -> list[Item]:
                 additions=row.get("additions", 0),
                 deletions=row.get("deletions", 0),
                 changed_files=row.get("changedFiles", 0),
+                has_stats="additions" in row,
                 base_branch=row.get("baseRefName", ""),
                 head_branch=row.get("headRefName", ""),
             )
@@ -315,12 +326,15 @@ def _parse_prs(raw: str) -> list[Item]:
 
 
 def fetch_issues(
-    repo: Optional[str], state: str = "open", limit: int = 30, label: str = ""
+    repo: Optional[str], state: str = "open", limit: int = 30, label: str = "",
+    milestone: "Optional[Milestone]" = None,
 ) -> list[Item]:
     """Fetch issues (excluding PRs) for the repo.
 
     ``gh issue list`` defaults to only 30 items and returns newest first.
     Pass ``limit`` to control how many are fetched.
+
+    ``milestone`` restricts it to that milestone's issues (Enter in Milestones).
 
     ``label`` restricts the list to issues carrying that label — this is what
     the Labels view drills into. Filtering server-side rather than in the app
@@ -334,13 +348,18 @@ def fetch_issues(
     args = ["issue", "list", "--state", state, "--limit", str(limit), "--json", ISSUE_FIELDS]
     if label:
         args += ["--label", label]
+    if milestone is not None:
+        # By number: gh takes a number or a title, and a title such as
+        # "2" would be read as milestone number 2.
+        args += ["--milestone", str(milestone.number)]
     if effective:
         args += ["--repo", effective]
     return _parse_issues(_run_gh(args))
 
 
 def fetch_prs(
-    repo: Optional[str], state: str = "open", limit: int = 30, label: str = ""
+    repo: Optional[str], state: str = "open", limit: int = 30, label: str = "",
+    milestone: "Optional[Milestone]" = None,
 ) -> list[Item]:
     """Fetch pull requests for the repo.
 
@@ -356,9 +375,27 @@ def fetch_prs(
     args = ["pr", "list", "--state", state, "--limit", str(limit), "--json", PR_FIELDS]
     if label:
         args += ["--label", label]
+    if milestone is not None:
+        # gh pr list has no --milestone; a search qualifier does it. GitHub
+        # search can't escape a quote, so one in the title is left out.
+        args += ["--search", 'milestone:"%s"' % milestone.title.replace('"', "")]
     if effective:
         args += ["--repo", effective]
+    try:
+        return _parse_prs(_run_gh(args))
+    except GhError as exc:
+        if not _is_timeout(exc):
+            raise
+    # Again without each change's size, which is what GitHub couldn't
+    # work out in time; the list is still worth having.
+    args[args.index(PR_FIELDS)] = PR_LIGHT_FIELDS
     return _parse_prs(_run_gh(args))
+
+
+def _is_timeout(exc: GhError) -> bool:
+    """GitHub gave up on the query: HTTP 502 or 504 from its GraphQL API."""
+    text = str(exc)
+    return "HTTP 502" in text or "HTTP 504" in text
 
 
 def _is_no_such_number(exc: GhError) -> bool:
@@ -4754,3 +4791,106 @@ def add_discussion_comment(discussion: Discussion, body: str) -> str:
         raise _graphql_error(reply, "GitHub didn't take the comment")
     comment = added.get("comment") if isinstance(added.get("comment"), dict) else {}
     return comment.get("url") or ""
+
+
+# ── Milestones ─────────────────────────────────────────────────────────
+#
+# REST repos/{o}/{r}/milestones?state=. Enter on one lists its issues and
+# pull requests in Issues & PRs (fetch_issues / fetch_prs ``milestone``).
+
+MILESTONE_COLUMNS = ["title", "due", "open", "closed", "done", "state", "description",
+                     "updated"]
+MILESTONE_DEFAULT_COLUMNS = ["title", "due", "open", "closed", "done", "state"]
+
+
+@dataclass
+class Milestone:
+    """A repository milestone and how far along it is."""
+
+    number: int
+    title: str
+    state: str = "open"      # "open" or "closed"
+    description: str = ""
+    due_on: str = ""
+    open_issues: int = 0     # issues and pull requests, as GitHub counts them
+    closed_issues: int = 0
+    created_at: str = ""
+    updated_at: str = ""
+    closed_at: str = ""
+    creator: str = ""
+    url: str = ""
+    repo: str = ""
+
+    @property
+    def total(self) -> int:
+        return self.open_issues + self.closed_issues
+
+    @property
+    def percent_done(self) -> Optional[int]:
+        """Closed as a whole percent of all, rounded down as GitHub shows it;
+        None with nothing in it."""
+        if not self.total:
+            return None
+        return self.closed_issues * 100 // self.total
+
+    @property
+    def done_display(self) -> str:
+        pct = self.percent_done
+        return "" if pct is None else f"{pct}%"
+
+    @property
+    def state_display(self) -> str:
+        return self.state.capitalize()
+
+    def to_row(self, columns: list[str]) -> dict[str, str]:
+        mapping = {
+            "title": self.title,
+            "due": self.due_on[:10] if self.due_on else "",
+            "open": str(self.open_issues),
+            "closed": str(self.closed_issues),
+            "done": self.done_display,
+            "state": self.state_display,
+            "description": _first_line_of(self.description),
+            "updated": self.updated_at[:10] if self.updated_at else "",
+        }
+        return {col: mapping.get(col, "") for col in columns}
+
+
+def _first_line_of(text: str) -> str:
+    for line in (text or "").splitlines():
+        if line.strip():
+            return line.strip()
+    return ""
+
+
+def _parse_milestone(row: dict, repo: str) -> Milestone:
+    creator = row.get("creator") if isinstance(row.get("creator"), dict) else {}
+    return Milestone(
+        number=row.get("number") or 0,
+        title=row.get("title") or "",
+        state=row.get("state") or "open",
+        description=row.get("description") or "",
+        due_on=row.get("due_on") or "",
+        open_issues=row.get("open_issues") or 0,
+        closed_issues=row.get("closed_issues") or 0,
+        created_at=row.get("created_at") or "",
+        updated_at=row.get("updated_at") or "",
+        closed_at=row.get("closed_at") or "",
+        creator=creator.get("login") or "",
+        url=row.get("html_url") or "",
+        repo=repo,
+    )
+
+
+def fetch_milestones(repo: Optional[str], state: str = "open",
+                     limit: int = 100) -> list[Milestone]:
+    """A repository's milestones in GitHub's order, the nearest due date
+    first (those with none last). ``state`` is View > State.
+
+    Like labels, a fork's are its upstream's, to match the issues listed.
+    """
+    effective = resolve_issue_repo(repo) or repo
+    if state not in ("open", "closed", "all"):
+        state = "open"
+    rows = _api_pages(f"repos/{effective}/milestones?state={state}", limit)
+    return [_parse_milestone(r, effective) for r in rows]

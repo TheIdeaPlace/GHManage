@@ -56,6 +56,12 @@ UI thread via `wx.CallAfter`. Never touch wx widgets from a worker thread.
   Copy Diff and Open Diff; `file_diff(f)` one file's, with its header. The marking style
   (`settings.load_diff_style`) is app-kit's difftext style id. app-kit is pinned to a commit
   archive in `requirements.txt` and `pyproject.toml`; bump both together.
+- `ReviewComment`, `fetch_pr_review_comments(pr_url)`, `add_review_comment(pr_url, commit_id,
+  path, line, side, body)` — a PR's line comments (#84). `line`/`side` (RIGHT new file, LEFT old)
+  place a comment; `line` is null once outdated. A reply's `in_reply_to` is its thread's first
+  comment. The post sends JSON on stdin (`gh api --input -`). For a PR the files worker attaches
+  each file's comments to `ChangedFile.comments` (`_attach_comments`); None for a commit's file
+  or when reading them failed, which leaves the Comments column blank.
 - `RepoFile`, `fetch_repo_folder(repo, ref, path)` — the Files view (`VIEW_CODE`). A folder is
   read with the git trees API (`git/trees/{ref}:{path}`, URL-quoted whole so a ref with a
   slash works), not the contents API: trees say which entries are links (mode 120000) and
@@ -169,7 +175,20 @@ UI thread via `wx.CallAfter`. Never touch wx widgets from a worker thread.
   if `_shows(view, item, gen)`; what arrives is cached either way (`_blob_cache` by blob SHA,
   `_patch_cache` by (sha, path)), since neither can change.
 - Alt+N/Alt+P's noun comes from `_nav_noun`: change (Changed Files, History), heading or run
-  (Files, run while blame shows), comment elsewhere.
+  (Files, run while blame shows), comment elsewhere; "change or comment" in a PR's Changed Files.
+  A `_comment_positions` entry may carry a third item, its kind ("change"/"comment"); then
+  `_navigate_comment` counts each kind on its own ("Comment 1 of 3").
+- `diffview.file_view(f, style, comments)` renders a changed file and returns a `FileView`:
+  `text`, `stops` (line, nlines, kind) and per-line `targets` — ("RIGHT"|"LEFT", line number)
+  for a line that can take a comment, else the spoken reason M refuses with. It works out each
+  rendered line's old/new numbers from the hunk header, following difftext's order
+  (`_order` mirrors the CHANGED style's pairing; a test checks it against `difftext._marked`).
+  Comments go after their line (replies after them), outdated ones under "Earlier comments".
+  `file_text` is the comment-less wrapper File History uses.
+- M in Changed Files (`_comment_on_line`, only in the details panel, only for a PR): the caret's
+  line (`_caret_line`) → `_file_view.target`, a TextEntryDialog, then head SHA + post + refetch
+  in a thread; `_on_line_comment_done` re-attaches comments, redraws rows, re-renders and puts
+  the caret back on the same line (comments go after it, so its index doesn't move).
 - `on_select_branch` — Ctrl+B branch picker dialog for Commits view; in Files,
   `_choose_code_ref` (branches, then tags marked "(tag)"), which keeps the folder and entry. Its first entry, "All branches", sets `commit_branch` to `ALL_BRANCHES` ("*"), which `fetch_commits` hands to `fetch_all_branch_commits` (GraphQL, newest 100 commits of up to 100 branches, merged).
 - **The Labels view is a view of the Issues view, not a drill-down.** Enter on a label
@@ -475,7 +494,7 @@ including the checks either side. The short version:
 - v0.9.5 — View ▸ Columns… dialog (order, show/hide, Speak column names) replaces the Columns submenu; columns per kind of list and list mode remembered (settings.py, settings.json); plain-word headings and Full mode names only text columns after the first (columns.py, gh_columns.py); Commits: All branches and a Branches column
 - v0.9.6 — File ▸ Archive or Unarchive Repository… and Delete Repository from GitHub… (typed-name confirmation, admin check, delete_repo scope via MissingScope); spoken results through UIA notifications from a served provider (announce.py, speech.py), View ▸ Speak Results; Search dialog examples in a read-only box, not dialog text; Mac labels through _name/speech.set_label, macOS CI runs the tests
 - v0.9.7 — Changed Files (VIEW_FILES): Enter on a commit or H on a PR lists its files; each file's lines marked by app-kit's difftext (diffview.py) in a style from View > Mark Changed Lines With; Alt+N/Alt+P between hunks; Copy Diff and Open Diff in Default App
-- v0.9.8 — Files (VIEW_CODE): browse a repository at a branch, tag or commit, read a file one line out per line in (codeview.py), Alt+N/Alt+P between Markdown headings, Ctrl+B Select Branch or Tag; B blame in runs; H File History (VIEW_HISTORY), each commit's change to the file in the chosen marking style, Enter to Changed Files; W in Changed Files opens the file whole
+- v0.9.8 — Files (VIEW_CODE): browse a repository at a branch, tag or commit, read a file one line out per line in (codeview.py), Alt+N/Alt+P between Markdown headings, Ctrl+B Select Branch or Tag; B blame in runs; H File History (VIEW_HISTORY), each commit's change to the file in the chosen marking style, Enter to Changed Files; W in Changed Files opens the file whole; a PR's review comments after their lines in Changed Files, Alt+N/Alt+P stop at them, M comments on the caret's line, Comments column (#84)
 
 ## Roadmap
 

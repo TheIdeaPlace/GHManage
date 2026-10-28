@@ -5,7 +5,8 @@ a fast, keyboard-driven list.
 
 This release lets you read a repository's code: browse its folders, read any
 file a line at a time, see who last changed each line, and read every change a
-file has had.
+file has had. In a pull request's changed files you can read reviewers'
+comments on its lines, and add your own.
 
 On a Mac, use `Cmd` where these notes say `Ctrl`, and `Option` where they say `Alt`.
 
@@ -49,6 +50,21 @@ by its path, so the list stops at the commit that gave the file its present name
 In Changed Files, `W` (**Actions → Open Whole File**) opens the selected file in
 Files, as it is at that commit or at the pull request's latest commit, so you
 can read the code around a change. `Backspace` takes you back to Changed Files.
+
+## Review comments in Changed Files
+
+In a pull request's Changed Files, the comments reviewers left on its lines now
+come straight after the line they are on: "Comment by alice: …", with replies
+after it, indented. Comments on lines changed since are listed at the end of the
+file under "Earlier comments". `Alt+N` and `Alt+P` stop at comments as well as
+at runs of changes, and say which: "Change 2 of 7", "Comment 1 of 3". A new
+Comments column says how many comments each file has. If you chose Changed
+Files' columns before, add it under **View → Columns…**.
+
+To comment on a line, move into the file's lines, put the caret on the line and
+press `M` (**Actions → Comment on This Line…**). Type the comment and choose OK.
+It appears after the line, and the caret stays where it was. A removed line
+takes a comment on the file as it was before the change.
 
 ## Before you start
 

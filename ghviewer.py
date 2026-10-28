@@ -128,6 +128,9 @@ from gh_data import (
     fetch_pr_diff,
     fetch_pr_files,
     fetch_pr_head_sha,
+    fetch_pr_review_comments,
+    add_review_comment,
+    comments_by_path,
     fetch_blame,
     fetch_blob_text,
     fetch_commit_file,
@@ -729,6 +732,7 @@ ID_VIEW_CODE = wx.NewIdRef()
 ID_FILE_HISTORY = wx.NewIdRef()
 ID_BLAME = wx.NewIdRef()
 ID_WHOLE_FILE = wx.NewIdRef()
+ID_COMMENT_LINE = wx.NewIdRef()
 
 
 # View modes
@@ -2380,6 +2384,9 @@ class GhViewerFrame(wx.Frame):
         self._patch_cache: dict[tuple[str, str], ChangedFile | None] = {}
         self._detail_gen = 0  # bumped whenever the details panel moves on
         self._whole_file_busy = False
+        self._line_comment_busy = False
+        self._files_head = ""  # the PR's commit Changed Files' lines are of
+        self._file_view: diffview.FileView | None = None  # the changed file shown
         self.assets_release: Release | None = None  # release whose assets are shown
         # Pages config for the current repo. Shared by both Pages views — the
         # published-file list is derived from it — so it survives the move
@@ -2711,6 +2718,8 @@ class GhViewerFrame(wx.Frame):
         self._act_file_history = actions_menu.Append(ID_FILE_HISTORY, "File History (H)")
         self._act_blame = actions_menu.Append(ID_BLAME, "Blame (B)")
         self._act_whole_file = actions_menu.Append(ID_WHOLE_FILE, "Open Whole File (W)")
+        # A pull request's line, in Changed Files: M in the file's lines.
+        self._act_comment_line = actions_menu.Append(ID_COMMENT_LINE, "Comment on This Line… (M)")
         actions_menu.AppendSeparator()
         # G in Activity and Notifications; here so the command can be found.
         self._act_go_to_repo = actions_menu.Append(
@@ -2889,6 +2898,7 @@ class GhViewerFrame(wx.Frame):
         self.Bind(wx.EVT_MENU, lambda e: self._show_file_history(), id=ID_FILE_HISTORY)
         self.Bind(wx.EVT_MENU, lambda e: self._toggle_blame(), id=ID_BLAME)
         self.Bind(wx.EVT_MENU, lambda e: self._open_whole_file(), id=ID_WHOLE_FILE)
+        self.Bind(wx.EVT_MENU, lambda e: self._comment_on_line(), id=ID_COMMENT_LINE)
         self.Bind(wx.EVT_MENU, lambda e: self._copy_clone_url("https"), id=ID_COPY_CLONE_HTTPS)
         self.Bind(wx.EVT_MENU, lambda e: self._copy_clone_url("ssh"), id=ID_COPY_CLONE_SSH)
 
@@ -3188,7 +3198,10 @@ class GhViewerFrame(wx.Frame):
         self._act_file_history.Enable(self.view_mode == VIEW_CODE)
         self._act_blame.Enable(self.view_mode == VIEW_CODE)
         self._act_whole_file.Enable(self.view_mode == VIEW_FILES)
-        noun = GhViewerFrame._nav_noun(self).title()
+        self._act_comment_line.Enable(
+            self.view_mode == VIEW_FILES and isinstance(self._files_of, Item))
+        noun = " ".join(w if w == "or" else w.capitalize()
+                        for w in GhViewerFrame._nav_noun(self).split())
         self._act_next_comment.SetItemLabel(f"Next {noun}\tAlt+N")
         self._act_prev_comment.SetItemLabel(f"Previous {noun}\tAlt+P")
         # An artifact has no page of its own on github.com to link to.
@@ -3817,13 +3830,27 @@ class GhViewerFrame(wx.Frame):
                     fresh = fetch_workflow_run(self.repo, run.run_id) if run else None
                     wx.CallAfter(self._on_jobs_loaded, token, jobs, fresh)
                 elif view == VIEW_FILES:
+                    note, head = "", ""
                     if isinstance(files_of, Item):
+                        # The commit these lines are of, read first: a line
+                        # comment is refused if the pull request has moved on
+                        # from it (see _comment_on_line).
+                        try:
+                            head = fetch_pr_head_sha(files_of.url)
+                        except GhError:
+                            head = ""
                         files = fetch_pr_files(files_of.url)
+                        # The files still show if their comments can't be read.
+                        try:
+                            GhViewerFrame._attach_comments(
+                                files, fetch_pr_review_comments(files_of.url))
+                        except GhError as exc:
+                            note = f"Couldn't read the review comments: {exc}"
                     elif isinstance(files_of, Commit):
                         files = fetch_commit_files(self.repo, files_of.sha)
                     else:
                         files = []
-                    wx.CallAfter(self._on_files_loaded, token, files)
+                    wx.CallAfter(self._on_files_loaded, token, files, note, head)
                 elif view == VIEW_CODE:
                     ref = code_ref or fetch_default_branch(repo) or "HEAD"
                     path, note = code_path, ""
@@ -5812,6 +5839,15 @@ class GhViewerFrame(wx.Frame):
                 and self.view_mode == VIEW_FILES):
             self._open_whole_file()
             return
+        if (key == ord("M") and not event.HasAnyModifiers()
+                and self.view_mode == VIEW_FILES):
+            # In the file's lines, where the caret says which line.
+            if focus is not self.details_text and isinstance(self._files_of, Item):
+                self._tell("Comment on This Line works in the file's lines: "
+                           "press Enter, move to the line, then press M.")
+                return
+            self._comment_on_line()
+            return
         if self.view_mode == VIEW_ISSUES and not event.HasAnyModifiers():
             # Pull request keys, here so they work from the details panel,
             # where the line naming them is read.
@@ -6248,26 +6284,40 @@ class GhViewerFrame(wx.Frame):
     def _navigate_comment(self, direction: int) -> None:
         """Move to the next (1) or previous (-1) comment in the details box."""
         noun = GhViewerFrame._nav_noun(self)
-        if not self._comment_positions:
-            self._announce(f"No {noun}s to navigate.")
+        nouns = "changes or comments" if noun == "change or comment" else f"{noun}s"
+        positions = self._comment_positions
+        if not positions:
+            self._announce(f"No {nouns} to navigate.")
             return
         new_idx = self._current_comment + direction
         if new_idx < 0:
             self._announce(f"Already at first {noun}.")
             return
-        if new_idx >= len(self._comment_positions):
+        if new_idx >= len(positions):
             self._announce(f"Already at last {noun}.")
             return
         self._current_comment = new_idx
-        line, length = self._comment_positions[new_idx]
+        line, length = positions[new_idx][:2]
+        # Changed Files names what each stop is, a change or a comment, and
+        # counts each kind on its own: "Comment 1 of 3".
+        kind = positions[new_idx][2] if len(positions[new_idx]) > 2 else None
         start_pos = self._line_to_position(line)
         end_pos = self._line_to_position(line + length)
-        if noun != "comment":
-            end_pos = max(start_pos, end_pos - 1)
+        if noun != "comment" or kind:
+            # Up to the end of its last line, not the newline after it (the
+            # last line of all has none).
+            text = self.details_text.GetValue()
+            if end_pos > start_pos and text[end_pos - 1:end_pos] == "\n":
+                end_pos -= 1
         self.details_text.SetFocus()
         self.details_text.SetSelection(start_pos, end_pos)
         self.details_text.ShowPosition(start_pos)
-        total = len(self._comment_positions)
+        if kind:
+            kinds = [p[2] if len(p) > 2 else kind for p in positions]
+            number = kinds[:new_idx + 1].count(kind)
+            self._announce(f"{kind.capitalize()} {number} of {kinds.count(kind)}")
+            return
+        total = len(positions)
         self._announce(f"{noun.capitalize()} {new_idx + 1} of {total}")
 
     def _line_to_position(self, line: int) -> int:
@@ -7911,9 +7961,20 @@ class GhViewerFrame(wx.Frame):
             return f"commit {src.short_sha} {_first_line(src.message)}".strip()
         return ""
 
-    def _on_files_loaded(self, token: int, files: list) -> None:
+    @staticmethod
+    def _attach_comments(files: list, comments: list) -> None:
+        """Give each of a pull request's files its review comments."""
+        by_path = comments_by_path(comments)
+        for f in files:
+            f.comments = by_path.get(f.filename, [])
+
+    def _on_files_loaded(self, token: int, files: list, note: str = "",
+                         head: str | None = None) -> None:
         if not self._fetch_is_current(token):
             return  # the user has moved on; these belong to a view they left
+        if head is not None:
+            # None when the files come back from Files (W) as they were.
+            self._files_head = head
         self.git_items = files
         self.items = []
         filtered = self._populate_filtered_list(files)
@@ -7922,10 +7983,19 @@ class GhViewerFrame(wx.Frame):
         totals = diffview.totals_message(files)
         if len(files) >= MAX_CHANGED_FILES:
             totals += f" GitHub lists only the first {MAX_CHANGED_FILES:,}."
+        pr = isinstance(self._files_of, Item)
+        if pr and files and not note:
+            n = sum(len(f.comments or []) for f in files)
+            if n:
+                totals += f" {diffview.comment_count(n).capitalize()}."
+        if note:
+            totals += f" {note}"
         back = self._files_back["view"] if self._files_back else VIEW_ISSUES
+        nav = ("Alt+N/Alt+P=next/previous change or comment  M=comment on the line  " if pr
+               else "Alt+N/Alt+P=next/previous change  ")
         self._set_view_status(
             f"{self._files_of_label()} — {totals}",
-            "Enter=read the changes  Alt+N/Alt+P=next/previous change  W=whole file  "
+            f"Enter=read the changes  {nav}W=whole file  "
             f"Ctrl+F=filter  Backspace=back to {self._view_label(back, lower=True)}",
         )
         self._update_title()
@@ -7943,13 +8013,17 @@ class GhViewerFrame(wx.Frame):
     def _show_file_details(self, idx: int) -> None:
         """A changed file's lines, marked in the chosen style."""
         if idx < 0 or idx >= len(self.git_items):
+            self._file_view = None
             self.details_text.Clear()
             return
-        text, starts = diffview.file_text(self.git_items[idx], self._diff_style)
-        self.details_text.SetValue(text)
+        f = self.git_items[idx]
+        view = diffview.file_view(f, self._diff_style, f.comments)
+        self._file_view = view
+        self.details_text.SetValue(view.text)
         # Alt+N and Alt+P move between runs of changes the way they move
-        # between comments: each is its "Lines 10 to 15:" line.
-        self._comment_positions = [(line, 1) for line in starts]
+        # between comments: each is its "Lines 10 to 15:" line. A pull
+        # request's review comments are stops too, each counted on its own.
+        self._comment_positions = list(view.stops)
         self._current_comment = -1
 
     def _read_changes(self) -> None:
@@ -8124,6 +8198,8 @@ class GhViewerFrame(wx.Frame):
     def _nav_noun(self) -> str:
         """What Alt+N and Alt+P move between in the details panel here."""
         view = getattr(self, "view_mode", None)
+        if view == VIEW_FILES and isinstance(getattr(self, "_files_of", None), Item):
+            return "change or comment"  # a pull request's review comments too
         if view in (VIEW_FILES, VIEW_HISTORY):
             return "change"
         if view == VIEW_CODE:
@@ -8603,6 +8679,103 @@ class GhViewerFrame(wx.Frame):
             self._tell(f"Couldn't find the pull request's latest commit. {err}".strip())
             return
         self._open_code_at(item, sha, f"at PR #{pr.number}, {sha[:8]}")
+
+    def _caret_line(self) -> int:
+        """The line (from 0) of the details panel the caret is on."""
+        caret = self.details_text.GetInsertionPoint()
+        return self.details_text.GetValue().count("\n", 0, caret)
+
+    def _comment_on_line(self) -> None:
+        """M in a pull request's changed file, or Actions ▸ Comment on This
+        Line: a review comment on the line the caret is on, posted on the
+        pull request's latest commit."""
+        src = self._files_of if self.view_mode == VIEW_FILES else None
+        if not isinstance(src, Item):
+            self._tell("Line comments are for a pull request's changed files, "
+                       "not a commit's." if isinstance(src, Commit) else
+                       "Comment on This Line is for a pull request's file in Changed Files.")
+            return
+        item = self._focused_item()
+        view = getattr(self, "_file_view", None)
+        if not isinstance(item, ChangedFile) or view is None:
+            self._tell("Select a file first.")
+            return
+        if self._line_comment_busy:
+            self._tell("Still adding the last comment.")
+            return
+        line = self._caret_line()
+        target = view.target(line)
+        if isinstance(target, str):
+            self._tell(target)
+            return
+        side, number = target
+        where = f"line {number}" if side == "RIGHT" else f"removed line {number}"
+        shown = view.text.split("\n")[line]
+        if len(shown) > 200:
+            shown = shown[:200] + "…"  # the prompt names the box: keep it short
+        dlg = wx.TextEntryDialog(
+            self, f"Comment on {where} of {item.filename}:\n{shown}",
+            "Comment on This Line", "", style=wx.TE_MULTILINE | wx.OK | wx.CANCEL)
+        try:
+            if dlg.ShowModal() != wx.ID_OK:
+                return
+            body = dlg.GetValue().strip()
+        finally:
+            dlg.Destroy()
+        if not body:
+            return
+        self._line_comment_busy = True
+        self._announce(f"Adding a comment on {where}…")
+        path = item.filename
+        shown_head = getattr(self, "_files_head", "")
+
+        def worker() -> None:
+            # Any failure, not only gh's, comes back to clear the busy flag.
+            try:
+                sha = fetch_pr_head_sha(src.url)
+                if shown_head and sha != shown_head:
+                    # GitHub would read the line number in the new diff,
+                    # where it may be another line, or none.
+                    raise GhError("The pull request has new commits since these lines "
+                                  "were read. Press R in the list of files to read them "
+                                  "again, then comment.")
+                add_review_comment(src.url, sha, path, number, side, body)
+            except Exception as exc:  # noqa: BLE001
+                wx.CallAfter(self._on_line_comment_done, src, item, line, where,
+                             False, None, str(exc))
+                return
+            try:
+                comments, err = fetch_pr_review_comments(src.url), ""
+            except Exception as exc:  # noqa: BLE001
+                comments, err = None, str(exc)
+            wx.CallAfter(self._on_line_comment_done, src, item, line, where,
+                         True, comments, err)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_line_comment_done(self, pr: Item, item: ChangedFile, line: int, where: str,
+                              posted: bool, comments: list | None, err: str) -> None:
+        """The comment is in (or isn't): the file's lines read again with it,
+        the caret kept on the line, and the Comments column brought up to date."""
+        self._line_comment_busy = False
+        if not posted:
+            self._tell(f"Couldn't add the comment. {err}".strip())
+            return
+        msg = f"Comment added on {where}."
+        if comments is None:
+            msg += f" Couldn't read the comments again: {err}"
+        elif self.view_mode == VIEW_FILES and self._files_of is pr:
+            GhViewerFrame._attach_comments(self.git_items, comments)
+            for row, shown in enumerate(self._shown):
+                self._redraw_row(row, shown)
+            shown = self._focused_item()
+            if isinstance(shown, ChangedFile) and shown.filename == item.filename:
+                self._show_details(self.list_ctrl.GetFirstSelected())
+                self.details_text.SetInsertionPoint(self._line_to_position(line))
+                # Alt+N from here goes on to the comments on the line.
+                self._current_comment = sum(
+                    1 for p in self._comment_positions if p[0] <= line) - 1
+        self._tell(msg)
 
     def _open_code_at(self, item: ChangedFile, ref: str, at: str) -> None:
         """Files at ``ref``, in the folder of ``item``, on it."""

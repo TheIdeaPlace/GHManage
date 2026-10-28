@@ -30,6 +30,7 @@ GHManage is a keyboard-driven desktop app for your GitHub repositories, built fo
 - [Activity](#activity)
 - [Starred and Watched Repositories](#starred-and-watched-repositories)
 - [My Organizations and Shared With Me](#my-organizations-and-shared-with-me)
+- [Gists](#gists)
 - [Favorites](#favorites)
 - [Quick Filter](#quick-filter)
 - [Copying](#copying)
@@ -284,14 +285,15 @@ It is in this order:
 5. **Notifications**, with how many are unread, for example "Notifications (12 unread)". See [Notifications](#notifications).
 6. **My Work**: open issues and pull requests that need you, with how many once it has loaded. See [My Work](#my-work).
 7. **My Organizations**: the organizations you belong to, with how many, for example "My Organizations (3)". See [My Organizations and Shared With Me](#my-organizations-and-shared-with-me).
-8. **Shared With Me**: other people's repositories you have been made a collaborator on, with how many. It is only there when there is at least one.
-9. **Your saved searches**, each marked with a magnifying glass, for example "🔍 NVDA braille bugs". See [Saved searches](#saved-searches).
-10. **Repositories you opened by address**, each marked with a pin, for example "📌 nvaccess/nvda — NVDA, the free and open source screen reader".
-11. **Your own repositories**, most recently pushed first, each followed by its description, up to 100.
+8. **Gists**: your gists, with how many, for example "Gists (4)". See [Gists](#gists).
+9. **Shared With Me**: other people's repositories you have been made a collaborator on, with how many. It is only there when there is at least one.
+10. **Your saved searches**, each marked with a magnifying glass, for example "🔍 NVDA braille bugs". See [Saved searches](#saved-searches).
+11. **Repositories you opened by address**, each marked with a pin, for example "📌 nvaccess/nvda — NVDA, the free and open source screen reader".
+12. **Your own repositories**, most recently pushed first, each followed by its description, up to 100.
 
-The first seven are always there, so the same keystrokes from the top of the list always reach them. The first four are where they were before Notifications, My Work and My Organizations arrived. When the list first loads, the status bar says how many repositories it found: "Loaded 42 repositories. Select one to view issues and PRs."
+The first eight are always there, so the same keystrokes from the top of the list always reach them. The first four are where they were before Notifications, My Work and My Organizations arrived. When the list first loads, the status bar says how many repositories it found: "Loaded 42 repositories. Select one to view issues and PRs."
 
-The notification, starred and watched counts are asked for once the list is up, so they appear a moment after the names, without moving you from the entry you are on. If GitHub can't be asked, the entry shows just its name rather than a number that might be wrong. Opening Starred or Watched, or pressing `R` in it, brings its count up to date, so a repository you starred on the web since GHManage started is counted then.
+The notification, starred, watched and gist counts are asked for once the list is up, so they appear a moment after the names, without moving you from the entry you are on. If GitHub can't be asked, the entry shows just its name rather than a number that might be wrong. Opening Starred or Watched, or pressing `R` in it, brings its count up to date, so a repository you starred on the web since GHManage started is counted then.
 
 Opening a repository shows its **Issues & PRs**. Use `Ctrl+2` through `Ctrl+0` to reach its other views.
 
@@ -1060,6 +1062,28 @@ These keep the repository you were in, so `Ctrl+1` takes you back to it.
 
 ---
 
+## Gists
+
+**Gists** lists your gists, public and secret, most recently updated first. Open it from its entry in the repository list, after My Organizations, or from **View → View Mode → Gists**. Like Starred, it isn't about one repository, so it works at any time.
+
+Each row shows the gist's description (or, without one, its first file's name, as GitHub names it), its files, whether it is Public or Secret, and when it was last updated; **View → Columns…** adds its comments and when it was created.
+
+Selecting a gist shows it in the details panel: its description, whether it is public or secret, how many files it has, when it was updated and created, its comments and address. A moment after the selection rests on it, its files' text follows, each file headed by its name, language and size, for example "File 2 of 3: notes.md — Markdown, 1.2 KB", then the file a line of the file to a line of the panel. `Alt+N` and `Alt+P` move from file to file. If you are already reading the panel when the files arrive, GHManage says how many were read.
+
+GitHub sends up to a megabyte of each file. A larger one shows its start and says GitHub sent only the start of it; a very large one, or one that isn't text, says so instead of showing it; and a gist with more files than GitHub lists says that too. In each case `Ctrl+O` opens the gist on GitHub, with all of it.
+
+| Key | Action |
+|-----|--------|
+| `Enter` or `Ctrl+O` | Open the gist on GitHub |
+| `Alt+N` / `Alt+P` | Next / previous file in the details panel |
+| `Ctrl++` | Load 100 more |
+| `Ctrl+F` | Filter the list |
+| `R` | Reload the list |
+
+**Copy Link** (`Ctrl+Shift+C`) copies the gist's address, **Copy Gist ID** (`Ctrl+Shift+I`) its ID, and **Copy Details** (`Ctrl+Shift+D`) everything in the details panel, files and all. Gists are read-only here, and can't be favorites.
+
+---
+
 ## Favorites
 
 Favorites gather the things you come back to, from any repository, into one list. Press `F` on almost anything to add it: an issue or pull request, a branch, a commit, a tag, a release, a label, a workflow, a workflow run, a published page, the subject of an Activity event, or a repository, whether in the repository list or in Starred, Watched, Shared With Me, an organization's repositories or search results. Press `F` again to remove it.
@@ -1322,7 +1346,7 @@ On a Mac, use `Cmd` in place of `Ctrl` for every shortcut that has one, `Option`
 | `Ctrl+Shift+L` | Copy a Markdown link to it |
 | `Ctrl+Shift+T` / `Ctrl+Shift+I` / `Ctrl+Shift+D` | Copy its title / number, SHA or name / details |
 | `Ctrl+Shift+O` | Open a repository, or an issue, pull request, commit, release or run, by its address |
-| `Alt+N` / `Alt+P` | Next / previous comment in the details panel; change in File History, and change or review comment in Changed Files; Markdown heading, or blame run, in Files |
+| `Alt+N` / `Alt+P` | Next / previous comment in the details panel; change in File History, and change or review comment in Changed Files; Markdown heading, or blame run, in Files; file in Gists |
 | `Ctrl+Shift+H` | The changed files of the selected pull request or commit |
 | `Ctrl+Shift+U` | Watch settings for the repository |
 | `Ctrl+Shift+K` | Switch GitHub account |
@@ -1413,6 +1437,13 @@ On a Mac, use `Cmd` in place of `Ctrl` for every shortcut that has one, `Option`
 | `Ctrl+D` or `Delete` | Delete the run |
 | `Enter` on an artifact | Download it into a folder you choose |
 | `Backspace` | Artifacts or jobs back to runs |
+
+### In Gists
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Open the gist on GitHub |
+| `Alt+N` / `Alt+P` | Next / previous file, in the details panel |
 
 ### In My Work and search results
 

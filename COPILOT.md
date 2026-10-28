@@ -26,6 +26,8 @@ codeview.py   — A repository's files as text to read (no wx): a file one line 
                 in, Markdown headings, blame runs, one commit of a file's history.
 alertview.py  — A security alert as text to read (no wx): alert_details, empty_text.
 milestoneview.py — A milestone as text to read (no wx): milestone_details, progress, status_message.
+gistview.py   — A gist as text to read (no wx): gist_text (text and a stop per file heading),
+                file_heading, file_body, status_message.
 insightview.py — Insights as text to read (no wx): insight_details, notes, status_message.
 discussionview.py — A discussion as text to read (no wx): discussion_details (text and
                 Alt+N/Alt+P stops per comment and reply), answer_line, status_message.
@@ -124,6 +126,13 @@ UI thread via `wx.CallAfter`. Never touch wx widgets from a worker thread.
   "milestone". `fetch_prs` retries an HTTP 502/504 without `PR_STAT_FIELDS`
   (additions, deletions, changedFiles), which GitHub times out on for very large PRs
   (nvaccess/nvda); those Items have `has_stats` False and blank Changes/Files cells.
+- `Gist`, `GistFile`, `fetch_gists(limit)` (`gists`, paged, no text), `fetch_gist(id)` (files
+  with `content`, `truncated` past ~1 MB, no content at all when very large; `Gist.files_truncated`
+  when GitHub lists only some files), `count_gists()` — the Gists view (`VIEW_GISTS`, #90,
+  read-only). A repoless category entry (`GISTS_ENTRY`, last of `CATEGORY_ENTRIES`, counted in
+  `COUNTED_ENTRIES`), in `REPOLESS_VIEWS` and `FEED_VIEWS`. A gist's files are read 250 ms after
+  its row rests (`_fetch_gist_later`, `_detail_gen`, `_shows`) and kept on the row's own Gist
+  (`loaded`), so coming back needs no fetch; Alt+N's noun is "file". F is refused aloud.
 - `InsightRow`, `Insights`, `fetch_insights(repo, limit)` — the Insights view (`VIEW_INSIGHTS`,
   #89, read-only). One list whose rows are the figures (`section`: Views, Clones, Referrer,
   Page, Contributor); `count_display`/`uniques_display` name what they count ("1,234 views",

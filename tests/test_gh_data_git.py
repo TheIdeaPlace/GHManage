@@ -30,9 +30,9 @@ def test_api_json_empty_output_is_empty_list(fake_gh):
 
 def test_fetch_branches_joins_commit_info_in_order(fake_gh):
     fake_gh.route("/branches", [
-        {"name": "main", "sha": "a" * 40, "protected": True},
-        {"name": "dev", "sha": "b" * 40},
-        {"name": "orphan", "sha": ""},
+        {"name": "main", "commit": {"sha": "a" * 40}, "protected": True},
+        {"name": "dev", "commit": {"sha": "b" * 40}},
+        {"name": "orphan", "commit": {"sha": ""}},
     ])
     fake_gh.route("commits/" + "a" * 40, {"message": "main tip", "author": "A", "date": "2026-01-01"})
     fake_gh.route("commits/" + "b" * 40, GhError("gone"))
@@ -48,9 +48,42 @@ def test_fetch_branches_joins_commit_info_in_order(fake_gh):
 
 
 def test_fetch_branches_without_repo_has_no_url(fake_gh):
-    fake_gh.route("/branches", [{"name": "main", "sha": ""}])
+    fake_gh.route("/branches", [{"name": "main", "commit": {"sha": ""}}])
     [b] = gh_data.fetch_branches(None)
     assert b.url == ""
+
+
+def test_fetch_branches_reads_every_page(fake_gh):
+    # More than a page of branches used to fail to load at all: `--paginate
+    # -q` printed one array per page, which isn't one JSON document.
+    first = [{"name": f"b{i}", "commit": {"sha": ""}} for i in range(100)]
+    fake_gh.route("branches?per_page=100&page=1", first)
+    fake_gh.route("branches?per_page=100&page=2",
+                  [{"name": "last", "commit": {"sha": ""}, "protected": True}])
+    branches = gh_data.fetch_branches("o/r", 150)
+    assert len(branches) == 101
+    assert (branches[-1].name, branches[-1].protected) == ("last", True)
+    assert fake_gh.calls[0] == ["api", "repos/o/r/branches?per_page=100&page=1"]
+
+
+def test_fetch_branches_stops_at_the_limit(fake_gh):
+    fake_gh.route("branches?per_page=100&page=1",
+                  [{"name": f"b{i}", "commit": {"sha": ""}} for i in range(100)])
+    assert len(gh_data.fetch_branches("o/r", 100)) == 100
+    assert len(fake_gh.calls) == 1
+
+
+def test_fetch_branches_without_repo_leaves_placeholders_for_gh(fake_gh):
+    fake_gh.route("/branches", [])
+    gh_data.fetch_branches(None)
+    assert fake_gh.calls[0] == ["api", "repos/{owner}/{repo}/branches?per_page=100&page=1"]
+
+
+def test_branch_names_need_no_commit_lookups(fake_gh):
+    fake_gh.route("/branches", [{"name": "main", "commit": {"sha": "a" * 40}},
+                                {"name": "dev", "commit": {"sha": "b" * 40}}])
+    assert gh_data.fetch_branch_names("o/r") == ["main", "dev"]
+    assert fake_gh.called_with("/commits/") == []
 
 
 def test_fetch_branches_non_list_is_empty(fake_gh):

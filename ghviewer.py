@@ -141,6 +141,7 @@ from gh_data import (
     dispatch_workflow,
     download_artifact,
     fetch_branches,
+    fetch_branch_names,
     fetch_dispatch_spec,
     fetch_run_artifacts,
     fetch_compare,
@@ -6317,7 +6318,7 @@ class GhViewerFrame(wx.Frame):
 
         def worker() -> None:
             try:
-                names = [b.name for b in fetch_branches(self.repo, 200)]
+                names = fetch_branch_names(self.repo, 200)
                 wx.CallAfter(self._on_workflow_branches_ready, wf, names)
             except GhError as exc:
                 wx.CallAfter(self._on_items_error, str(exc))
@@ -7726,8 +7727,7 @@ class GhViewerFrame(wx.Frame):
 
         def worker() -> None:
             try:
-                branches = fetch_branches(self.repo, 200)
-                names = [b.name for b in branches]
+                names = fetch_branch_names(self.repo, 200)
                 wx.CallAfter(self._show_branch_picker, names)
             except GhError as exc:
                 wx.CallAfter(self._on_items_error, str(exc))
@@ -7780,8 +7780,7 @@ class GhViewerFrame(wx.Frame):
 
         def worker() -> None:
             try:
-                branches = fetch_branches(self.repo, 200)
-                names = [b.name for b in branches]
+                names = fetch_branch_names(self.repo, 200)
                 wx.CallAfter(self._show_compare_pickers, names)
             except GhError as exc:
                 wx.CallAfter(self._on_items_error, str(exc))

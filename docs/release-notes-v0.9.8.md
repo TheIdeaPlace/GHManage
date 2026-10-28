@@ -128,6 +128,13 @@ row reads whole: "Views, Last 14 days, 1,234 views, 210 unique visitors".
 `Enter` opens it on GitHub. GitHub shows traffic only to people who can push to
 the repository; without that, GHManage says so and lists the contributors.
 
+## Gists
+
+A **Gists** entry in the repository list (and **View → View Mode → Gists**)
+lists your gists, public and secret, with their files. Selecting one shows its
+details and then each file's text, headed by its name; `Alt+N` and `Alt+P` move
+between files. `Enter` opens it on GitHub, and Copy Link and Copy Details work.
+
 ## Before you start
 
 GHManage drives the [GitHub CLI](https://cli.github.com/), so install it and sign

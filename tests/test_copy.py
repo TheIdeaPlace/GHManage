@@ -110,6 +110,7 @@ VIEW_SAMPLES = {
     ghviewer.VIEW_DISCUSSIONS: ghviewer.Discussion(3, "T", url="u"),
     ghviewer.VIEW_MILESTONES: ghviewer.Milestone(3, "v1", url="u"),
     ghviewer.VIEW_INSIGHTS: ghviewer.InsightRow("Contributor", "kelly", 3, url="u"),
+    ghviewer.VIEW_GISTS: ghviewer.Gist("abc", "Notes", url="u"),
 }
 
 

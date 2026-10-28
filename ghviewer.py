@@ -33,6 +33,7 @@ import commands
 import diffview
 import discussionview
 import insightview
+import gistview
 import milestoneview
 import settings
 import search_help
@@ -50,7 +51,7 @@ from gh_columns import (
     ISSUE_SET, JOB_SET, LABEL_SET, MY_WORK_SET, NOTIFICATION_SET, ORG_SET,
     PAGEFILE_SET, PAGES_SET, RELEASE_SET, REPO_FILE_SET, REPO_SET, SEARCH_ITEM_SET, TAG_SET,
     SECURITY_SET, WORKFLOW_RUN_SET, WORKFLOW_SET, DISCUSSION_SET, MILESTONE_SET,
-    INSIGHT_SET,
+    INSIGHT_SET, GIST_SET,
 )
 from gh_data import (
     ACTIVITY_MAX,
@@ -72,6 +73,10 @@ from gh_data import (
     fetch_milestones,
     InsightRow,
     fetch_insights,
+    Gist,
+    count_gists,
+    fetch_gist,
+    fetch_gists,
     ALL_BRANCHES,
     ALL_BRANCHES_PER_BRANCH_MAX,
     GhError,
@@ -618,6 +623,8 @@ def copy_values(item) -> CopyValues | None:
         return CopyValues(item.url, item.title, item.repo, "Repository Name", item.title)
     if isinstance(item, Milestone):
         return CopyValues(item.url, item.title, item.title, "Milestone Title", item.title)
+    if isinstance(item, Gist):
+        return CopyValues(item.url, item.title, item.id, "Gist ID", item.title)
     if isinstance(item, InsightRow):
         text = ", ".join(x for x in (item.section, item.name, item.count_display,
                                      item.uniques_display) if x)
@@ -798,6 +805,7 @@ ID_VIEW_SECURITY = wx.NewIdRef()
 ID_VIEW_DISCUSSIONS = wx.NewIdRef()
 ID_VIEW_MILESTONES = wx.NewIdRef()
 ID_VIEW_INSIGHTS = wx.NewIdRef()
+ID_VIEW_GISTS = wx.NewIdRef()
 
 
 # View modes
@@ -832,15 +840,16 @@ VIEW_SECURITY = "security"     # Dependabot, code scanning and secret scanning a
 VIEW_DISCUSSIONS = "discussions"  # a repository's discussions (GraphQL)
 VIEW_MILESTONES = "milestones"   # a repository's milestones and their progress
 VIEW_INSIGHTS = "insights"       # traffic of the last 14 days, and contributors
+VIEW_GISTS = "gists"             # your gists (not of a repository)
 
 # Views that are not views *of a repo*, so they work with none selected.
 REPOLESS_VIEWS = (VIEW_FAVORITES, VIEW_NOTIFICATIONS, VIEW_MY_WORK, VIEW_ACTIVITY,
                   VIEW_STARRED, VIEW_WATCHED, VIEW_SEARCH_ISSUES, VIEW_SEARCH_REPOS,
-                  VIEW_ORGS, VIEW_ORG, VIEW_SHARED)
+                  VIEW_ORGS, VIEW_ORG, VIEW_SHARED, VIEW_GISTS)
 # The repoless views fetched from GitHub (Favorites is read from disk).
 FEED_VIEWS = (VIEW_NOTIFICATIONS, VIEW_MY_WORK, VIEW_ACTIVITY, VIEW_STARRED,
               VIEW_WATCHED, VIEW_SEARCH_ISSUES, VIEW_SEARCH_REPOS, VIEW_ORGS, VIEW_ORG,
-              VIEW_SHARED)
+              VIEW_SHARED, VIEW_GISTS)
 # Views listing issues and pull requests (Items), shown with the issue
 # details. Only Issues & PRs is of one repo; the issue actions (close,
 # reopen, comment) belong to it alone.
@@ -904,6 +913,7 @@ ACTIVITY_ENTRY = "__activity__"
 STARRED_ENTRY = "__starred__"
 WATCHED_ENTRY = "__watched__"
 MY_ORGS_ENTRY = "__my_orgs__"
+GISTS_ENTRY = "__gists__"
 # Shown only when someone has shared a repository with you.
 SHARED_ENTRY = "__shared__"
 SHARED_LABEL = "Shared With Me"
@@ -918,6 +928,7 @@ CATEGORY_ENTRIES = [
     (NOTIFICATIONS_ENTRY, "Notifications"),
     (MY_WORK_ENTRY, "My Work"),
     (MY_ORGS_ENTRY, "My Organizations"),
+    (GISTS_ENTRY, "Gists"),
 ]
 # Which repo-list entry stands for which view, both ways.
 VIEW_ENTRIES = {
@@ -929,6 +940,7 @@ VIEW_ENTRIES = {
     VIEW_WATCHED: WATCHED_ENTRY,
     VIEW_SHARED: SHARED_ENTRY,
     VIEW_ORGS: MY_ORGS_ENTRY,
+    VIEW_GISTS: GISTS_ENTRY,
 }
 ENTRY_VIEWS = {entry: view for view, entry in VIEW_ENTRIES.items()}
 # The categories whose entry carries a count, like ★ Favorites (6), and how
@@ -937,6 +949,7 @@ COUNTED_ENTRIES = {
     NOTIFICATIONS_ENTRY: count_unread_notifications,
     STARRED_ENTRY: count_starred_repos,
     WATCHED_ENTRY: count_watched_repos,
+    GISTS_ENTRY: count_gists,
 }
 
 # The Actions menu item for F. Context menus name what it will do instead.
@@ -993,6 +1006,7 @@ VIEW_COLUMNS = {
     VIEW_DISCUSSIONS: DISCUSSION_SET,
     VIEW_MILESTONES: MILESTONE_SET,
     VIEW_INSIGHTS: INSIGHT_SET,
+    VIEW_GISTS: GIST_SET,
 }
 
 
@@ -2855,6 +2869,7 @@ class GhViewerFrame(wx.Frame):
         show_menu.AppendRadioItem(ID_VIEW_STARRED, "Starred Repositories")
         show_menu.AppendRadioItem(ID_VIEW_WATCHED, "Watched Repositories")
         show_menu.AppendRadioItem(ID_VIEW_SHARED, "Shared With Me")
+        show_menu.AppendRadioItem(ID_VIEW_GISTS, "Gists")
         # Checked too while one organization's repositories are showing.
         show_menu.AppendRadioItem(ID_VIEW_ORGS, "My Organizations")
         view_menu.AppendSubMenu(show_menu, "View Mode")
@@ -2973,6 +2988,7 @@ class GhViewerFrame(wx.Frame):
         self.Bind(wx.EVT_MENU, self.on_view_starred, id=ID_VIEW_STARRED)
         self.Bind(wx.EVT_MENU, self.on_view_watched, id=ID_VIEW_WATCHED)
         self.Bind(wx.EVT_MENU, self.on_view_shared, id=ID_VIEW_SHARED)
+        self.Bind(wx.EVT_MENU, lambda e: self._select_category(VIEW_GISTS), id=ID_VIEW_GISTS)
         self.Bind(wx.EVT_MENU, self.on_view_orgs, id=ID_VIEW_ORGS)
         self.Bind(wx.EVT_MENU, self.on_favorite, id=ID_FAVORITE)
         for view, menu_id in ID_GO_TO_VIEW.items():
@@ -3205,6 +3221,7 @@ class GhViewerFrame(wx.Frame):
         menu_bar.Check(ID_VIEW_STARRED, self.view_mode == VIEW_STARRED)
         menu_bar.Check(ID_VIEW_WATCHED, self.view_mode == VIEW_WATCHED)
         menu_bar.Check(ID_VIEW_SHARED, self.view_mode == VIEW_SHARED)
+        menu_bar.Check(ID_VIEW_GISTS, self.view_mode == VIEW_GISTS)
         menu_bar.Check(ID_VIEW_ORGS, self.view_mode in (VIEW_ORGS, VIEW_ORG))
         # State filter
         menu_bar.Check(ID_STATE_OPEN, self.state_filter == "open")
@@ -3847,6 +3864,8 @@ class GhViewerFrame(wx.Frame):
             self._set_view_status("Loading your organizations…")
         elif self.view_mode in REPO_LIST_VIEWS:
             self._set_view_status(f"Loading {self._view_label(self.view_mode, lower=True)}…")
+        elif self.view_mode == VIEW_GISTS:
+            self._set_view_status("Loading your gists…")
         else:
             self._set_view_status(f"Loading {view_label} for {self.repo}…")
         self.list_ctrl.DeleteAllItems()
@@ -4041,6 +4060,15 @@ class GhViewerFrame(wx.Frame):
                 elif view == VIEW_SECURITY:
                     report = fetch_security_alerts(repo, state, limit)
                     wx.CallAfter(self._on_security_loaded, token, report, state)
+                elif view == VIEW_GISTS:
+                    gists = fetch_gists(limit)
+                    count = None
+                    if len(gists) >= limit:
+                        try:
+                            count = count_gists()
+                        except GhError:
+                            pass
+                    wx.CallAfter(self._on_gists_loaded, token, gists, count, focus_row)
                 elif view == VIEW_INSIGHTS:
                     insights = fetch_insights(repo, INSIGHT_CONTRIBUTORS)
                     wx.CallAfter(self._on_insights_loaded, token, insights)
@@ -4120,6 +4148,7 @@ class GhViewerFrame(wx.Frame):
         VIEW_DISCUSSIONS: "Discussions",
         VIEW_MILESTONES: "Milestones",
         VIEW_INSIGHTS: "Insights",
+        VIEW_GISTS: "Gists",
     }
 
     def _view_label(self, view: str, lower: bool = False) -> str:
@@ -4897,6 +4926,8 @@ class GhViewerFrame(wx.Frame):
             self._show_milestone_details(idx)
         elif self.view_mode == VIEW_INSIGHTS:
             self._show_insight_details(idx)
+        elif self.view_mode == VIEW_GISTS:
+            self._show_gist_details(idx)
         else:
             self._show_git_details(idx)
 
@@ -4960,6 +4991,96 @@ class GhViewerFrame(wx.Frame):
             return
         if filtered:
             wx.CallLater(100, self._focus_list, row)
+
+    def _on_gists_loaded(self, token: int, gists: list, count, focus=0) -> None:
+        """Your gists, most recently updated first; the entry in the
+        repository list counts them."""
+        if not self._fetch_is_current(token):
+            return  # the user has moved on; these belong to a view they left
+        self.git_items = gists
+        self.items = []
+        filtered = self._populate_filtered_list(gists, use_favorite_prefix=False)
+        if len(gists) < self.current_limit:
+            count = len(gists)  # all of them, so newer than the startup count
+        if count is not None:
+            self._category_counts[GISTS_ENTRY] = count
+            self._refresh_category_labels()
+        message = gistview.status_message(gists, self.current_limit)
+        keys = "R=refresh"
+        if gists:
+            keys = ("Enter or Ctrl+O=open on GitHub  Alt+N/Alt+P=next/previous file  "
+                    "Ctrl++=view more  R=refresh  Ctrl+F=filter")
+        self._set_view_status(message, keys)
+        self._update_title()
+        if not gists:
+            self.details_text.SetValue("You have no gists. Gists you make on "
+                                       "gist.github.com are listed here.")
+            announce.announce(message, announce.STATUS)
+            return
+        row = focus if isinstance(focus, int) else 0
+        if filtered:
+            wx.CallLater(100, self._focus_list, row)
+
+    def _show_gist_details(self, idx: int) -> None:
+        """A gist and, once read (when the selection has rested on it a
+        moment), each of its files' text, headed by its name."""
+        if idx < 0 or idx >= len(self.git_items):
+            self.details_text.Clear()
+            return
+        item = self.git_items[idx]
+        if not isinstance(item, Gist):
+            self.details_text.Clear()
+            return
+        self._render_gist(item)
+        if not item.loaded:
+            self._fetch_gist_later(item, self._detail_gen)
+
+    def _render_gist(self, item: Gist) -> None:
+        text, positions = gistview.gist_text(item)
+        self.details_text.SetValue(text)
+        self._comment_positions = [(line, 1) for line in positions]
+        self._current_comment = -1
+
+    def _fetch_gist_later(self, item: Gist, gen: int) -> None:
+        """Read a gist's files once the selection has rested on it, so
+        arrowing down the list doesn't read every gist passed."""
+
+        def worker() -> None:
+            try:
+                got, err = fetch_gist(item.id), ""
+            except GhError as exc:
+                got, err = None, str(exc)
+            wx.CallAfter(self._on_gist_fetched, gen, item, got, err)
+
+        def start() -> None:
+            if gen == self._detail_gen:
+                threading.Thread(target=worker, daemon=True).start()
+
+        wx.CallLater(250, start)
+
+    def _on_gist_fetched(self, gen: int, item: Gist, got, err: str) -> None:
+        if got is not None:
+            # Kept on the row's own Gist, so coming back to it needs no fetch.
+            item.files, item.files_truncated, item.loaded = got.files, got.files_truncated, True
+        if not self._shows(VIEW_GISTS, item, gen):
+            return
+        reading = self.FindFocus() is self.details_text
+        if got is None:
+            said = f"Couldn't get the files of {item.title}: {err}"
+            text = self.details_text.GetValue()
+            self.details_text.SetValue(text.rsplit("\n", 1)[0] + "\n" + said)
+            self._announce(said)  # on the status bar, not spoken over the list
+            if reading:
+                announce.announce(said, announce.STATUS)
+            return
+        caret = self.details_text.GetInsertionPoint() if reading else 0
+        self._render_gist(item)
+        if reading:
+            # A focused text box's new value isn't read: say it arrived.
+            self.details_text.SetInsertionPoint(min(caret, self.details_text.GetLastPosition()))
+            n = len(item.files)
+            announce.announce(f"Files here: {n}. Alt+N moves to "
+                              f"{'it' if n == 1 else 'the first'}.", announce.STATUS)
 
     def _on_insights_loaded(self, token: int, insights) -> None:
         """Insights: a row a figure, Section first; what is missing (no push
@@ -5673,6 +5794,7 @@ class GhViewerFrame(wx.Frame):
         VIEW_DISCUSSIONS: "Number",
         VIEW_MILESTONES: "Milestone Title",
         VIEW_INSIGHTS: "Name",
+        VIEW_GISTS: "Gist ID",
     }
 
     _COPY_WHAT = {
@@ -5911,7 +6033,7 @@ class GhViewerFrame(wx.Frame):
         if url:
             webbrowser.open(url)
             label = getattr(item, "number", None) or getattr(item, "name", "") or getattr(item, "short_sha", "")
-            self._announce(f"Opened {label} in browser")
+            self._announce(f"Opened {label or getattr(item, 'title', '')} in browser")
         else:
             self._announce("No URL for this item")
 
@@ -6007,7 +6129,7 @@ class GhViewerFrame(wx.Frame):
         # nothing it could favorite.
         if self.view_mode == VIEW_FAVORITES:
             fav_label = "Remove from Favorites (F)"
-        elif (item is None or isinstance(item, (OrgEntry, ChangedFile))
+        elif (item is None or isinstance(item, (OrgEntry, ChangedFile, Gist, InsightRow))
               or not getattr(item, "url", "")):
             fav_label = None
         elif self._favorite_prefix(item):
@@ -6696,6 +6818,10 @@ class GhViewerFrame(wx.Frame):
             )
             return
 
+        if isinstance(item, Gist):
+            self._tell("Gists can't be favorites. Ctrl+Shift+C copies its link.")
+            return
+
         if isinstance(item, InsightRow):
             self._tell("Insights can't be favorites. F on the repository in the "
                        "repository list favorites it.")
@@ -6973,6 +7099,11 @@ class GhViewerFrame(wx.Frame):
                 self._announce(f"That is all {whose}{label}.")
                 return
             self._pending_focus_row = len(self._shown)
+        elif self.view_mode == VIEW_GISTS:
+            if len(self.git_items) < self.current_limit:
+                self._announce("That is all your gists.")
+                return
+            self._pending_focus_row = len(self._shown)
         elif not self.repo:
             return
         elif (self.view_mode == VIEW_COMMITS and self.commit_branch == ALL_BRANCHES
@@ -7006,7 +7137,7 @@ class GhViewerFrame(wx.Frame):
                 self._announce(f"Opened {item.title} in browser")
             else:
                 label = getattr(item, "number", None) or getattr(item, "name", "") or getattr(item, "short_sha", "")
-                self._announce(f"Opened {label} in browser")
+                self._announce(f"Opened {label or getattr(item, 'title', '')} in browser")
         else:
             self._announce("No URL for this item")
 
@@ -8840,6 +8971,8 @@ class GhViewerFrame(wx.Frame):
             return "change"
         if view == VIEW_CODE:
             return "run" if getattr(self, "_code_blame", None) is not None else "heading"
+        if view == VIEW_GISTS:
+            return "file"
         return "comment"
 
     def _load_code(self) -> None:

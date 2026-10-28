@@ -6,7 +6,8 @@ a fast, keyboard-driven list.
 This release lets you read a repository's code: browse its folders, read any
 file a line at a time, see who last changed each line, and read every change a
 file has had. In a pull request's changed files you can read reviewers'
-comments on its lines, and add your own.
+comments on its lines, and add your own. And you can read a repository's
+security alerts.
 
 On a Mac, use `Cmd` where these notes say `Ctrl`, and `Option` where they say `Alt`.
 
@@ -65,6 +66,22 @@ To comment on a line, move into the file's lines, put the caret on the line and
 press `M` (**Actions → Comment on This Line…**). Type the comment and choose OK.
 It appears after the line, and the caret stays where it was. A removed line
 takes a comment on the file as it was before the change.
+
+## Security Alerts
+
+**View → View Mode → Security Alerts** (or **Go To → Security Alerts** on a
+repository) lists a repository's Dependabot, code scanning and secret scanning
+alerts together, most severe first. The Kind column says which each is, and
+Where gives the manifest file, or the file and line. Selecting one shows
+everything GitHub says about it: the advisory, the affected and first patched
+versions, the CVE and GHSA ids and CVSS score, the rule and where it matched, or
+the kind of secret and whether it is still valid, and who dismissed it and why.
+`Enter` opens it on GitHub. **View → State** shows closed alerts, or all.
+
+A kind of alert that isn't turned on, or that you can't see, is named in the
+status bar, for example "Code scanning isn't set up on this repository.", and
+the rest are still shown. If `gh` needs the "security_events" permission, the
+status bar gives the command that adds it.
 
 ## Before you start
 

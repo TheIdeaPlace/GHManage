@@ -4185,10 +4185,10 @@ class GhViewerFrame(wx.Frame):
         self.items = []
         filtered = self._populate_filtered_list(alerts, use_favorite_prefix=True)
         message = security_status(self.repo, report, state, self.current_limit)
-        self._set_view_status(
-            message,
-            "Enter=open on GitHub  Ctrl++=view more  R=refresh  Ctrl+F=filter",
-        )
+        keys = "R=refresh  Ctrl+F=filter"
+        if alerts:  # nothing to open, or more to show, in an empty list
+            keys = "Enter=open on GitHub  Ctrl++=view more  " + keys
+        self._set_view_status(message, keys)
         self._update_title()
         if not alerts:
             # Nothing in the list to read, so say why here and out loud.

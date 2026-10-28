@@ -457,7 +457,7 @@ def test_an_empty_list_says_why_in_the_details_and_aloud(monkeypatch):
     message, keys = frame.status[-1]
     assert message == ("o/r — 0 open security alerts. "
                        "Dependabot alerts aren't turned on for this repository.")
-    assert "Enter=open on GitHub" in keys
+    assert keys == "R=refresh  Ctrl+F=filter"
     assert spoken == [(message, announce.STATUS)]
 
 

@@ -24,6 +24,7 @@ diffview.py   — A changed file as text to read (no wx). Lines are marked by ap
                 `theideaplace_appkit.difftext`, shared with The Chat Place.
 codeview.py   — A repository's files as text to read (no wx): a file one line out per line
                 in, Markdown headings, blame runs, one commit of a file's history.
+alertview.py  — A security alert as text to read (no wx): alert_details, empty_text.
 ```
 
 **Rule:** `ghviewer.py` never calls `gh` or the API directly. `gh_data.py` never imports wx.
@@ -73,6 +74,19 @@ UI thread via `wx.CallAfter`. Never touch wx widgets from a worker thread.
   ref, path)` (GraphQL `object(expression:).blame(path:)`, values quoted with json.dumps),
   `fetch_ref_names(repo)` (branch and tag names only, for Ctrl+B in Files), and
   `fetch_pr_head_sha(pr_url)` (W on a pull request's file).
+- `SecurityAlert`, `SecurityAlerts`, `fetch_security_alerts(repo, state, limit)` — the Security
+  Alerts view (`VIEW_SECURITY`, #85, read-only). Reads `repos/{r}/dependabot|code-scanning|
+  secret-scanning/alerts` in parallel (ThreadPoolExecutor); each kind fails on its own and
+  `classify_alert_error` turns its failure into "off" (disabled / not enabled / no analysis /
+  404), "rights" (admin rights), "scope" (403 otherwise: said once by `scope_sentence`, naming
+  `security_events` and the `gh auth refresh` command) or "error". **gh adds a bogus
+  "needs the admin:repo_hook scope" hint to every one of these failures**, so "off" is checked
+  first and the scope gh names is never repeated. Dependabot rejects `page=` (HTTP 400): it
+  pages by cursor through `_api_cursor_pages` (`gh api -i`, Link rel="next"). Secret scanning
+  rejects `state=all`, so View > State > All sends no state; `hide_secret=true` always, so the
+  secret is never fetched. `sort_alerts`: `SEVERITY_RANK` (critical..low, then code scanning's
+  tool error/warning/note, then none), newest first within. `ghviewer.security_status` is
+  the status line; `_on_security_loaded` speaks it (STATUS) only when the list is empty.
 - `fetch_tags(repo, limit)` / `fetch_releases(repo, limit)` / `fetch_workflow_runs(repo, limit)`.
 - `fetch_release_assets(repo, release_id, release_tag, limit)` — a release's files with their
   download counts. The releases endpoint already returns assets inline, so the Releases list
@@ -419,6 +433,7 @@ UI thread via `wx.CallAfter`. Never touch wx widgets from a worker thread.
 | Notifications | `notifications?all=false|true&per_page=50&page=` |
 | Mark read / done / unsubscribe | `PATCH`/`DELETE notifications/threads/{id}`, `DELETE …/{id}/subscription` |
 | Mark all read | `PUT notifications -F read=true` |
+| Security alerts | `repos/{owner}/{repo}/dependabot/alerts` (cursor paging), `…/code-scanning/alerts`, `…/secret-scanning/alerts?hide_secret=true` |
 | Activity feed | `users/{login}/received_events?per_page=100&page=` (max 3 pages; page 4 is HTTP 422; pages are not reliably full) |
 | PR titles for the feed | GraphQL `repository(owner,name){ pN: pullRequest(number:N){title body} }`, batched, per repo on error |
 
@@ -494,7 +509,7 @@ including the checks either side. The short version:
 - v0.9.5 — View ▸ Columns… dialog (order, show/hide, Speak column names) replaces the Columns submenu; columns per kind of list and list mode remembered (settings.py, settings.json); plain-word headings and Full mode names only text columns after the first (columns.py, gh_columns.py); Commits: All branches and a Branches column
 - v0.9.6 — File ▸ Archive or Unarchive Repository… and Delete Repository from GitHub… (typed-name confirmation, admin check, delete_repo scope via MissingScope); spoken results through UIA notifications from a served provider (announce.py, speech.py), View ▸ Speak Results; Search dialog examples in a read-only box, not dialog text; Mac labels through _name/speech.set_label, macOS CI runs the tests
 - v0.9.7 — Changed Files (VIEW_FILES): Enter on a commit or H on a PR lists its files; each file's lines marked by app-kit's difftext (diffview.py) in a style from View > Mark Changed Lines With; Alt+N/Alt+P between hunks; Copy Diff and Open Diff in Default App
-- v0.9.8 — Files (VIEW_CODE): browse a repository at a branch, tag or commit, read a file one line out per line in (codeview.py), Alt+N/Alt+P between Markdown headings, Ctrl+B Select Branch or Tag; B blame in runs; H File History (VIEW_HISTORY), each commit's change to the file in the chosen marking style, Enter to Changed Files; W in Changed Files opens the file whole; a PR's review comments after their lines in Changed Files, Alt+N/Alt+P stop at them, M comments on the caret's line, Comments column (#84)
+- v0.9.8 — Files (VIEW_CODE): browse a repository at a branch, tag or commit, read a file one line out per line in (codeview.py), Alt+N/Alt+P between Markdown headings, Ctrl+B Select Branch or Tag; B blame in runs; H File History (VIEW_HISTORY), each commit's change to the file in the chosen marking style, Enter to Changed Files; W in Changed Files opens the file whole; a PR's review comments after their lines in Changed Files, Alt+N/Alt+P stop at them, M comments on the caret's line, Comments column (#84); Security Alerts (VIEW_SECURITY, alertview.py): Dependabot, code scanning and secret scanning alerts, most severe first (#85)
 
 ## Roadmap
 

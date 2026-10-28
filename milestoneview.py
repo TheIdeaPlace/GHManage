@@ -43,7 +43,9 @@ def milestone_details(m: Milestone) -> str:
     lines.append("")
     lines.extend(m.description.splitlines() or ["(no description)"])
     lines.append("")
-    lines.append("Press Enter to list its issues and pull requests, Ctrl+O to open it on GitHub.")
+    # Enter works in the list, not here; Ctrl+O works from both.
+    lines.append("Enter in the list shows its issues and pull requests. "
+                 "Ctrl+O opens it on GitHub.")
     return "\n".join(lines)
 
 

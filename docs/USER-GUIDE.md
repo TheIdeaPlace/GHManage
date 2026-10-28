@@ -473,7 +473,7 @@ To switch branch without going back, use **Actions → Select Branch…** (`Ctrl
 
 **All branches**, first in that list, shows recent commits from every branch together, newest first. A commit on several branches appears once, naming each of them. **View More** (`Ctrl++`) adds older commits, up to the newest 100 of each of the default branch and the 99 most recently changed branches (on a repository with more than 1,000 branches, of the first 1,000 by name); that makes it a view of recent work across branches rather than of older history, for which you pick one branch. For an older commit, the branches named are the ones it is still among the newest commits of, which may not be every branch that has it. If some branches couldn't be read, the status bar says how many.
 
-Each commit shows its short SHA, message, author and date; **View → Columns…** adds the branch (on All branches, the first few branches it is on and how many more), how many files changed and the lines added and removed. The details panel has the full SHA, the branch or every branch it is on, the whole message, and the files changed when GitHub reports them. `Enter` on a commit opens it on GitHub, and `H` lists its changed files, with their lines; see [Changed Files](#changed-files).
+Each commit shows its short SHA, message, author and date; **View → Columns…** adds the branch (on All branches, the first few branches it is on and how many more), how many files changed and the lines added and removed. The details panel has the full SHA, the branch or every branch it is on, the whole message, and the files changed when GitHub reports them. `Enter` on a commit lists its changed files, with their lines; see [Changed Files](#changed-files). `H` does the same, and `Ctrl+O` opens the commit on GitHub.
 
 ---
 
@@ -481,7 +481,7 @@ Each commit shows its short SHA, message, author and date; **View → Columns…
 
 **Changed Files** lists the files a pull request or a commit changed, and lets you read each file's changed lines, a line at a time, with every line saying whether it was added, removed or left as it was.
 
-To open it, select a pull request in Issues & PRs, or a commit in Commits, and press `H`. **Actions → Changed Files** (`Ctrl+Shift+H`) and the context menu do the same. When the files have loaded, GHManage says how many there are and how many lines were added and removed, for example "3 files changed, 40 lines added, 12 removed." `Backspace` takes you back to the pull request or commit, in the list as you left it.
+To open it, press `Enter` on a commit in Commits, or `H` on a pull request in Issues & PRs or on a commit. **Actions → Changed Files** (`Ctrl+Shift+H`) and the context menu do the same. When the files have loaded, GHManage says how many there are and how many lines were added and removed, for example "3 files changed, 40 lines added, 12 removed." `Backspace` takes you back to the pull request or commit, in the list as you left it.
 
 Each file has a row with its path, what happened to it (Added, Modified, Deleted or Renamed) and how many lines were added and removed. The quick filter (`Ctrl+F`) finds a file by part of its name.
 
@@ -1164,9 +1164,10 @@ On a Mac, use `Cmd` in place of `Ctrl` for every shortcut that has one, `Option`
 | Key | Action |
 |-----|--------|
 | `Enter` on a branch | Show its commits |
+| `Enter` on a commit | Show its changed files |
 | `Ctrl+Shift+B` | Compare two branches (Branches view) |
 | `Ctrl+B` | Choose the branch (Commits view) |
-| `H` | The selected commit's changed files |
+| `H` | The selected commit's changed files, as `Enter` does |
 | `Backspace` | Commits back to branches |
 
 ### In Changed Files

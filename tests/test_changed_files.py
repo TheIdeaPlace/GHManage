@@ -560,3 +560,13 @@ def test_a_failed_diff_frees_the_next_try():
     f = _frame(_diff_busy=True)
     Frame._diff_failed(f, "diff too large")
     assert f._diff_busy is False and f.told[-1] == "Couldn't get the diff: diff too large"
+
+
+def test_enter_on_a_commit_opens_its_changed_files():
+    commit = Commit("a" * 40, "aaaaaaaa", "One", "me", "", url="u")
+    f = _frame(view_mode=ghviewer.VIEW_COMMITS)
+    f._focused_item = lambda: commit
+    opened = []
+    f._show_changed_files = lambda: opened.append(True)
+    Frame.on_item_activated(f, None)
+    assert opened == [True]

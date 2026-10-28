@@ -4083,7 +4083,7 @@ class GhViewerFrame(wx.Frame):
         elif self.view_mode == VIEW_ASSETS:
             compare_hint = "  Enter=download in browser  Backspace=back to releases"
         elif self.view_mode == VIEW_COMMITS:
-            compare_hint = "  H=changed files  Backspace=back to branches"
+            compare_hint = "  Enter=changed files  Backspace=back to branches"
         elif self.view_mode == VIEW_LABELS:
             compare_hint = (
                 "  Enter=browse issues & PRs with it"
@@ -4685,7 +4685,10 @@ class GhViewerFrame(wx.Frame):
                 lines.append(f"Total: +{item.additions} -{item.deletions} ({item.files_changed} files)")
             if getattr(self, "view_mode", None) == VIEW_COMMITS:
                 lines.append("")
-                lines.append("Press H to read the changed files.")
+                # H, not Enter: Enter only works in the list, and this is read
+                # in the details panel.
+                lines.append("Press H to read the changed files, "
+                             "Ctrl+O to open the commit on GitHub.")
         elif isinstance(item, Tag):
             lines.append(f"Tag: {item.name}")
             lines.append(f"Commit: {item.commit_sha}")
@@ -5155,6 +5158,11 @@ class GhViewerFrame(wx.Frame):
         if self.view_mode == VIEW_FILES and isinstance(item, ChangedFile):
             self._read_changes()
             return
+        # In Commits, Enter steps into the commit's changed files, as Enter on
+        # a branch steps into its commits; Ctrl+O opens it on GitHub.
+        if self.view_mode == VIEW_COMMITS and isinstance(item, Commit):
+            self._show_changed_files()
+            return
         # In Artifacts view, Enter downloads the selected artifact
         if self.view_mode == VIEW_ARTIFACTS and isinstance(item, Artifact):
             self._download_artifact_flow(item)
@@ -5233,6 +5241,7 @@ class GhViewerFrame(wx.Frame):
     # Open in Browser already offers.
     _OPEN_LABELS = {
         VIEW_BRANCHES: "Show Commits",
+        VIEW_COMMITS: "Changed Files",
         VIEW_WORKFLOWS: "Run on a Branch…",
         VIEW_WORKFLOW: "List Artifacts",
         VIEW_JOBS: "Read Log",
@@ -5270,6 +5279,8 @@ class GhViewerFrame(wx.Frame):
             label = None  # gone from GitHub; Enter would only say so
         # Actions entries that do what the Enter entry already does.
         same_as_enter = {ID_ACT_RUN_WORKFLOW, ID_ACT_DOWNLOAD_ARTIFACT}
+        if self.view_mode == VIEW_COMMITS:
+            same_as_enter.add(ID_CHANGED_FILES)
         if label and item is not None:
             entries.append(("item", ID_CTX_OPEN, f"{label}\tEnter"))
             entries.append(("sep",))

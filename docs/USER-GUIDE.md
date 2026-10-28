@@ -486,9 +486,9 @@ A list of very large pull requests can take GitHub too long to measure. Then GHM
 - **Clones**: the same for clones and unique cloners.
 - **Referrer**: the sites people came from, most first.
 - **Page**: the repository's most visited pages, most first.
-- **Contributor**: each contributor with their commits on the default branch, most first, up to 500.
+- **Contributor**: each contributor with their commits on the default branch, most first, up to 500; the status bar says when there are that many.
 
-The status bar sums it up, for example "owner/name — 1,234 views (210 unique) and 56 clones (12 unique) in the last 14 days, 30 contributors." Selecting a row shows it in full in the details panel. `Enter` or `Ctrl+O` opens it on GitHub: the repository's traffic page for views, clones and referrers, the page itself for a popular page, and the person's profile for a contributor. The quick filter (`Ctrl+F`) finds rows by section or name, for example "contributor". **Copy Details** copies the row as it reads.
+The status bar sums it up, for example "owner/name — 1,234 views (210 unique) and 56 clones (12 unique) in the last 14 days, 30 contributors." Selecting a row shows it in full in the details panel. `Enter` or `Ctrl+O` opens it on GitHub: the repository's traffic page for views, clones and referrers, the page itself for a popular page, and the person's profile for a contributor. The quick filter (`Ctrl+F`) finds rows by section or name, for example "contributor". **Copy Details** copies what the details panel shows; **Copy Markdown Link** gives the row as it reads, linked.
 
 GitHub keeps traffic for 14 days only, and shows it only to people who can push to the repository. Without that access the Views, Clones, Referrer and Page rows are left out, and GHManage says "Traffic needs push access to owner/name, which you don't have." after the first row. GitHub won't list the contributors of a very large repository, and says so; and when it is still counting them, GHManage says "GitHub is still counting the contributors; press R in a moment."
 

@@ -201,25 +201,38 @@ ROWS = [InsightRow("Views", "Last 14 days", 3, 2, url="u"), InsightRow("Contribu
 
 
 def test_loaded_lands_on_the_first_row(monkeypatch):
-    later, spoken = [], []
-    monkeypatch.setattr(ghviewer.wx, "CallLater", lambda ms, fn, *a: later.append(a))
+    later, spoken, focused = [], [], []
+    monkeypatch.setattr(ghviewer.wx, "CallLater", lambda ms, fn, *a: later.append(fn))
     monkeypatch.setattr(announce, "announce", lambda text, *a, **k: spoken.append(text))
-    f = _frame(_focus_list=lambda row: None)
+    f = _frame(_focus_list=focused.append)
     Frame._on_insights_loaded(f, 2, Insights(ROWS))
     assert f.git_items == []  # a load the user moved on from
     Frame._on_insights_loaded(f, 1, Insights(ROWS))
-    assert f.git_items == ROWS and later == [(0,)] and spoken == []
+    later[-1]()
+    assert f.git_items == ROWS and focused == [0] and spoken == []
     message, keys = f.status[-1]
     assert keys.startswith("Enter or Ctrl+O=open on GitHub")
 
 
 def test_what_is_missing_is_said_after_the_first_row(monkeypatch):
-    spoken = []
-    monkeypatch.setattr(ghviewer.wx, "CallLater", lambda *a: None)
-    monkeypatch.setattr(announce, "announce", lambda text, *a, **k: spoken.append(text))
-    f = _frame()
+    events, later = [], []
+    monkeypatch.setattr(ghviewer.wx, "CallLater", lambda ms, fn, *a: later.append(fn))
+    monkeypatch.setattr(announce, "announce", lambda text, *a, **k: events.append(text))
+    f = _frame(_focus_list=lambda row: events.append(("focus", row)))
     Frame._on_insights_loaded(f, 1, Insights(ROWS[1:], traffic_error="Traffic needs push."))
-    assert spoken == ["Traffic needs push."]
+    assert events == []          # nothing before focus moves
+    later[-1]()
+    assert events == [("focus", 0), "Traffic needs push."]
+
+
+def test_a_view_left_before_focus_moves_is_not_focused(monkeypatch):
+    later, events = [], []
+    monkeypatch.setattr(ghviewer.wx, "CallLater", lambda ms, fn, *a: later.append(fn))
+    f = _frame(_focus_list=events.append)
+    Frame._on_insights_loaded(f, 1, Insights(ROWS))
+    f._fetch_is_current = lambda token: False
+    later[-1]()
+    assert events == []
 
 
 def test_nothing_to_show_is_said(monkeypatch):
@@ -239,7 +252,15 @@ def test_many_contributors_says_only_the_top_are_listed(monkeypatch):
     f = _frame()
     Frame._on_insights_loaded(f, 1, Insights([InsightRow("Contributor", "a", 2),
                                               InsightRow("Contributor", "b", 1)]))
-    assert f.status[-1][0].endswith("The 2 contributors with most commits are listed.")
+    assert f.status[-1][0] == "o/r — 2 contributors. These are the 2 with most commits."
+
+
+def test_full_mode_does_not_name_cells_that_say_what_they_count():
+    from columns import row_text
+    cols = ghviewer.INSIGHT_SET.defs(list(ghviewer.INSIGHT_SET.defaults))
+    values = InsightRow("Views", "Last 14 days", 1234, 210).to_row([c.id for c in cols])
+    assert row_text(values, cols, True) == (
+        "Views, Name: Last 14 days, 1,234 views, 210 unique visitors")
 
 
 def test_selecting_a_row_shows_it():

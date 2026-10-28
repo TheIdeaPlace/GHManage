@@ -63,9 +63,10 @@ def notes(insights: Insights) -> list[str]:
     return out
 
 
-def status_message(repo: str, insights: Insights) -> str:
+def status_message(repo: str, insights: Insights, most: int = 0) -> str:
     """``o/r — 1,234 views (210 unique) and 56 clones in the last 14 days,
-    12 contributors.`` and then anything missing."""
+    12 contributors.`` and then anything missing. ``most``: the most
+    contributors listed, said when that many are."""
     parts: list[str] = []
     views, clones = _total(insights, "Views"), _total(insights, "Clones")
     if views and clones:
@@ -75,5 +76,7 @@ def status_message(repo: str, insights: Insights) -> str:
     if not insights.contributors_pending and not insights.contributors_error:
         parts.append(f"{people:,} contributor{'' if people == 1 else 's'}")
     said = f"{repo} — {', '.join(parts)}." if parts else f"{repo} — no insights to show."
+    if most and people >= most:
+        said += f" These are the {most:,} with most commits."
     extra = notes(insights)
     return " ".join([said] + extra)

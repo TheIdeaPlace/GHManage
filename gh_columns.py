@@ -132,8 +132,9 @@ CATALOG: dict[str, ColumnDef] = {c.id: c for c in [
     _c("done", "Done", 60),
     # Insights
     _c("section", "Section", 100),
-    _c("count", "Count", 130),
-    _c("uniques", "Unique", 160),
+    # They say what they count ("1,234 views"), so Full mode adds no name.
+    _c("count", "Count", 130, STATE),
+    _c("uniques", "Unique", 160, STATE),
 ]}
 
 

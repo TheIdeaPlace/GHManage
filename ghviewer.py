@@ -4970,9 +4970,7 @@ class GhViewerFrame(wx.Frame):
         self.git_items = rows
         self.items = []
         filtered = self._populate_filtered_list(rows, use_favorite_prefix=False)
-        message = insightview.status_message(self.repo, insights)
-        if len(insights.section("Contributor")) >= INSIGHT_CONTRIBUTORS:
-            message += f" The {INSIGHT_CONTRIBUTORS} contributors with most commits are listed."
+        message = insightview.status_message(self.repo, insights, INSIGHT_CONTRIBUTORS)
         keys = "R=refresh  Ctrl+F=filter"
         if rows:
             keys = "Enter or Ctrl+O=open on GitHub  " + keys
@@ -4983,11 +4981,17 @@ class GhViewerFrame(wx.Frame):
             self.details_text.SetValue(message)
             announce.announce(message, announce.STATUS)
             return
-        if filtered:
-            wx.CallLater(100, self._focus_list, 0)
-        if notes:
-            # Queued behind the first row, which focus reads.
-            announce.announce(" ".join(notes), announce.STATUS)
+
+        def land() -> None:
+            if not self._fetch_is_current(token):
+                return
+            if filtered:
+                self._focus_list(0)
+            if notes:
+                # A status, so it waits for the row focus lands on to be read.
+                announce.announce(" ".join(notes), announce.STATUS)
+
+        wx.CallLater(100, land)
 
     def _show_insight_details(self, idx: int) -> None:
         if idx < 0 or idx >= len(self.git_items):

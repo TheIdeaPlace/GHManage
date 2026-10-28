@@ -5048,7 +5048,7 @@ def _fetch_contributors(repo: str, limit: int) -> Optional[list[InsightRow]]:
         raw = _run_gh(["api", f"repos/{repo}/contributors?per_page={per_page}&page={page}"])
         rows = json.loads(raw) if raw.strip() else []
         if not isinstance(rows, list):
-            return None if page == 1 else out  # still counting
+            return None  # still counting (202): all of them, or not yet
         for r in rows:
             if isinstance(r, dict) and r.get("login"):
                 out.append(InsightRow("Contributor", r["login"],

@@ -286,12 +286,14 @@ def test_landing_back_on_the_milestone(monkeypatch):
     frame = SimpleNamespace(_pending_target=(1, v, "milestone", "91"), view_mode=v,
                             _row_of=lambda it: items.index(it),
                             _describe_landing=Frame._describe_landing,
-                            _announce=lambda m: None)
+                            _announce=lambda m: None, _tell="tell", state_filter="open")
     assert Frame._take_pending_row(frame, items, 1) == 1
     assert later[-1] == ("Milestone 2027.1",)
+    # A closed one, from its address: said aloud, with how to see it.
     frame._pending_target = (1, v, "milestone", "5")
     assert Frame._take_pending_row(frame, items, 1) == 0
-    assert later[-1] == ("Milestone 5 isn't among the 2 milestones listed.",)
+    assert later[-1] == ("That milestone isn't among the 2 milestones listed. "
+                         "A closed one shows with View, State, All.",)
 
 
 @needs_wx
@@ -310,3 +312,81 @@ def test_copy_and_favorite():
     fav = Frame._build_favorite_entry(SimpleNamespace(repo="o/r", view_mode="milestones"), m)
     assert (fav.item_type, fav.title, fav.subtitle) == (
         "milestone", "2027.1", "76 of 92 closed, 82% done")
+
+
+def _items_frame(**attrs):
+    frame = _frame(view_mode=ghviewer.VIEW_ISSUES, label_filter="", state_filter="open",
+                   _return_to=None, milestone_filter=Milestone(91, "2027.1"))
+    for k, v in attrs.items():
+        setattr(frame, k, v)
+    return frame
+
+
+@needs_wx
+def test_an_empty_milestone_is_said_aloud(monkeypatch):
+    spoken = []
+    monkeypatch.setattr(announce, "announce", lambda text, cat=None, force=False:
+                        spoken.append(text))
+    monkeypatch.setattr(ghviewer, "parent_repo", lambda repo: None)
+    frame = _items_frame()
+    Frame._on_items_loaded(frame, 1, [], 0, 0)
+    said = ("No open issues or PRs in milestone '2027.1'. View, State, All shows every one.")
+    assert spoken == [said] and frame.details_text.value == said
+    message, keys = frame.status[-1]
+    assert "in milestone '2027.1'" in message and keys.endswith("Backspace=back to milestones")
+    # An ordinary empty list isn't spoken here.
+    spoken.clear()
+    Frame._on_items_loaded(_items_frame(milestone_filter=None), 1, [], 0, 0)
+    assert spoken == []
+
+
+@needs_wx
+def test_prs_without_sizes_are_explained(monkeypatch):
+    monkeypatch.setattr(ghviewer, "parent_repo", lambda repo: None)
+    monkeypatch.setattr(ghviewer.wx, "CallLater", lambda *a: None)
+    frame = _items_frame(milestone_filter=None, _focus_list=lambda row: None)
+    pr = gh_data.Item(5, "Big", "MERGED", "u", True, has_stats=False)
+    Frame._on_items_loaded(frame, 1, [pr], 0, 1)
+    assert "GitHub took too long to measure these pull requests" in frame.status[-1][0]
+    Frame._on_items_loaded(frame, 1, [gh_data.Item(5, "Big", "MERGED", "u", True)], 0, 1)
+    assert "too long" not in frame.status[-1][0]
+
+
+@needs_wx
+def test_the_upstream_is_named_on_a_fork(monkeypatch):
+    monkeypatch.setattr(ghviewer.wx, "CallLater", lambda *a: None)
+    frame = _frame(repo="me/r", _focus_list=lambda row: None)
+    Frame._on_milestones_loaded(frame, 1, [Milestone(1, "a", repo="up/r")], "open")
+    assert frame.status[-1][0] == "me/r (milestones from upstream up/r) — 1 open milestone."
+
+
+@needs_wx
+def test_the_way_back_to_a_list_survives_a_milestone(monkeypatch):
+    monkeypatch.setattr(announce, "announce", lambda *a, **k: None)
+    saved = ("starred", [], False, None, 100)
+    frame = _frame(label_filter="", milestone_filter=None, _return_to=saved,
+                   _return_view=ghviewer.VIEW_MILESTONES)
+
+    def switch(view, load=True):
+        frame.view_mode = view
+        if view != frame._return_view:
+            frame._return_to = None
+    frame._switch_view = switch
+    frame._load_items = lambda: None
+    frame._set_pending_target = lambda *a: None
+    Frame._browse_milestone(frame, Milestone(3, "a"))
+    assert frame._return_to is None
+    Frame._back_to_milestones(frame)
+    assert frame._return_to is saved and frame._return_view == ghviewer.VIEW_MILESTONES
+
+
+@needs_wx
+def test_ctrl_1_drops_the_milestone():
+    loads, said = [], []
+    frame = SimpleNamespace(view_mode=ghviewer.VIEW_ISSUES, label_filter="",
+                            milestone_filter=Milestone(3, "a"), page_size=100,
+                            current_limit=300, _load_items=lambda: loads.append(1),
+                            _announce=said.append)
+    Frame.on_view_issues(frame, None)
+    assert frame.milestone_filter is None and loads == [1] and frame.current_limit == 100
+    assert said == ["Showing all issues and PRs"]

@@ -4190,9 +4190,13 @@ class GhViewerFrame(wx.Frame):
         if self._return_to:
             back = self._view_label(self._return_to[0], lower=True)
             label_hint = f"  Backspace=back to {back}"
+        unsized = ""
+        if any(it.is_pr and not getattr(it, "has_stats", True) for it in items):
+            unsized = (" GitHub took too long to measure these pull requests, so Changes "
+                       "and Files are blank.")
         self._set_view_status(
             f"{source} — {n_issues} issues, {n_prs} PRs ({self.state_filter}){label_info}. "
-            f"Showing up to {self.current_limit} newest.",
+            f"Showing up to {self.current_limit} newest.{unsized}",
             "Ctrl++=view more  R=refresh  M=comment  N=new issue  K=checks  V=review  "
             "H=changed files  "
             "F=favorite  Ctrl+F=filter"
@@ -4200,6 +4204,15 @@ class GhViewerFrame(wx.Frame):
         )
         self._update_title()
         row = self._take_pending_row(items, token)
+        if not items and label_info:
+            # Enter on a milestone or label that has nothing in this state:
+            # focus stays put, so say so rather than leave silence.
+            which = "" if self.state_filter == "all" else f"{self.state_filter} "
+            said = f"No {which}issues or PRs{label_info}."
+            if self.state_filter != "all":
+                said += " View, State, All shows every one."
+            self.details_text.SetValue(said)
+            announce.announce(said, announce.STATUS)
         if filtered:
             wx.CallLater(100, self._focus_list, row)
 
@@ -4690,7 +4703,7 @@ class GhViewerFrame(wx.Frame):
                                "discussions"),
                 "discussion_title": (f"The discussion “{ref}”",
                                      "most recently active discussions", "discussions"),
-                "milestone": (f"Milestone {ref}", "milestones listed", "milestones"),
+                "milestone": ("That milestone", "milestones listed", "milestones"),
             }[kind]
             if found is not None:
                 said = f"{what} is hidden by the quick filter. Escape clears it."
@@ -4698,7 +4711,7 @@ class GhViewerFrame(wx.Frame):
                 said = f"{what} isn't among the {len(items)} {newest}."
             else:
                 said = f"{what} wasn't found: there are no {plural} to show."
-            if kind == "discussion_title":
+            if kind in ("discussion_title", "milestone"):
                 # Enter was pressed to land on it: say aloud that it didn't.
                 if getattr(self, "state_filter", "all") != "all":
                     said += " A closed one shows with View, State, All."
@@ -4887,7 +4900,10 @@ class GhViewerFrame(wx.Frame):
         self.git_items = milestones
         self.items = []
         filtered = self._populate_filtered_list(milestones, use_favorite_prefix=True)
-        message = milestoneview.status_message(self.repo, milestones, state)
+        source = self.repo
+        if milestones and milestones[0].repo and milestones[0].repo != self.repo:
+            source = f"{self.repo} (milestones from upstream {milestones[0].repo})"
+        message = milestoneview.status_message(source, milestones, state)
         keys = "R=refresh  Ctrl+F=filter"
         if milestones:
             keys = ("Enter=issues and PRs  Ctrl+O=open on GitHub  F=favorite  "
@@ -4897,7 +4913,7 @@ class GhViewerFrame(wx.Frame):
         row = self._take_pending_row(milestones, token)
         if not milestones:
             which = {"open": "open ", "closed": "closed "}.get(state, "")
-            self.details_text.SetValue(f"{self.repo} has no {which}milestones.")
+            self.details_text.SetValue(f"{source} has no {which}milestones.")
             announce.announce(message, announce.STATUS)
             return
         if filtered:
@@ -9989,15 +10005,20 @@ class GhViewerFrame(wx.Frame):
         Issues & PRs, as Enter on a label does; Backspace comes back."""
         self.label_filter = ""
         self.current_limit = self.page_size
+        # The way back from Milestones to a list it was opened from (Starred,
+        # Activity), which the switch to Issues & PRs would otherwise drop.
+        self._milestone_return = (getattr(self, "_return_to", None),
+                                  getattr(self, "_return_view", VIEW_ISSUES))
         self._switch_view(VIEW_ISSUES, load=False)
         # Set after the switch, which clears it everywhere but Issues & PRs.
         self.milestone_filter = milestone
         self._update_title()
         self._load_items()
-        self._announce(
-            f"Showing issues and PRs in milestone '{milestone.title}'. "
-            "Backspace returns to the milestones."
-        )
+        said = (f"Showing issues and PRs in milestone '{milestone.title}'. "
+                "Backspace returns to the milestones.")
+        self._announce(said)
+        # Queued behind the first row, which focus reads.
+        announce.announce(f"Milestone {milestone.title}", announce.STATUS)
 
     def _back_to_milestones(self) -> None:
         """Backspace from a milestone's issues: the milestones, on it."""
@@ -10006,6 +10027,10 @@ class GhViewerFrame(wx.Frame):
         self._switch_view(VIEW_MILESTONES)
         if milestone is not None:
             self._set_pending_target(VIEW_MILESTONES, "milestone", str(milestone.number))
+        saved = getattr(self, "_milestone_return", None)
+        self._milestone_return = None
+        if saved and saved[0] and saved[1] == VIEW_MILESTONES:
+            self._return_to, self._return_view = saved
         self._announce("Back to milestones")
 
     def _browse_label(self, label: "Label") -> None:

@@ -913,6 +913,10 @@ ADDRESS_VIEWS = {
 }
 PENDING_KINDS = ("item", "commit", "release", "run", "discussion", "milestone")
 # Views that load everything at once, where View More has nothing to add.
+# Alt+N selects a whole comment so it is read; NVDA reads a selection only up
+# to 512 characters and says "N characters selected" beyond that, so a longer
+# stop selects just its first line.
+SELECTION_READ_MAX = 500
 NO_MORE_VIEWS = (VIEW_FAVORITES, VIEW_MY_WORK, VIEW_ORGS, VIEW_JOBS, VIEW_ARTIFACTS,
                  VIEW_PAGES, VIEW_PAGEFILES, VIEW_FILES, VIEW_CODE, VIEW_INSIGHTS)
 # Insights lists up to this many contributors, most commits first (GitHub gives 500).
@@ -3362,8 +3366,15 @@ class GhViewerFrame(wx.Frame):
         """Do what choosing the menu item does, from the pane that had focus."""
         if focus:  # a destroyed window is falsy
             focus.SetFocus()
+        view = getattr(self, "view_mode", None)
         event = wx.CommandEvent(wx.wxEVT_MENU, command_id)
         self.GetEventHandler().ProcessEvent(event)
+        if getattr(self, "view_mode", None) != view:
+            # Focus came back to the list before the command switched it, so
+            # the screen reader read the old list's name: say the new one, as
+            # the list names itself ("Files: src/ on main").
+            self._update_list_label()
+            announce.announce(self.list_label.GetLabel(), announce.RESULT)
 
     def on_user_guide(self, event) -> None:
         """Help ▸ User Guide (F1): the guide on the web, in your browser."""
@@ -3569,6 +3580,7 @@ class GhViewerFrame(wx.Frame):
         if mode != VIEW_ISSUES:
             self.label_filter = ""
             self.milestone_filter = None
+            self._say_milestone = False
         if mode not in (VIEW_PAGES, VIEW_PAGEFILES):
             self.pages_site = None
         if mode != getattr(self, "_return_view", VIEW_ISSUES):
@@ -4488,6 +4500,8 @@ class GhViewerFrame(wx.Frame):
         )
         self._update_title()
         row = self._take_pending_row(items, token)
+        say_milestone = getattr(self, "_say_milestone", False)
+        self._say_milestone = False
         if not items and label_info:
             # Enter on a milestone or label that has nothing in this state:
             # focus stays put, so say so rather than leave silence.
@@ -4499,6 +4513,12 @@ class GhViewerFrame(wx.Frame):
             announce.announce(said, announce.STATUS)
         if filtered:
             wx.CallLater(100, self._focus_list, row)
+            milestone = getattr(self, "milestone_filter", None)
+            if milestone is not None and say_milestone:
+                # Once, after Enter on it, and behind the first row: said when
+                # Enter was pressed, it came seconds before the list (NVDA run).
+                wx.CallLater(150, announce.announce, f"Milestone {milestone.title}",
+                             announce.STATUS)
 
     def _on_jobs_loaded(self, token: int, jobs: list, fresh) -> None:
         if not self._fetch_is_current(token):
@@ -5253,7 +5273,9 @@ class GhViewerFrame(wx.Frame):
         filtered = self._populate_filtered_list(gists, use_favorite_prefix=False)
         if len(gists) < self.current_limit:
             count = len(gists)  # all of them, so newer than the startup count
-        if count is not None:
+        if count is not None and self._category_counts.get(GISTS_ENTRY) != count:
+            # Only when it changed: relabelling the entry with focus on it
+            # makes the screen reader read it again ("Gists (0)" twice).
             self._category_counts[GISTS_ENTRY] = count
             self._refresh_category_labels()
         message = gistview.status_message(gists, self.current_limit)
@@ -7382,6 +7404,16 @@ class GhViewerFrame(wx.Frame):
             text = self.details_text.GetValue()
             if end_pos > start_pos and text[end_pos - 1:end_pos] == "\n":
                 end_pos -= 1
+        if end_pos - start_pos > SELECTION_READ_MAX:
+            # NVDA reads a selection only up to 512 characters; past that it
+            # says just "592 characters selected". Select the first line, the
+            # heading that says whose it is, and Down Arrow reads on.
+            text = self.details_text.GetValue()
+            first_nl = text.find("\n", start_pos, end_pos)
+            if first_nl > start_pos:
+                end_pos = min(first_nl, start_pos + SELECTION_READ_MAX)
+            else:
+                end_pos = start_pos + SELECTION_READ_MAX
         self.details_text.SetFocus()
         self.details_text.SetSelection(start_pos, end_pos)
         self.details_text.ShowPosition(start_pos)
@@ -10827,13 +10859,14 @@ class GhViewerFrame(wx.Frame):
         said = (f"Showing issues and PRs in milestone '{milestone.title}'. "
                 "Backspace returns to the milestones.")
         self._announce(said)
-        # Queued behind the first row, which focus reads.
-        announce.announce(f"Milestone {milestone.title}", announce.STATUS)
+        # Said when the list lands, behind its first row (_on_items_loaded).
+        self._say_milestone = True
 
     def _back_to_milestones(self) -> None:
         """Backspace from a milestone's issues: the milestones, on it."""
         milestone = self.milestone_filter
         self.milestone_filter = None
+        self._say_milestone = False  # left before its issues arrived
         self._switch_view(VIEW_MILESTONES)
         if milestone is not None:
             self._set_pending_target(VIEW_MILESTONES, "milestone", str(milestone.number))

@@ -596,7 +596,7 @@ For a pull request, the comments reviewers left on its lines are part of each fi
 
 Comments on lines that later commits changed are no longer on any line shown, so they are listed at the end of the file under "Earlier comments, on lines changed since:", each saying the line it was on, for example "Comment by alice on line 12 as it was:". Comments on the file as a whole come under "Comments on the whole file:", and comments on lines this view doesn't show, such as the lines of a file too large for GitHub to show, under "Comments on lines not shown here:", each saying its line.
 
-`Alt+N` and `Alt+P` stop at each comment and reply as well as at each run of changes, selecting the whole comment. The status bar counts each kind on its own: "Change 2 of 7", then "Comment 1 of 3". In this view the **File** menu's items read Next Change or Comment and Previous Change or Comment. When the files load, GHManage also says how many comments there are, for example "9 files changed, 251 lines added, 28 removed. 2 comments."
+`Alt+N` and `Alt+P` stop at each comment and reply as well as at each run of changes, selecting the whole comment (or, for a comment over about 500 characters, its first line: see below). The status bar counts each kind on its own: "Change 2 of 7", then "Comment 1 of 3". In this view the **File** menu's items read Next Change or Comment and Previous Change or Comment. When the files load, GHManage also says how many comments there are, for example "9 files changed, 251 lines added, 28 removed. 2 comments."
 
 A commit's changed files have no review comments, so its rows leave the Comments column empty.
 
@@ -1313,7 +1313,7 @@ An issue or pull request's comments come after its description, each beginning w
 
 On a Mac, use `Option+N` and `Option+P`. Both are also on the **File** menu as **Next Comment** and **Previous Comment**.
 
-Each press moves focus to the details panel and selects the whole comment, from its heading to its last line, so your screen reader reads it and you can copy it. The status bar says "Comment 2 of 5". At either end it says "Already at last comment." or "Already at first comment.", and an item with none says "No comments to navigate."
+Each press moves focus to the details panel and selects the whole comment, from its heading to its last line, so your screen reader reads it and you can copy it. A comment over about 500 characters selects only its first line, the heading that says whose it is: NVDA reads a longer selection only as "592 characters selected". `Down Arrow` reads on, and `Shift+Down Arrow` selects more to copy. The status bar says "Comment 2 of 5". At either end it says "Already at last comment." or "Already at first comment.", and an item with none says "No comments to navigate."
 
 ---
 

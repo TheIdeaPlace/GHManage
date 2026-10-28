@@ -1058,15 +1058,31 @@ BRANCH_COLUMNS = ["branch", "last commit", "author", "date", "protected", "ahead
 BRANCH_DEFAULT_COLUMNS = ["branch", "last commit", "author", "date"]
 
 
+def _branch_rows(repo: Optional[str], limit: int) -> list[dict]:
+    """The repository's branches as GitHub lists them, up to ``limit``.
+
+    A page at a time, not `--paginate -q`: that applies the query to each
+    page and prints one array per page, which isn't one JSON document, so
+    any repository with more than a page of branches failed to load.
+    """
+    endpoint = f"repos/{repo}/branches" if repo else "repos/{owner}/{repo}/branches"
+    return _api_pages(endpoint, limit)
+
+
+def fetch_branch_names(repo: Optional[str], limit: int = 200) -> list[str]:
+    """Just the branches' names, for the pickers: one call a page, rather
+    than fetch_branches' look-up of every branch's last commit."""
+    return [r.get("name", "") for r in _branch_rows(repo, limit) if r.get("name")]
+
+
 def fetch_branches(repo: Optional[str], limit: int = 100) -> list[Branch]:
     """Fetch branches for the repo via GitHub REST API."""
-    rows = _api_json(
-        ["repos/{owner}/{repo}/branches", "--paginate", "-q",
-         f"[.[] | {{name, sha: .commit.sha, protected}}] | .[0:{limit}]"],
-        repo,
-    )
-    if not isinstance(rows, list):
-        return []
+    rows = [
+        {"name": r.get("name", ""),
+         "sha": (r.get("commit") or {}).get("sha", ""),
+         "protected": r.get("protected", False)}
+        for r in _branch_rows(repo, limit)
+    ]
     # Fetch each branch tip's commit details concurrently. Doing this serially
     # is an N+1 that makes the Branches view slow on repos with many branches;
     # a small thread pool keeps it responsive without hammering the API.

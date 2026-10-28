@@ -135,6 +135,12 @@ lists your gists, public and secret, with their files. Selecting one shows its
 details and then each file's text, headed by its name; `Alt+N` and `Alt+P` move
 between files. `Enter` opens it on GitHub, and Copy Link and Copy Details work.
 
+## Fixed
+
+- Branches, and the branch pickers (Select Branch, Compare Branches, Run
+  Workflow), failed to load on a repository with more than 30 branches. They now
+  list them, and the pickers open faster.
+
 ## Before you start
 
 GHManage drives the [GitHub CLI](https://cli.github.com/), so install it and sign

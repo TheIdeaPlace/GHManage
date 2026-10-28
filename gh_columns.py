@@ -17,6 +17,7 @@ from gh_data import (
     CHANGED_FILE_COLUMNS, CHANGED_FILE_DEFAULT_COLUMNS,
     DISCUSSION_COLUMNS, DISCUSSION_DEFAULT_COLUMNS,
     MILESTONE_COLUMNS, MILESTONE_DEFAULT_COLUMNS,
+    INSIGHT_COLUMNS, INSIGHT_DEFAULT_COLUMNS,
     COMMIT_COLUMNS, COMMIT_DEFAULT_COLUMNS,
     JOB_COLUMNS, JOB_DEFAULT_COLUMNS,
     LABEL_COLUMNS, LABEL_DEFAULT_COLUMNS,
@@ -129,6 +130,10 @@ CATALOG: dict[str, ColumnDef] = {c.id: c for c in [
     _c("open", "Open", 60),
     _c("closed", "Closed", 60),
     _c("done", "Done", 60),
+    # Insights
+    _c("section", "Section", 100),
+    _c("count", "Count", 130),
+    _c("uniques", "Unique", 160),
 ]}
 
 
@@ -198,6 +203,9 @@ DISCUSSION_SET = _set("discussions", "Discussions", DISCUSSION_COLUMNS,
 # The title says what each is, and Open and Closed are counts, not states.
 MILESTONE_SET = _set("milestones", "Milestones", MILESTONE_COLUMNS,
                      MILESTONE_DEFAULT_COLUMNS, {"title": {"width": 200}})
+# Each count says what it counts ("1,234 views"), so a row reads on its own.
+INSIGHT_SET = _set("insights", "Insights", INSIGHT_COLUMNS, INSIGHT_DEFAULT_COLUMNS,
+                   {"name": {"width": 260}})
 FAVORITES_SET = _set("favorites", "Favorites", FAVORITES_COLUMNS,
                      FAVORITES_DEFAULT_COLUMNS)
 
@@ -206,5 +214,5 @@ COLUMN_SETS: list[ColumnSet] = [
     ASSET_SET, RELEASE_SET, WORKFLOW_RUN_SET, ARTIFACT_SET, WORKFLOW_SET,
     PAGES_SET, PAGEFILE_SET, ACTIVITY_SET, NOTIFICATION_SET, SEARCH_ITEM_SET,
     MY_WORK_SET, JOB_SET, FAVORITES_SET, CHANGED_FILE_SET, REPO_FILE_SET, SECURITY_SET,
-    DISCUSSION_SET, MILESTONE_SET,
+    DISCUSSION_SET, MILESTONE_SET, INSIGHT_SET,
 ]

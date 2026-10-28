@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 import webbrowser
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
@@ -4908,3 +4909,193 @@ def fetch_milestones(repo: Optional[str], state: str = "open",
         state = "open"
     rows = _api_pages(f"repos/{effective}/milestones?state={state}", limit)
     return [_parse_milestone(r, effective) for r in rows]
+
+
+# ── Insights: traffic and contributors (#89) ───────────────────────────
+
+INSIGHT_COLUMNS = ["section", "name", "count", "uniques"]
+INSIGHT_DEFAULT_COLUMNS = ["section", "name", "count", "uniques"]
+
+# What each section counts: (the count, the unique count), as said in a row.
+INSIGHT_NOUNS = {
+    "Views": ("view", "views", "unique visitor", "unique visitors"),
+    "Clones": ("clone", "clones", "unique cloner", "unique cloners"),
+    "Referrer": ("view", "views", "unique visitor", "unique visitors"),
+    "Page": ("view", "views", "unique visitor", "unique visitors"),
+    "Contributor": ("commit", "commits", "", ""),
+}
+# Contributors asked again while GitHub is still counting them (HTTP 202).
+CONTRIBUTOR_RETRIES = 2
+CONTRIBUTOR_WAIT = 2.0
+
+
+def _counted(n: int, one: str, many: str) -> str:
+    return f"{n:,} {one if n == 1 else many}"
+
+
+@dataclass
+class InsightRow:
+    """One row of Insights: a total, a day, a referring site, a popular
+    page or a contributor. ``section`` says which; the count cells say what
+    they count ("1,234 views"), so a row reads on its own."""
+
+    section: str             # Views, Clones, Referrer, Page, Contributor
+    name: str                # "Last 14 days", "2026-10-27", "github.com", a page, a login
+    count: int = 0
+    uniques: Optional[int] = None  # None where there is no such count (contributors)
+    url: str = ""
+    detail: str = ""         # a page's path; a day's or total's period
+    repo: str = ""
+
+    @property
+    def count_display(self) -> str:
+        one, many, _, _ = INSIGHT_NOUNS.get(self.section, ("", "", "", ""))
+        return _counted(self.count, one, many)
+
+    @property
+    def uniques_display(self) -> str:
+        if self.uniques is None:
+            return ""
+        _, _, one, many = INSIGHT_NOUNS.get(self.section, ("", "", "", ""))
+        return _counted(self.uniques, one, many)
+
+    def to_row(self, columns: list[str]) -> dict[str, str]:
+        mapping = {
+            "section": self.section,
+            "name": self.name,
+            "count": self.count_display,
+            "uniques": self.uniques_display,
+        }
+        return {col: mapping.get(col, "") for col in columns}
+
+
+@dataclass
+class Insights:
+    """What Insights could read. ``traffic_error``: why there is no traffic
+    ("" when there is); ``contributors_error`` likewise, with
+    ``contributors_pending`` when GitHub was still counting."""
+
+    rows: list[InsightRow] = field(default_factory=list)
+    traffic_error: str = ""
+    contributors_error: str = ""
+    contributors_pending: bool = False
+
+    def section(self, name: str) -> list[InsightRow]:
+        return [r for r in self.rows if r.section == name]
+
+
+def traffic_sentence(exc: GhError, repo: str) -> str:
+    """Why there is no traffic, in a sentence."""
+    text = str(exc)
+    if "push access" in text.lower():
+        return (f"Traffic needs push access to {repo}, which you don't have, "
+                "so only contributors are shown.")
+    return f"Couldn't read the traffic: {text}"
+
+
+def _traffic_rows(repo: str, kind: str, data: dict) -> list[InsightRow]:
+    """The total and each day of ``views`` or ``clones``, newest day first."""
+    section = "Views" if kind == "views" else "Clones"
+    page = f"https://github.com/{repo}/graphs/traffic"
+    days = [d for d in data.get(kind) or [] if isinstance(d, dict)]
+    first = days[0].get("timestamp", "")[:10] if days else ""
+    last = days[-1].get("timestamp", "")[:10] if days else ""
+    period = f"{first} to {last}" if first and last and first != last else first
+    rows = [InsightRow(section, "Last 14 days", int(data.get("count") or 0),
+                       int(data.get("uniques") or 0), page, period, repo)]
+    for d in reversed(days):
+        rows.append(InsightRow(section, (d.get("timestamp") or "")[:10],
+                               int(d.get("count") or 0), int(d.get("uniques") or 0),
+                               page, "", repo))
+    return rows
+
+
+def _fetch_traffic(repo: str) -> list[InsightRow]:
+    """Views, clones, referrers and popular pages, read side by side."""
+    endpoints = {
+        "views": f"repos/{repo}/traffic/views",
+        "clones": f"repos/{repo}/traffic/clones",
+        "referrers": f"repos/{repo}/traffic/popular/referrers",
+        "paths": f"repos/{repo}/traffic/popular/paths",
+    }
+    with ThreadPoolExecutor(max_workers=len(endpoints)) as pool:
+        futures = {k: pool.submit(_api_json, [e], None) for k, e in endpoints.items()}
+        got = {k: f.result() for k, f in futures.items()}  # the first failure raises
+    page = f"https://github.com/{repo}/graphs/traffic"
+    rows: list[InsightRow] = []
+    for kind in ("views", "clones"):
+        data = got[kind] if isinstance(got[kind], dict) else {}
+        rows += _traffic_rows(repo, kind, data)
+    for r in got["referrers"] if isinstance(got["referrers"], list) else []:
+        if isinstance(r, dict):
+            rows.append(InsightRow("Referrer", r.get("referrer") or "", int(r.get("count") or 0),
+                                   int(r.get("uniques") or 0), page, "", repo))
+    for p in got["paths"] if isinstance(got["paths"], list) else []:
+        if isinstance(p, dict):
+            path = p.get("path") or ""
+            rows.append(InsightRow("Page", p.get("title") or path, int(p.get("count") or 0),
+                                   int(p.get("uniques") or 0),
+                                   f"https://github.com{path}" if path else page, path, repo))
+    return rows
+
+
+def _fetch_contributors(repo: str, limit: int) -> Optional[list[InsightRow]]:
+    """Contributors with their commits on the default branch, most first;
+    None while GitHub is still counting them (it answers 202 with no list)."""
+    per_page = max(1, min(limit, 100))
+    out: list[InsightRow] = []
+    page = 1
+    while len(out) < limit:
+        raw = _run_gh(["api", f"repos/{repo}/contributors?per_page={per_page}&page={page}"])
+        rows = json.loads(raw) if raw.strip() else []
+        if not isinstance(rows, list):
+            return None if page == 1 else out  # still counting
+        for r in rows:
+            if isinstance(r, dict) and r.get("login"):
+                out.append(InsightRow("Contributor", r["login"],
+                                      int(r.get("contributions") or 0), None,
+                                      r.get("html_url") or f"https://github.com/{r['login']}",
+                                      "", repo))
+        if len(rows) < per_page:
+            break
+        page += 1
+    return out[:limit]
+
+
+def fetch_insights(repo: str, limit: int = 100) -> Insights:
+    """Insights: the last 14 days' traffic (views, clones, referring sites,
+    popular pages), which needs push access, and up to ``limit``
+    contributors. Each part fails on its own and says why."""
+    result = Insights()
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        traffic = pool.submit(_fetch_traffic, repo)
+        contributors = pool.submit(_contributors_with_retry, repo, limit)
+        try:
+            result.rows = traffic.result()
+        except GhError as exc:
+            result.traffic_error = traffic_sentence(exc, repo)
+        try:
+            people = contributors.result()
+        except GhError as exc:
+            people = []
+            text = str(exc)
+            if "too large" in text.lower():
+                result.contributors_error = (
+                    "GitHub won't list the contributors of a repository this large.")
+            else:
+                result.contributors_error = f"Couldn't read the contributors: {text}"
+    if people is None:
+        result.contributors_pending = True
+        people = []
+    result.rows += people
+    return result
+
+
+def _contributors_with_retry(repo: str, limit: int) -> Optional[list[InsightRow]]:
+    for attempt in range(CONTRIBUTOR_RETRIES + 1):
+        people = _fetch_contributors(repo, limit)
+        if people is not None:
+            return people
+        if attempt < CONTRIBUTOR_RETRIES:
+            time.sleep(CONTRIBUTOR_WAIT)
+    return None

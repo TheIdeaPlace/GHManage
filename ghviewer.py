@@ -32,6 +32,7 @@ import codeview
 import commands
 import diffview
 import discussionview
+import insightview
 import milestoneview
 import settings
 import search_help
@@ -49,6 +50,7 @@ from gh_columns import (
     ISSUE_SET, JOB_SET, LABEL_SET, MY_WORK_SET, NOTIFICATION_SET, ORG_SET,
     PAGEFILE_SET, PAGES_SET, RELEASE_SET, REPO_FILE_SET, REPO_SET, SEARCH_ITEM_SET, TAG_SET,
     SECURITY_SET, WORKFLOW_RUN_SET, WORKFLOW_SET, DISCUSSION_SET, MILESTONE_SET,
+    INSIGHT_SET,
 )
 from gh_data import (
     ACTIVITY_MAX,
@@ -68,6 +70,8 @@ from gh_data import (
     fetch_discussions,
     Milestone,
     fetch_milestones,
+    InsightRow,
+    fetch_insights,
     ALL_BRANCHES,
     ALL_BRANCHES_PER_BRANCH_MAX,
     GhError,
@@ -614,6 +618,10 @@ def copy_values(item) -> CopyValues | None:
         return CopyValues(item.url, item.title, item.repo, "Repository Name", item.title)
     if isinstance(item, Milestone):
         return CopyValues(item.url, item.title, item.title, "Milestone Title", item.title)
+    if isinstance(item, InsightRow):
+        text = ", ".join(x for x in (item.section, item.name, item.count_display,
+                                     item.uniques_display) if x)
+        return CopyValues(item.url, item.name, item.name, "Name", text)
     if isinstance(item, Discussion):
         number = f"#{item.number}"
         return CopyValues(item.url, item.title, number, "Number", f"{number} {item.title}")
@@ -789,6 +797,7 @@ ID_COMMENT_LINE = wx.NewIdRef()
 ID_VIEW_SECURITY = wx.NewIdRef()
 ID_VIEW_DISCUSSIONS = wx.NewIdRef()
 ID_VIEW_MILESTONES = wx.NewIdRef()
+ID_VIEW_INSIGHTS = wx.NewIdRef()
 
 
 # View modes
@@ -822,6 +831,7 @@ VIEW_SHARED = "shared"         # others' repositories you are a collaborator on
 VIEW_SECURITY = "security"     # Dependabot, code scanning and secret scanning alerts
 VIEW_DISCUSSIONS = "discussions"  # a repository's discussions (GraphQL)
 VIEW_MILESTONES = "milestones"   # a repository's milestones and their progress
+VIEW_INSIGHTS = "insights"       # traffic of the last 14 days, and contributors
 
 # Views that are not views *of a repo*, so they work with none selected.
 REPOLESS_VIEWS = (VIEW_FAVORITES, VIEW_NOTIFICATIONS, VIEW_MY_WORK, VIEW_ACTIVITY,
@@ -854,6 +864,7 @@ REPO_GO_TO = [
     (VIEW_SECURITY, "Security Alerts"),
     (VIEW_DISCUSSIONS, "Discussions"),
     (VIEW_MILESTONES, "Milestones"),
+    (VIEW_INSIGHTS, "Insights"),
 ]
 ID_GO_TO_VIEW = {view: wx.NewIdRef() for view, _ in REPO_GO_TO}
 
@@ -877,7 +888,9 @@ ADDRESS_VIEWS = {
 PENDING_KINDS = ("item", "commit", "release", "run", "discussion", "milestone")
 # Views that load everything at once, where View More has nothing to add.
 NO_MORE_VIEWS = (VIEW_FAVORITES, VIEW_MY_WORK, VIEW_ORGS, VIEW_JOBS, VIEW_ARTIFACTS,
-                 VIEW_PAGES, VIEW_PAGEFILES, VIEW_FILES, VIEW_CODE)
+                 VIEW_PAGES, VIEW_PAGEFILES, VIEW_FILES, VIEW_CODE, VIEW_INSIGHTS)
+# Insights lists up to this many contributors, most commits first (GitHub gives 500).
+INSIGHT_CONTRIBUTORS = 500
 # Views listing repositories; Enter on one opens it here.
 REPO_LIST_VIEWS = (VIEW_STARRED, VIEW_WATCHED, VIEW_ORG, VIEW_SHARED)
 
@@ -979,6 +992,7 @@ VIEW_COLUMNS = {
     VIEW_SECURITY: SECURITY_SET,
     VIEW_DISCUSSIONS: DISCUSSION_SET,
     VIEW_MILESTONES: MILESTONE_SET,
+    VIEW_INSIGHTS: INSIGHT_SET,
 }
 
 
@@ -2831,6 +2845,7 @@ class GhViewerFrame(wx.Frame):
         show_menu.AppendRadioItem(ID_VIEW_SECURITY, "Security Alerts")
         show_menu.AppendRadioItem(ID_VIEW_DISCUSSIONS, "Discussions")
         show_menu.AppendRadioItem(ID_VIEW_MILESTONES, "Milestones")
+        show_menu.AppendRadioItem(ID_VIEW_INSIGHTS, "Insights")
         show_menu.AppendRadioItem(ID_VIEW_NOTIFICATIONS, "Notifications\tCtrl+Shift+N")
         show_menu.AppendRadioItem(ID_VIEW_MY_WORK, "My Work\tCtrl+Shift+M")
         # Checked while search results are showing; choosing it asks for a
@@ -2947,6 +2962,7 @@ class GhViewerFrame(wx.Frame):
         self.Bind(wx.EVT_MENU, self.on_view_security, id=ID_VIEW_SECURITY)
         self.Bind(wx.EVT_MENU, self.on_view_discussions, id=ID_VIEW_DISCUSSIONS)
         self.Bind(wx.EVT_MENU, self.on_view_milestones, id=ID_VIEW_MILESTONES)
+        self.Bind(wx.EVT_MENU, lambda e: self._switch_view(VIEW_INSIGHTS), id=ID_VIEW_INSIGHTS)
         self.Bind(wx.EVT_MENU, self.on_view_activity, id=ID_VIEW_ACTIVITY)
         self.Bind(wx.EVT_MENU, self.on_view_notifications, id=ID_VIEW_NOTIFICATIONS)
         self.Bind(wx.EVT_MENU, lambda e: self._toggle_include_read(), id=ID_SHOW_READ)
@@ -3179,6 +3195,7 @@ class GhViewerFrame(wx.Frame):
         menu_bar.Check(ID_VIEW_SECURITY, self.view_mode == VIEW_SECURITY)
         menu_bar.Check(ID_VIEW_DISCUSSIONS, self.view_mode == VIEW_DISCUSSIONS)
         menu_bar.Check(ID_VIEW_MILESTONES, self.view_mode == VIEW_MILESTONES)
+        menu_bar.Check(ID_VIEW_INSIGHTS, self.view_mode == VIEW_INSIGHTS)
         menu_bar.Check(ID_VIEW_NOTIFICATIONS, self.view_mode == VIEW_NOTIFICATIONS)
         menu_bar.Check(ID_VIEW_MY_WORK, self.view_mode == VIEW_MY_WORK)
         menu_bar.Check(ID_VIEW_SEARCH_RESULTS, self.view_mode in SEARCH_VIEWS)
@@ -4024,6 +4041,9 @@ class GhViewerFrame(wx.Frame):
                 elif view == VIEW_SECURITY:
                     report = fetch_security_alerts(repo, state, limit)
                     wx.CallAfter(self._on_security_loaded, token, report, state)
+                elif view == VIEW_INSIGHTS:
+                    insights = fetch_insights(repo, INSIGHT_CONTRIBUTORS)
+                    wx.CallAfter(self._on_insights_loaded, token, insights)
                 elif view == VIEW_MILESTONES:
                     milestones = fetch_milestones(repo, state, limit)
                     wx.CallAfter(self._on_milestones_loaded, token, milestones, state)
@@ -4099,6 +4119,7 @@ class GhViewerFrame(wx.Frame):
         VIEW_SECURITY: "Security Alerts",
         VIEW_DISCUSSIONS: "Discussions",
         VIEW_MILESTONES: "Milestones",
+        VIEW_INSIGHTS: "Insights",
     }
 
     def _view_label(self, view: str, lower: bool = False) -> str:
@@ -4874,6 +4895,8 @@ class GhViewerFrame(wx.Frame):
             self._show_discussion_details(idx)
         elif self.view_mode == VIEW_MILESTONES:
             self._show_milestone_details(idx)
+        elif self.view_mode == VIEW_INSIGHTS:
+            self._show_insight_details(idx)
         else:
             self._show_git_details(idx)
 
@@ -4937,6 +4960,44 @@ class GhViewerFrame(wx.Frame):
             return
         if filtered:
             wx.CallLater(100, self._focus_list, row)
+
+    def _on_insights_loaded(self, token: int, insights) -> None:
+        """Insights: a row a figure, Section first; what is missing (no push
+        access, contributors still being counted) said aloud."""
+        if not self._fetch_is_current(token):
+            return  # the user has moved on; these belong to a view they left
+        rows = insights.rows
+        self.git_items = rows
+        self.items = []
+        filtered = self._populate_filtered_list(rows, use_favorite_prefix=False)
+        message = insightview.status_message(self.repo, insights)
+        if len(insights.section("Contributor")) >= INSIGHT_CONTRIBUTORS:
+            message += f" The {INSIGHT_CONTRIBUTORS} contributors with most commits are listed."
+        keys = "R=refresh  Ctrl+F=filter"
+        if rows:
+            keys = "Enter or Ctrl+O=open on GitHub  " + keys
+        self._set_view_status(message, keys)
+        self._update_title()
+        notes = insightview.notes(insights)
+        if not rows:
+            self.details_text.SetValue(message)
+            announce.announce(message, announce.STATUS)
+            return
+        if filtered:
+            wx.CallLater(100, self._focus_list, 0)
+        if notes:
+            # Queued behind the first row, which focus reads.
+            announce.announce(" ".join(notes), announce.STATUS)
+
+    def _show_insight_details(self, idx: int) -> None:
+        if idx < 0 or idx >= len(self.git_items):
+            self.details_text.Clear()
+            return
+        item = self.git_items[idx]
+        if not isinstance(item, InsightRow):
+            self.details_text.Clear()
+            return
+        self.details_text.SetValue(insightview.insight_details(item))
 
     def _show_milestone_details(self, idx: int) -> None:
         if idx < 0 or idx >= len(self.git_items):
@@ -5607,6 +5668,7 @@ class GhViewerFrame(wx.Frame):
         VIEW_SECURITY: "Advisory, Rule or Secret Type",
         VIEW_DISCUSSIONS: "Number",
         VIEW_MILESTONES: "Milestone Title",
+        VIEW_INSIGHTS: "Name",
     }
 
     _COPY_WHAT = {
@@ -6628,6 +6690,11 @@ class GhViewerFrame(wx.Frame):
                 "This event isn't about an issue, pull request, release or "
                 "discussion, so there is nothing to favorite."
             )
+            return
+
+        if isinstance(item, InsightRow):
+            self._tell("Insights can't be favorites. F on the repository in the "
+                       "repository list favorites it.")
             return
 
         if isinstance(item, ChangedFile):
@@ -7810,6 +7877,11 @@ class GhViewerFrame(wx.Frame):
             self._update_menu_checks()
             self._tell("Milestones are listed in GitHub's order, nearest due date "
                        "first, so they aren't sorted.")
+            return
+        if self.view_mode == VIEW_INSIGHTS:
+            self._update_menu_checks()
+            self._tell("Insights are listed by section, most first within each, "
+                       "so they aren't sorted.")
             return
         self.sort_order = self._sort_menu_items.get(event.GetId(), SORT_ORDERS[0])
         self._update_menu_checks()

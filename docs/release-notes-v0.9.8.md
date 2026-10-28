@@ -7,7 +7,7 @@ This release lets you read a repository's code: browse its folders, read any
 file a line at a time, see who last changed each line, and read every change a
 file has had. In a pull request's changed files you can read reviewers'
 comments on its lines, and add your own. And you can read a repository's
-security alerts.
+security alerts and its discussions.
 
 On a Mac, use `Cmd` where these notes say `Ctrl`, and `Option` where they say `Alt`.
 
@@ -82,6 +82,21 @@ A kind of alert that isn't turned on, or that you can't see, is named in the
 status bar, for example "Code scanning isn't set up on this repository." or
 "Dependabot alerts need admin or security manager rights on this repository.",
 and the rest are still shown.
+
+## Discussions
+
+**View → View Mode → Discussions** (or **Go To → Discussions** on a repository)
+lists a repository's discussions, most recently active first, with their
+category, author, whether they are answered, and how many comments they have.
+Selecting one shows its text and then its comments, each headed like an issue's,
+"Comment 2 of 5 — alice (2026-10-01):", with replies indented under them. The
+answer is marked. `Alt+N` and `Alt+P` move between comments and replies. `M`
+adds a comment, `Enter` opens the discussion on GitHub, and **View → State**
+shows closed discussions, or all. A repository with discussions turned off says
+so.
+
+`Enter` on a discussion in Notifications or Activity, or a discussion's address
+in **File → Open Repository or Address…**, now opens it here in Discussions, and `Backspace` goes back.
 
 ## Before you start
 

@@ -148,6 +148,7 @@ from gh_data import (
     comments_by_path,
     fetch_blame,
     fetch_blob_text,
+    fetch_readme_path,
     fetch_commit_file,
     fetch_default_branch,
     fetch_file_history,
@@ -755,6 +756,7 @@ ID_CTX_OPEN = wx.NewIdRef()
 ID_REPO_OPEN = wx.NewIdRef()
 ID_REPO_BROWSER = wx.NewIdRef()
 ID_SEARCH_REPO = wx.NewIdRef()
+ID_READ_README = wx.NewIdRef()
 ID_RUN_JOBS = wx.NewIdRef()
 ID_PR_CHECKS = wx.NewIdRef()
 ID_PR_REVIEW = wx.NewIdRef()
@@ -2746,6 +2748,7 @@ class GhViewerFrame(wx.Frame):
         self._act_pr = actions_menu.AppendSubMenu(pr_menu, "&Pull Request")
         self._act_search_repo = actions_menu.Append(
             ID_SEARCH_REPO, "Search This Repository…\tCtrl+Shift+S")
+        self._act_readme = actions_menu.Append(ID_READ_README, "Read README\tCtrl+Shift+R")
         self._act_watch = actions_menu.Append(ID_WATCH_SETTINGS, "Watch Settings…\tCtrl+Shift+U")
         self._act_save_search = actions_menu.Append(ID_SAVE_SEARCH, "Save Search…\tCtrl+S")
         actions_menu.AppendSeparator()
@@ -3221,6 +3224,7 @@ class GhViewerFrame(wx.Frame):
         # _repo_in_front) and say so when there is none.
         self._act_new_issue.Enable(True)
         self._act_search_repo.Enable(True)
+        self._act_readme.Enable(True)
         self._act_pr.Enable(issues)
         # Always on: it can act on the repo selected in the repo list from any
         # view, and says "Select a repository first" when there is none.
@@ -3401,6 +3405,7 @@ class GhViewerFrame(wx.Frame):
         self.Bind(wx.EVT_MENU, lambda e: self._activate_repo_entry(), id=ID_REPO_OPEN)
         self.Bind(wx.EVT_MENU, lambda e: self._repo_entry_action("browser"), id=ID_REPO_BROWSER)
         self.Bind(wx.EVT_MENU, lambda e: self._search_repo_in_front(), id=ID_SEARCH_REPO)
+        self.Bind(wx.EVT_MENU, lambda e: self._read_readme(), id=ID_READ_README)
         self.Bind(wx.EVT_MENU, lambda e: self._search_from_view_menu(), id=ID_VIEW_SEARCH_RESULTS)
         self.Bind(wx.EVT_MENU, lambda e: self._show_run_jobs(), id=ID_RUN_JOBS)
         self.Bind(wx.EVT_MENU, lambda e: self._pr_checks(), id=ID_PR_CHECKS)
@@ -3838,6 +3843,9 @@ class GhViewerFrame(wx.Frame):
         commit_branch = self.commit_branch
         files_of = getattr(self, "_files_of", None)
         code_ref, code_path = getattr(self, "_code_ref", ""), getattr(self, "_code_path", "")
+        # Read README: this load of Files lands on the README. One load only.
+        readme = view == VIEW_CODE and getattr(self, "_code_readme", None) == self.repo
+        self._code_readme = None
         history_of = getattr(self, "_history_of", None)
         repo = self.repo
         state = self.state_filter
@@ -3933,7 +3941,17 @@ class GhViewerFrame(wx.Frame):
                     wx.CallAfter(self._on_files_loaded, token, files, note, head)
                 elif view == VIEW_CODE:
                     ref = code_ref or fetch_default_branch(repo) or "HEAD"
-                    path, note = code_path, ""
+                    path, note, readme_path = code_path, "", ""
+                    if readme:
+                        try:
+                            readme_path = fetch_readme_path(repo) or ""
+                        except GhError as exc:
+                            note = f"Couldn't find the README: {exc}"
+                        else:
+                            if readme_path:
+                                path = readme_path.rpartition("/")[0]
+                            else:
+                                note = f"{repo} has no README."
                     try:
                         entries, cut = fetch_repo_folder(repo, ref, path)
                     except GhError as exc:
@@ -3943,7 +3961,8 @@ class GhViewerFrame(wx.Frame):
                         note = f"{path} isn't on {ref}, so this is the top."
                         path = ""
                         entries, cut = fetch_repo_folder(repo, ref, path)
-                    wx.CallAfter(self._on_code_loaded, token, ref, path, entries, cut, note)
+                    wx.CallAfter(self._on_code_loaded, token, ref, path, entries, cut, note,
+                                 readme_path)
                 elif view == VIEW_HISTORY:
                     commits = (fetch_file_history(repo, history_of[1], history_of[0], limit)
                                if history_of else [])
@@ -6005,6 +6024,7 @@ class GhViewerFrame(wx.Frame):
                 ("sep",),
                 ("item", ID_NEW_ISSUE, "New Issue…\tCtrl+N"),
                 ("item", ID_SEARCH_REPO, "Search This Repository…\tCtrl+Shift+S"),
+                ("item", ID_READ_README, "Read README\tCtrl+Shift+R"),
                 ("item", ID_WATCH_SETTINGS, "Watch Settings…\tCtrl+Shift+U"),
                 ("item", ID_FAVORITE,
                  "Remove from Favorites (F)" if is_favorite(f"https://github.com/{data}",
@@ -8726,6 +8746,7 @@ class GhViewerFrame(wx.Frame):
         self._code_blame: RepoFile | None = None  # the file whose blame is showing
         self._code_folders: dict = {}  # (repo, ref, path) -> (entries, cut), this visit
         self._blame_cache: dict = {}   # (repo, ref, path) -> ranges
+        self._readme_focus: RepoFile | None = None  # Read README: into it when it arrives
 
     def _code_where(self) -> str:
         """``src/ on main``: the folder and the branch, tag or commit."""
@@ -8754,7 +8775,9 @@ class GhViewerFrame(wx.Frame):
         self._on_code_loaded(token, self._code_ref, self._code_path, *cached, "")
 
     def _on_code_loaded(self, token: int, ref: str, path: str, entries: list,
-                        cut: bool, note: str) -> None:
+                        cut: bool, note: str, readme: str = "") -> None:
+        """A folder of Files has arrived. ``readme``: the README's path, when
+        Read README opened it, to land on and read."""
         if not self._fetch_is_current(token):
             return  # the user has moved on; these belong to a view they left
         self._code_ref = ref
@@ -8786,6 +8809,7 @@ class GhViewerFrame(wx.Frame):
         self._update_title()
         self._update_actions_menu()
         land, self._code_land = self._code_land, ""
+        land = readme or land
         row = next((i for i, f in enumerate(self._shown) if land and f.path == land), 0)
 
         def arrive() -> None:
@@ -8795,6 +8819,9 @@ class GhViewerFrame(wx.Frame):
                 self._focus_list(row)
             if note:
                 self._tell(note)
+            if readme and filtered and self._shown[row].path == readme:
+                self._read_readme_text(self._shown[row])
+                return
             # A status, so it waits for the row focus lands on to be read.
             announce.announce(f"{codeview.folder_label(self.repo or '', path)} {summary}",
                               announce.STATUS)
@@ -8944,12 +8971,47 @@ class GhViewerFrame(wx.Frame):
             return
         reading = self.FindFocus() is self.details_text
         self._render_code(item)
-        if reading:
+        if getattr(self, "_readme_focus", None) is item:
+            self._readme_focus = None
+            self._read_from_top()
+        elif reading:
             # Enter went into the panel while it was on its way: the top,
             # and say it is here, as a focused text box's new value isn't read.
             self.details_text.SetInsertionPoint(0)
             first = self.details_text.GetValue().split("\n", 1)[0]
             announce.announce(first, announce.STATUS)
+
+    def _read_readme_text(self, item: RepoFile) -> None:
+        """Read README has landed on ``item``: into its text, at the top,
+        now if it is here, else when it arrives (``_on_blob_fetched``)."""
+        if item.sha in self._blob_cache or codeview.too_big(item):
+            self._read_from_top()
+        else:
+            self._readme_focus = item
+
+    def _read_from_top(self) -> None:
+        """Focus in the details panel, on its first line, which the screen
+        reader reads as focus arrives."""
+        self.details_text.SetFocus()
+        self.details_text.SetInsertionPoint(0)
+
+    def _read_readme(self) -> None:
+        """Actions ▸ Read README (Ctrl+Shift+R): the README of the repository
+        in front of you, in Files on its default branch, read from the top
+        in the details panel. Alt+N and Alt+P move between its headings;
+        Backspace goes to the list of files around it."""
+        repo, source = self._repo_in_front_from()
+        if not repo:
+            self._tell("Select a repository first: Read README needs one.")
+            return
+        self._readme_focus = None
+        self._code_readme = repo  # taken by the load of Files below
+        self._announce(f"Getting the README of {repo}…")
+        if source == "row":
+            self._open_repo_from_list(repo, self._focused_item(), VIEW_CODE)
+        else:
+            self._select_repo(repo, VIEW_CODE)
+            self._select_in_repo_list(repo)
 
     def _code_file(self, doing: str) -> RepoFile | None:
         """The file selected in Files, or None having said why not."""

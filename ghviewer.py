@@ -54,6 +54,7 @@ from gh_data import (
     Notification,
     RepoEntry,
     RepoFile,
+    ALERT_DEPENDABOT,
     ALERT_KIND_LABELS,
     ALERT_KINDS,
     SecurityAlert,
@@ -614,7 +615,8 @@ def security_status(repo: str, report, state: str, limit: int) -> str:
     for kind in ALERT_KINDS:
         k = sum(1 for a in alerts if a.kind == kind)
         if k:
-            counts.append(f"{k} {ALERT_KIND_LABELS[kind].lower()}")
+            label = ALERT_KIND_LABELS[kind]
+            counts.append(f"{k} {label if kind == ALERT_DEPENDABOT else label.lower()}")
     parts = [head + (": " + ", ".join(counts) if counts else "") + "."]
     parts += report.notes()
     if report.full:
@@ -4187,7 +4189,8 @@ class GhViewerFrame(wx.Frame):
         message = security_status(self.repo, report, state, self.current_limit)
         keys = "R=refresh  Ctrl+F=filter"
         if alerts:  # nothing to open, or more to show, in an empty list
-            keys = "Enter=open on GitHub  Ctrl++=view more  " + keys
+            keys = ("Enter or Ctrl+O=open on GitHub  F=favorite  Ctrl++=view more  "
+                    + keys)
         self._set_view_status(message, keys)
         self._update_title()
         if not alerts:

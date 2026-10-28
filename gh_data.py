@@ -4117,6 +4117,11 @@ class SecurityAlert:
 
     @property
     def severity_rank(self) -> int:
+        if (self.kind == ALERT_SECRET and self.state == "open"
+                and (self.info.get("validity") == "active" or self.info.get("publicly_leaked"))):
+            # A secret that still works, or is out in public, has no severity
+            # from GitHub but is as urgent as anything: it goes with the high ones.
+            return SEVERITY_RANK["high"]
         return SEVERITY_RANK.get(self.severity, UNKNOWN_SEVERITY_RANK)
 
     def to_row(self, columns: list[str]) -> dict[str, str]:
@@ -4361,18 +4366,36 @@ def classify_alert_error(kind: str, exc: GhError) -> tuple[str, str]:
     """Why ``kind`` couldn't be read: ("off" | "scope" | "rights" | "error",
     a sentence). The sentence is "" for "scope", which is said once for all
     the kinds that need it (scope_sentence)."""
-    text = str(exc)
+    # gh's own hint about a scope is wrong for these endpoints (it names
+    # admin:repo_hook whatever the failure), so it is set aside: GitHub's
+    # message is what says what happened.
+    lines = []
+    for ln in str(exc).splitlines():
+        ln = ln.strip()
+        if ln.startswith("{") and "}gh: " in ln:
+            ln = ln[ln.index("}gh: ") + 1:]  # the reply's JSON, then gh's line
+        if ln and not ln.startswith("{") and "scope" not in ln:
+            lines.append(ln)
+    text = "\n".join(lines)
     low = text.lower()
     label = ALERT_KIND_LABELS.get(kind, kind)
-    if any(s in low for s in _NOT_SET_UP) or "(http 404)" in low:
+    if any(s in low for s in _NOT_SET_UP):
         return "off", _NOT_SET_UP_SENTENCES.get(kind, f"{label} isn't set up on this repository.")
-    if "admin rights" in low or "must be an admin" in low:
+    if ("not authorized" in low or "admin rights" in low or "must be an admin" in low):
+        # What a repository you don't administer answers: Dependabot "You are
+        # not authorized to perform this operation.", code scanning "You are
+        # not authorized to read code scanning alerts." (both HTTP 403).
         return "rights", (f"{label} alerts need admin or security manager rights on this "
                           "repository.")
-    if _scope_error(exc) or "not accessible by" in low or "(http 403)" in low:
+    if "not found" in low and "(http 404)" in low:
+        # Secret scanning's answer without rights; one that is off says "disabled".
+        return "rights", (f"{label} alerts can't be read here: either it isn't turned on, "
+                          "or it needs admin or security manager rights on this repository.")
+    if "not accessible by" in low:
+        # A token GitHub won't let read security alerts: gh's sign-in lacks
+        # the permission, or a fine-grained token lacks it.
         return "scope", ""
-    first = next((ln.strip() for ln in text.splitlines()
-                  if ln.strip() and not ln.strip().startswith("{")), text.strip())
+    first = lines[0] if lines else str(exc).strip()
     if first.startswith("gh: "):
         first = first[4:]
     return "error", f"Couldn't read {label.lower()} alerts: {first}"
@@ -4402,6 +4425,9 @@ def fetch_security_alerts(repo: str, state: str = "open", limit: int = 100) -> S
                 found[kind] = fut.result()
             except GhError as exc:
                 failed[kind] = exc
+            except ValueError as exc:
+                # A reply that isn't JSON; the other kinds still show.
+                failed[kind] = GhError(f"Unexpected reply from GitHub ({exc})")
     result = SecurityAlerts(alerts=[])
     for kind in ALERT_KINDS:
         if kind in failed:

@@ -79,9 +79,9 @@ the kind of secret and whether it is still valid, and who dismissed it and why.
 `Enter` opens it on GitHub. **View → State** shows closed alerts, or all.
 
 A kind of alert that isn't turned on, or that you can't see, is named in the
-status bar, for example "Code scanning isn't set up on this repository.", and
-the rest are still shown. If `gh` needs the "security_events" permission, the
-status bar gives the command that adds it.
+status bar, for example "Code scanning isn't set up on this repository." or
+"Dependabot alerts need admin or security manager rights on this repository.",
+and the rest are still shown.
 
 ## Before you start
 

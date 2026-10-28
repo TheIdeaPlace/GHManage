@@ -626,7 +626,7 @@ In [Changed Files](#changed-files), `W` on a file, or **Actions → Open Whole F
 
 **View → View Mode → Security Alerts**, or **Go To → Security Alerts** on a repository in the repository list, lists the repository's security alerts from GitHub: Dependabot alerts about the packages it depends on, code scanning alerts about its code, and secret scanning alerts about passwords and keys committed to it, all in one list. The Kind column says which each one is. GHManage only reads alerts; to dismiss or reopen one, open it on GitHub.
 
-The columns are Kind, Severity, Package or rule, Summary, Where, State and Created. Where is the manifest file for a Dependabot alert (such as `requirements.txt`), the file and line for code scanning, and where a secret was found. The most severe come first, critical, high, medium and low, and newest first within each. Code scanning rules that aren't about security have only the scanning tool's own error, warning or note, which come after low; secret scanning alerts have no severity and come last. **View → Sort Order** doesn't apply here.
+The columns are Kind, Severity, Package or rule, Summary, Where, State and Created. Where is the manifest file for a Dependabot alert (such as `requirements.txt`), the file and line for code scanning, and where a secret was found. The most severe come first, critical, high, medium and low, and newest first within each. Code scanning rules that aren't about security have only the scanning tool's own error, warning or note, which come after low; secret scanning alerts have no severity, so an open secret that still works, or has leaked publicly, comes with the high ones and the rest come last. **View → Sort Order** doesn't apply here.
 
 **View → State** chooses what is listed: **Open** (the default), **Closed** (dismissed, fixed or, for secrets, resolved) or **All**. `Ctrl++` loads more of each kind when there are more than one page.
 
@@ -647,9 +647,11 @@ Each kind of alert is turned on separately on GitHub, and each needs its own rig
 - "Dependabot alerts aren't turned on for this repository."
 - "Code scanning isn't set up on this repository."
 - "Secret scanning isn't turned on for this repository."
-- "Secret scanning alerts need admin or security manager rights on this repository."
+- "Code scanning alerts need admin or security manager rights on this repository."
 
-Reading security alerts can also need `gh`'s "security_events" permission, which `gh` doesn't always ask for when you sign in. When it is missing, the status bar says so with the command that adds it:
+On a repository you don't administer, the last is the usual answer: GitHub shows security alerts only to admins and security managers. Secret scanning doesn't say which of the two it is, so for it the message names both.
+
+Rarely, the way `gh` signs in isn't allowed to read security alerts at all, and GitHub says so. Then the status bar gives the command that adds `gh`'s "security_events" permission:
 
 ```
 gh auth refresh -h github.com -s security_events

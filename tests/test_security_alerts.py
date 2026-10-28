@@ -107,8 +107,16 @@ DEP_403 = GhError('{"message":"Dependabot alerts are disabled for this repositor
 CODE_404 = GhError("gh: no analysis found (HTTP 404)\n"
                    'gh: This API operation needs the "admin:repo_hook" scope.')
 SECRET_404 = GhError("gh: Secret scanning is disabled on this repository. (HTTP 404)")
+HINT = ('gh: This API operation needs the "admin:repo_hook" scope. To request it, run:  '
+        "gh auth refresh -h github.com -s admin:repo_hook")
 NOT_ACCESSIBLE = GhError("gh: Resource not accessible by personal access token (HTTP 403)\n"
-                         'gh: This API operation needs the "security_events" scope.')
+                         + HINT)
+# What a repository you don't administer answers (cli/cli, as gh prints it).
+DEP_NOT_AUTHORIZED = GhError("gh: You are not authorized to perform this operation. "
+                             "(HTTP 403)\n" + HINT)
+CODE_NOT_AUTHORIZED = GhError("gh: You are not authorized to read code scanning alerts. "
+                              "(HTTP 403)\n" + HINT)
+SECRET_NOT_FOUND = GhError("gh: Not Found (HTTP 404)")
 
 
 def _headers(body, next_url=""):
@@ -266,9 +274,40 @@ def test_a_missing_permission_names_the_scope_and_the_command_once(fake_gh):
         "Run gh auth refresh -h github.com -s security_events in a terminal, then press R."]
 
 
+def test_a_reply_that_is_not_json_loses_only_its_own_kind(fake_gh):
+    fake_gh.route("dependabot/alerts", _headers([DEPENDABOT]))
+    fake_gh.route("code-scanning/alerts", "<html>oops</html>")
+    fake_gh.route("secret-scanning/alerts", [SECRET])
+    report = gh_data.fetch_security_alerts("o/r", "all", 100)
+    assert len(report.alerts) == 2
+    assert report.notes()[0].startswith("Couldn't read code scanning alerts: Unexpected reply")
+
+
+def test_a_live_or_leaked_open_secret_goes_with_the_high_ones():
+    live = gh_data._secret_alert(dict(SECRET, state="open", validity="active"))
+    leaked = gh_data._secret_alert(dict(SECRET, state="open", validity="unknown",
+                                        publicly_leaked=True))
+    old = gh_data._secret_alert(dict(SECRET, state="open", validity="inactive"))
+    gone = gh_data._secret_alert(dict(SECRET, validity="active"))  # resolved
+    assert live.severity_rank == leaked.severity_rank == gh_data.SEVERITY_RANK["high"]
+    assert old.severity_rank == gone.severity_rank == gh_data.UNKNOWN_SEVERITY_RANK
+
+
 def test_three_kinds_needing_the_scope_read_as_a_list():
     assert gh_data.scope_sentence(list(gh_data.ALERT_KINDS)).startswith(
         "Dependabot, code scanning and secret scanning alerts need")
+
+
+def test_a_repository_you_dont_administer_says_rights_not_permission(fake_gh):
+    _all_routes(fake_gh, dependabot=DEP_NOT_AUTHORIZED, code=CODE_NOT_AUTHORIZED,
+                secret=SECRET_NOT_FOUND)
+    report = gh_data.fetch_security_alerts("o/r", "open", 100)
+    assert report.missing_scope == []
+    assert report.notes() == [
+        "Dependabot alerts need admin or security manager rights on this repository.",
+        "Code scanning alerts need admin or security manager rights on this repository.",
+        "Secret scanning alerts can't be read here: either it isn't turned on, or it needs "
+        "admin or security manager rights on this repository."]
 
 
 def test_no_rights_and_other_failures_are_said_plainly():
@@ -276,6 +315,11 @@ def test_no_rights_and_other_failures_are_said_plainly():
         ALERT_SECRET, GhError("gh: Must have admin rights to Repository. (HTTP 403)"))
     assert why == "rights"
     assert said == "Secret scanning alerts need admin or security manager rights on this repository."
+    # Any other 403 is GitHub's own words, without gh's scope hint.
+    why, said = gh_data.classify_alert_error(
+        ALERT_DEPENDABOT, GhError("gh: API rate limit exceeded for user. (HTTP 403)\n" + HINT))
+    assert (why, said) == ("error", "Couldn't read dependabot alerts: "
+                                    "API rate limit exceeded for user. (HTTP 403)")
     why, said = gh_data.classify_alert_error(
         ALERT_CODE, GhError("gh: error connecting to api.github.com\ncheck your connection"))
     assert why == "error"
@@ -381,7 +425,7 @@ def test_status_counts_each_kind_and_says_what_is_missing():
         unavailable={ALERT_SECRET: "Secret scanning isn't turned on for this repository."},
         full=[ALERT_CODE])
     assert ghviewer.security_status("o/r", report, "open", 2) == (
-        "o/r — 3 open security alerts: 1 dependabot, 2 code scanning. "
+        "o/r — 3 open security alerts: 1 Dependabot, 2 code scanning. "
         "Secret scanning isn't turned on for this repository. "
         "Showing up to 2 of each kind; Ctrl++ shows more.")
     one = SecurityAlerts(alerts=[gh_data._secret_alert(SECRET)])

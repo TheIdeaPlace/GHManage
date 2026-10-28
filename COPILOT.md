@@ -77,11 +77,13 @@ UI thread via `wx.CallAfter`. Never touch wx widgets from a worker thread.
 - `SecurityAlert`, `SecurityAlerts`, `fetch_security_alerts(repo, state, limit)` — the Security
   Alerts view (`VIEW_SECURITY`, #85, read-only). Reads `repos/{r}/dependabot|code-scanning|
   secret-scanning/alerts` in parallel (ThreadPoolExecutor); each kind fails on its own and
-  `classify_alert_error` turns its failure into "off" (disabled / not enabled / no analysis /
-  404), "rights" (admin rights), "scope" (403 otherwise: said once by `scope_sentence`, naming
-  `security_events` and the `gh auth refresh` command) or "error". **gh adds a bogus
-  "needs the admin:repo_hook scope" hint to every one of these failures**, so "off" is checked
-  first and the scope gh names is never repeated. Dependabot rejects `page=` (HTTP 400): it
+  `classify_alert_error` turns its failure into "off" (disabled / not enabled / no analysis),
+  "rights" ("You are not authorized…" 403 from Dependabot and code scanning on a repo you don't
+  administer; secret scanning's bare "Not Found" 404, which names both causes), "scope"
+  ("Resource not accessible by…": said once by `scope_sentence`, naming `security_events` and
+  the `gh auth refresh` command) or "error" (GitHub's own text: rate limits, SSO). **gh adds a
+  bogus "needs the admin:repo_hook scope" hint to every one of these failures**; it is
+  dropped before classifying and never repeated. Dependabot rejects `page=` (HTTP 400): it
   pages by cursor through `_api_cursor_pages` (`gh api -i`, Link rel="next"). Secret scanning
   rejects `state=all`, so View > State > All sends no state; `hide_secret=true` always, so the
   secret is never fetched. `sort_alerts`: `SEVERITY_RANK` (critical..low, then code scanning's

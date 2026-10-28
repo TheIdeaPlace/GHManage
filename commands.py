@@ -52,6 +52,19 @@ def matching(commands: list[Command], text: str) -> list[Command]:
     return sorted(hits, key=lambda c: not c.name.lower().startswith(typed))
 
 
+# The keys line of a details panel that Enter brought you into (Issues &
+# PRs, Discussions, Security Alerts, Insights, Gists): read where it works.
+READ_KEYS = "Backspace goes back to the list; Ctrl+O opens it on GitHub."
+
+
+def hint_words(label: str) -> str:
+    """A menu label as the status bar's key hints say it: "Show Commits" is
+    "show commits", "Run on a Branch…" is "run on a branch". Words that are
+    capitals inside as well (PRs, GitHub, README) are names and keep them."""
+    words = label.replace("…", "").split()
+    return " ".join(w.lower() if w[1:] == w[1:].lower() else w for w in words)
+
+
 REPO_LIST = "Repository list"
 ANY_LIST = "Any list"
 ISSUES = "Issues & PRs list"
@@ -63,6 +76,12 @@ FEEDS = "Activity, Notifications, My Work and search results"
 PAGES = "GitHub Pages"
 CHANGES = "Issues & PRs list and Commits list"
 FILES = "Changed Files"
+DETAILS = "Details panel"
+TAGS = "Tags list"
+ASSETS = "A release's files"
+RUN_LIST = "Workflow Runs list"
+READING = ("Issues & PRs, Discussions, Security Alerts, Insights, Gists and "
+           "Published Pages")
 CODE = "Files"
 HISTORY = "File History"
 COMMITS = "Commits list"
@@ -73,13 +92,21 @@ LIST_KEYS: list[Command] = [
     Command("Move to the previous pane", "Shift+F6", WINDOW),
     Command("Context menu", "Applications or Shift+F10", WINDOW),
     Command("Open the selected entry", "Enter", REPO_LIST),
+    Command("Open the repository on GitHub", "Ctrl+O", REPO_LIST),
     Command("Add the repository to favorites, or remove it", "F", REPO_LIST),
-    Command("Remove from the list", "Delete", REPO_LIST),
-    Command("Open the item, or go into it", "Enter", ANY_LIST),
+    Command("Remove the repository from the list", "Delete", REPO_LIST),
+    Command("Remove the saved search", "Delete", REPO_LIST),
+    Command("Go in: a deeper list, the item in the details panel, or an action here",
+            "Enter", ANY_LIST),
     Command("Add to favorites, or remove", "F", ANY_LIST),
     Command("Refresh", "R", ANY_LIST),
     Command("Clear the quick filter", "Escape", ANY_LIST),
     Command("Back to where you came from", "Backspace", ANY_LIST),
+    Command("Read the item: into the details panel, at the top", "Enter", READING),
+    Command("Back to the item's row in the list", "Backspace", DETAILS),
+    Command("What Enter does in the list, where that isn't reading", "Enter", DETAILS),
+    Command("The files at the tag", "Enter", TAGS),
+    Command("Download the file into a folder you choose", "Enter", ASSETS),
     Command("Close the issue or pull request", "C", ISSUES),
     Command("Reopen it", "O", ISSUES),
     Command("Add a comment", "M", ISSUES),
@@ -102,7 +129,7 @@ LIST_KEYS: list[Command] = [
     Command("Back to the file", "Backspace", HISTORY),
     Command("New label", "Insert", LABELS),
     Command("Delete the label", "Delete", LABELS),
-    Command("Show jobs", "J", RUNS),
+    Command("Show jobs", "J", RUN_LIST),
     Command("Show what failed", "L", RUNS),
     Command("Rerun", "E", RUNS),
     Command("Cancel the run", "X", RUNS),

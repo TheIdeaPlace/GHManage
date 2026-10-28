@@ -27,7 +27,7 @@ def test_split_label(label, expected):
 
 
 CMDS = [
-    Command("Open in Browser", "Ctrl+O", "Actions"),
+    Command("Open on GitHub", "Ctrl+O", "Actions"),
     Command("Copy Link", "Ctrl+Shift+C", "Actions > Copy"),
     Command("Refresh (R)", "Ctrl+R", "File"),
     Command("Issues & PRs", "Ctrl+1", "View > View Mode", checked=True),

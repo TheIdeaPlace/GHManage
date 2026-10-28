@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 
+from commands import READ_KEYS
 from gh_data import ALERT_CODE, ALERT_DEPENDABOT, ALERT_SECRET, SecurityAlert, SecurityAlerts
 
 # An advisory's description can run to pages; the rest is a keypress away.
@@ -171,6 +172,7 @@ def alert_details(alert: SecurityAlert) -> str:
     if advisory:
         lines.append("Advisory URL:")
         lines.append(advisory)
+    lines.append(READ_KEYS)
     if description.strip():
         lines += ["", RULE, "", trim_text(description)]
     return "\n".join(lines)

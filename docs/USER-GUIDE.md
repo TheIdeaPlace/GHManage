@@ -10,6 +10,7 @@ GHManage is a keyboard-driven desktop app for your GitHub repositories, built fo
 - [Installing and Updating](#installing-and-updating)
 - [Signing In with the GitHub CLI](#signing-in-with-the-github-cli)
 - [The Main Window](#the-main-window)
+- [Enter, Ctrl+O and Backspace](#enter-ctrlo-and-backspace)
 - [The Repository List](#the-repository-list)
 - [Issues and Pull Requests](#issues-and-pull-requests)
 - [Labels](#labels)
@@ -231,7 +232,7 @@ Each repository has several views. `Ctrl` and a number jumps straight to one fro
 
 Favorites, Notifications, My Work, Activity, Starred Repositories, Watched Repositories, Shared With Me, an organization's repositories and search results are not about one repository, so they work at any time. Every other view needs a repository: with none chosen, the status bar says "Select a repository first." and the view stays as it was.
 
-Several views lead into others. `Enter` on a branch shows its commits, on a release its files, on a workflow run its artifacts, on a label the issues that carry it. `Backspace` steps back up to where you came from.
+Several views lead into others. `Enter` on a branch shows its commits, on a release its files, on a workflow run its artifacts, on a label the issues that carry it. `Backspace` steps back up to where you came from. See [Enter, Ctrl+O and Backspace](#enter-ctrlo-and-backspace).
 
 When a view loads, the status bar names it and the repository, for example "Loading Branches for owner/name…", and then says what arrived.
 
@@ -240,7 +241,7 @@ When a view loads, the status bar names it and the repository, for example "Load
 The status bar is split into items:
 
 - **The message**: what the view is showing, or the last thing GHManage told you.
-- **Keys**: the keys that work in the current view, for example "Ctrl++=view more  R=refresh  Ctrl+F=filter  Enter=list assets".
+- **Keys**: the keys that work in the current view, `Enter` and `Ctrl+O` first, then the view's own, and last where `Backspace` goes, for example "Enter=list files  Ctrl+O=open on GitHub  Ctrl++=view more  R=refresh  Ctrl+F=filter". `Enter` and `Backspace` are named as File and Actions name them.
 - **Filter**: the quick filter and how many rows it matches, while one is set.
 - **Mode**: Quick mode or Full mode.
 - **Update**: an update ready to install, when one has been found.
@@ -257,18 +258,63 @@ Lists load 100 items to begin with. `Ctrl++` (**File → View More**) loads the 
 
 | Menu | What is on it |
 |------|---------------|
-| **File** | Open Repository or Address, Remove from List, Hidden Repositories, Archive or Unarchive Repository, Delete Repository from GitHub, Switch GitHub Account, Refresh, Search GitHub, View More, Go To Issue, Quick Filter, Next and Previous Comment, Quit |
-| **Actions** | Everything that acts on the item you are on. See [The Actions Menu](#the-actions-menu). |
-| **View** | View Mode, List Mode, Sort Order, Columns, State, Filter, Include Read Notifications, Speak Results |
+| **File** | Open Repository or Address, Remove from List, Hidden Repositories, Archive or Unarchive Repository, Delete Repository from GitHub, Switch GitHub Account, Refresh, Back, View More, Search GitHub, Go To Issue, Quick Filter, Clear Quick Filter, Next and Previous Comment, Quit |
+| **Actions** | Everything that acts on the item you are on, starting with what `Enter` does. See [The Actions Menu](#the-actions-menu). |
+| **View** | View Mode, List Mode, Sort Order, Columns, State, Filter, Mark Changed Lines With, Next Pane, Previous Pane, Include Read Notifications, Speak Results |
 | **Help** | User Guide, Keyboard Shortcuts, Command Palette, Check for Updates, About GHManage |
 
 **Help → User Guide** (`F1`, or `fn+F1` on a Mac) opens this guide in your web browser.
+
+Every key that does something is on a menu with the key in its name, the single-letter keys too: **Refresh (R)**, **Back to Branches (Backspace)**, **Clear Quick Filter (Escape)**, **Next Pane (F6)**, **New Label… (Insert)**. So the menus, the Command Palette and Keyboard Shortcuts tell you every key.
 
 ### Keyboard Shortcuts and the Command Palette
 
 **Help → Keyboard Shortcuts** (`Ctrl+F1`) lists every key in GHManage in a table of key, command and where it works: the single-letter keys in the lists as well as every menu shortcut. Type in **Filter** to narrow it, for example "delete" or "ctrl+shift"; the list's name says how many match, for example "Shortcuts, 4 matching". What it found is shown under **Filter** when you pause typing, for example "4 shortcuts.", and NVDA reads it. `Escape` closes it.
 
 **Help → Command Palette…** (`Ctrl+Shift+P`) finds a command by name and runs it, so you don't need to know which menu it is on or what its shortcut is. Type a few letters of the command, for example "branches" or "copy link", then `Down Arrow` to move into the list, and `Enter` to run the one you are on. `Enter` in the box runs the first match, and `Up Arrow` on the first command goes back to the box. As you type, GHManage says how many commands match and which one `Enter` would run, for example "2 commands. Enter runs Branches, Ctrl+2." It is said when you pause, so it doesn't talk over your typing, and it is also shown under the box. NVDA reads it as the box's description; on a Mac it is only on screen for now. The list's name says how many match too. The command runs as if you had chosen it from its menu, on whatever you were on before you opened the palette. It lists only the commands that apply where you are, each with its shortcut and the menu it is on, so it also teaches you the shortcut for next time.
+
+---
+
+## Enter, Ctrl+O and Backspace
+
+Three keys work the same way in every view.
+
+**`Enter` goes in, inside GHManage.** Where the selected item has a deeper list, `Enter` shows it: a branch's commits, a tag's files, a release's files, a run's artifacts, a folder. Otherwise `Enter` goes into the item itself: focus moves into the details panel, at the top, where its text, comments or lines are, and `Alt+N` and `Alt+P` move through them. Where the thing to do is an action here, `Enter` does it: run a workflow, download an artifact or a release's file. In Favorites, Notifications, Activity, My Work and search results, `Enter` opens the thing in its own view here, on it. `Enter` never opens the web browser. Where GHManage has no view for something, `Enter` says so: "GHManage has no view for that; Ctrl+O opens it on GitHub."
+
+**`Ctrl+O` opens the selected thing on GitHub**, in every view (**Actions → Open on GitHub**). It acts on the pane with focus, as Copy and `F` do: in the repository list, the repository. A few views open something else, and the menu item is named for it: a release's file opens its release (**Open Its Release on GitHub**), a publish in GitHub Pages opens its commit (**Open Its Commit on GitHub**), and a published page opens on the web (**Open on the Web**). An artifact has no page of its own, so there the item is greyed out and `Ctrl+O` says so.
+
+**`Backspace` goes back out**, the opposite of `Enter`. In the details panel it goes back to the item's row in the list. In a list, it goes back to the list you came from, on the item you left: from a branch's commits to Branches, from Files at a tag to Tags, from what `Enter` opened in Favorites back to Favorites. **File → Back** is named for where it goes, for example **Back to Branches (Backspace)**, and is greyed out where `Backspace` has nowhere to go.
+
+The first item on the **Actions** menu, and on the list's context menu, is what `Enter` does in the view you are in, for example **Show Commits (Enter)**, **Read (Enter)** or **Download… (Enter)**. The status bar says it the same way: "Enter=show commits".
+
+| View | `Enter` | `Ctrl+O` | `Backspace` in the list |
+|------|---------|----------|-------------------------|
+| Issues & PRs | Read it, in the details panel | Open it on GitHub | Back to the label, milestone or list you came from |
+| Branches | Show its commits | Open it on GitHub | |
+| Commits | Its changed files | Open it on GitHub | Back to Branches |
+| Tags | Its files, in Files at that tag | Open it on GitHub | |
+| Releases | List its files | Open it on GitHub | |
+| A release's files | Download it into a folder you choose | Open its release on GitHub | Back to Releases |
+| Workflows | Run it on a branch | Open it on GitHub | |
+| Workflow Runs | List its artifacts | Open it on GitHub | |
+| Jobs | Read its log | Open it on GitHub | Back to Workflow Runs |
+| Artifacts | Download it into a folder you choose | Nothing: no page | Back to Workflow Runs |
+| Changed Files | Read its changes | Open the file on GitHub | Back to the pull request or commit |
+| Files | Open the folder, or read the file | Open it on GitHub | Up a folder; at the top, back to Tags or Changed Files |
+| File History | The commit's changed files | Open the commit on GitHub | Back to Files |
+| Labels | List its issues and pull requests | Open it on GitHub | |
+| Milestones | List its issues and pull requests | Open it on GitHub | |
+| Discussions, Security Alerts, Insights, Gists | Read it, in the details panel | Open it on GitHub | |
+| GitHub Pages | Browse the published pages | Open the publish's commit on GitHub | |
+| Published Pages | Read it, in the details panel | Open the page on the web | Back to GitHub Pages |
+| Favorites | Open it here, in its own view | Open it on GitHub | From there, back to Favorites |
+| Notifications | Open it here, in its own view, and mark it read | Open it on GitHub, and mark it read | From there, back to Notifications |
+| Activity | Open what it is about here | Open it on GitHub | From there, back to Activity |
+| My Work, issue search results | Open it in its repository here | Open it on GitHub | From there, back to the list |
+| Starred, Watched, Shared With Me, an organization, repository search | Open the repository here | Open it on GitHub | From there, back to the list |
+| My Organizations | List its repositories | Open it on GitHub | |
+
+An issue or pull request in a fork can't open here, because a fork's Issues & PRs shows its upstream's issues. `Enter` says so, for example "#9 is in me/fork, a fork; GHManage shows that repository's issues from up/r. Ctrl+O opens it on GitHub."
 
 ---
 
@@ -369,7 +415,7 @@ Both reload the list from GitHub, so they reach items that were never in the lis
 
 | Key | Action |
 |-----|--------|
-| `Enter` | Open the issue or pull request on GitHub in your browser |
+| `Enter` | Read it: focus moves into the details panel, at the top, with its comments after its description. `Backspace` there comes back to the row |
 | `C` or `Ctrl+W` | Close it |
 | `O` or `Ctrl+Shift+W` | Reopen it |
 | `M` or `Ctrl+M` | Add a comment |
@@ -490,7 +536,7 @@ A list of very large pull requests can take GitHub too long to measure. Then GHM
 - **Page**: the repository's most visited pages, most first.
 - **Contributor**: each contributor with their commits on the default branch, most first, up to 500; the status bar says when there are that many.
 
-The status bar sums it up, for example "owner/name — 1,234 views (210 unique) and 56 clones (12 unique) in the last 14 days, 30 contributors." Selecting a row shows it in full in the details panel. `Enter` or `Ctrl+O` opens it on GitHub: the repository's traffic page for views, clones and referrers, the page itself for a popular page, and the person's profile for a contributor. The quick filter (`Ctrl+F`) finds rows by section or name, for example "contributor". **Copy Details** copies what the details panel shows; **Copy Markdown Link** gives the row as it reads, linked.
+The status bar sums it up, for example "owner/name — 1,234 views (210 unique) and 56 clones (12 unique) in the last 14 days, 30 contributors." Selecting a row shows it in full in the details panel. `Enter` moves into it in the details panel, and `Backspace` comes back. `Ctrl+O` opens it on GitHub: the repository's traffic page for views, clones and referrers, the page itself for a popular page, and the person's profile for a contributor. The quick filter (`Ctrl+F`) finds rows by section or name, for example "contributor". **Copy Details** copies what the details panel shows; **Copy Markdown Link** gives the row as it reads, linked.
 
 GitHub keeps traffic for 14 days only, and shows it only to people who can push to the repository. Without that access the Views, Clones, Referrer and Page rows are left out, and GHManage says "Traffic needs push access to owner/name, which you don't have." after the first row. GitHub won't list the contributors of a very large repository, and says so; and when it is still counting them, GHManage says "GitHub is still counting the contributors; press R in a moment."
 
@@ -697,7 +743,7 @@ Selecting an alert shows everything GitHub says about it in the details panel:
 
 A closed alert also says who dismissed or resolved it, when and why. The alert's address is on the line after "URL:", and a Dependabot advisory's after "Advisory URL:".
 
-`Enter` or `Ctrl+O` opens the alert on GitHub. **Copy** works as everywhere else; Copy Advisory, Rule or Secret Type (`Ctrl+Shift+I`) copies the CVE id (or the GHSA id when there is no CVE), the code scanning rule id, or the secret's type.
+`Enter` moves into the alert in the details panel, at the top, and `Backspace` comes back to the row. `Ctrl+O` opens the alert on GitHub. **Copy** works as everywhere else; Copy Advisory, Rule or Secret Type (`Ctrl+Shift+I`) copies the CVE id (or the GHSA id when there is no CVE), the code scanning rule id, or the secret's type.
 
 ### When a kind of alert can't be shown
 
@@ -728,7 +774,7 @@ Selecting a discussion shows it in the details panel: its number, category and t
 
 `M`, or **Actions → Add Comment…** (`Ctrl+M`), comments on the selected discussion. Type the comment and choose OK. The comments are read again with yours among them, and the caret stays where it was. A locked discussion can't take comments, and GHManage says so.
 
-`Enter` or `Ctrl+O` opens the discussion on GitHub. **Copy** works as everywhere else; Copy Number copies `#7`. `F` adds it to your favorites.
+`Enter` moves into the discussion in the details panel, at the top, where `Alt+N` and `Alt+P` move between its comments, and `Backspace` comes back to the row. `Ctrl+O` opens the discussion on GitHub. **Copy** works as everywhere else; Copy Number copies `#7`. `F` adds it to your favorites.
 
 A repository with discussions turned off says so, in the details panel and aloud.
 
@@ -738,7 +784,7 @@ A repository with discussions turned off says so, in the details panel and aloud
 
 ### Tags
 
-**Tags** (`Ctrl+4`) lists the repository's tags and the commit each points at. `Enter` opens a tag on GitHub.
+**Tags** (`Ctrl+4`) lists the repository's tags and the commit each points at. `Enter` on a tag opens its files in [Files](#files), as they are at that tag, from the top of the repository; everything in Files works there. `Backspace` at the top comes back to Tags, on the tag. `Ctrl+O` opens the tag on GitHub.
 
 ### Releases
 
@@ -752,7 +798,7 @@ The details panel shows a release's downloads file by file, most downloaded firs
 
 `Enter` on a release lists its files, each with its download count and size, and the status bar gives the total: "Showing 6 assets for v1.2.0, 3,204 downloads in total". A release with no files says so instead.
 
-In that list, `Enter` downloads the selected file through your browser, and `Backspace` returns to the releases.
+In that list, `Enter` downloads the selected file: GHManage asks which folder to save it in, and asks before replacing a file of the same name there. The status bar says "Downloaded app.zip into C:\Users\you\Downloads." when it is done, and your screen reader says it too. `Ctrl+O` opens the release on GitHub, and `Backspace` returns to the releases.
 
 ### Reading download counts
 
@@ -766,7 +812,7 @@ A download count is a running total kept by GitHub for the life of the file. It 
 
 **Workflows** (`Ctrl+6`) lists the repository's GitHub Actions workflows: each one's name, whether it is active, and its file.
 
-`Enter` runs the selected workflow on a branch you choose. So does **Actions → Run Workflow on Branch…**, and **Run on branch…** on the context menu. It goes like this:
+`Enter` runs the selected workflow on a branch you choose. So does **Actions → Run on a Branch… (Enter)**, the first item on the Actions menu and the context menu here. It goes like this:
 
 1. GHManage asks which branch to run on.
 2. It reads the workflow file *on that branch* to find out whether it can be run by hand, and what inputs it takes. The branch comes first because a branch can add or change inputs, and the form has to match the branch that will run.
@@ -813,7 +859,7 @@ Logs are tidied for reading: no colour codes or other terminal control codes, no
 
 ### Artifacts
 
-A run's **Artifacts** list shows each file the run saved, with its size, whether it has expired, and when it was made. `Enter`, **Actions → Download Artifact…**, or **Download…** on the context menu asks which folder to save it in and downloads it there. The status bar says "Downloaded 'build' into C:\Users\you\Downloads." when it is done.
+A run's **Artifacts** list shows each file the run saved, with its size, whether it has expired, and when it was made. `Enter`, or **Actions → Download… (Enter)**, asks which folder to save it in and downloads it there. An artifact has no page of its own on GitHub, so **Open on GitHub** is greyed out here and `Ctrl+O` says so. The status bar says "Downloaded 'build' into C:\Users\you\Downloads." when it is done.
 
 GitHub deletes artifacts after a while. An expired one is marked in the list, and GHManage says it can no longer be downloaded rather than trying.
 
@@ -835,12 +881,13 @@ If the repository has no site, the details panel says "GitHub Pages is not enabl
 
 | Key | Action |
 |-----|--------|
-| `Enter` | Open the page in your browser |
+| `Enter` | Read the page's details: its address, size, and how it is served |
+| `Ctrl+O` | Open the page on the web (**Actions → Open on the Web**) |
 | `S` | Open the site's home page in your browser (also in the publish history) |
 | `F` | Add the page to favorites, so one you check often is a keystroke away |
 | `Backspace` | Return to the publish history |
 
-**Actions → Open Published Site** does what `S` does, once GHManage knows there is a site.
+**Actions → Open Published Site** does what `S` does, once GHManage knows there is a site. In the publish history, `Ctrl+O` (**Open Its Commit on GitHub**) opens the commit a publish came from.
 
 Two things about this list are worth knowing, and the details panel points them out on the pages they apply to:
 
@@ -867,8 +914,8 @@ Why you were told is GitHub's reason in words: review requested, mention, team m
 
 | Key | Action |
 |-----|--------|
-| `Enter` | An issue or pull request opens here in GHManage, selected in its repository's list. A discussion opens here too, selected in its repository's Discussions (found by its title when GitHub doesn't give its number), and `Backspace` comes back. A commit, release or security advisory opens on its own page on GitHub; a workflow run, which notifications don't identify, opens the repository's Actions page. Either way it is marked read |
-| `Backspace` | From the issue or pull request, come back to the same notification |
+| `Enter` | Open it here in GHManage, on it: an issue or pull request in its repository's Issues & PRs, a discussion in Discussions (found by its title when GitHub doesn't give its number), a release in Releases, a commit in Commits. A workflow run, which notifications don't identify, opens the repository's Workflow Runs; a security alert its Security Alerts. Anything else says GHManage has no view for it, and that `Ctrl+O` opens it on GitHub. Either way it is marked read |
+| `Backspace` | From what `Enter` opened, come back to the same notification |
 | `M` | Mark it read |
 | `Delete` or `Ctrl+D` | Mark it done: it leaves your inbox, as the Done button on github.com does. GHManage can't bring it back; github.com's **Done** tab can |
 | `U` | Unsubscribe from the thread: no more notifications about it unless you comment or are mentioned |
@@ -981,7 +1028,8 @@ The details panel gives the whole event as one sentence, then who, what, the rep
 
 | Key | Action |
 |-----|--------|
-| `Enter` | Open what the event is about here in GHManage: an issue or pull request in its repository's Issues & PRs, a release in Releases, a commit in Commits, a discussion in Discussions. Anything GHManage has no view for (a push's comparison, a wiki page) opens on GitHub |
+| `Enter` | Open what the event is about here in GHManage: an issue or pull request in its repository's Issues & PRs, a release in Releases, a commit in Commits, a branch's commits, a discussion in Discussions, a repository at its Issues & PRs. For anything GHManage has no view for (a push's comparison, a wiki page, a person) it says so, and that `Ctrl+O` opens it on GitHub |
+| `Ctrl+O` | Open it on GitHub |
 | `G` or `Ctrl+Shift+G` | Open the event's repository here in GHManage |
 | `Backspace` | From what `Enter` or `G` opened, come back to the same event |
 | `F` | Add what the event is about to favorites, or remove it |
@@ -1074,7 +1122,8 @@ GitHub sends up to a megabyte of each file. A larger one shows its start and say
 
 | Key | Action |
 |-----|--------|
-| `Enter` or `Ctrl+O` | Open the gist on GitHub |
+| `Enter` | Read it: focus moves into the details panel, at the top; `Backspace` comes back to the row |
+| `Ctrl+O` | Open the gist on GitHub |
 | `Alt+N` / `Alt+P` | Next / previous file in the details panel |
 | `Ctrl++` | Load 100 more |
 | `Ctrl+F` | Filter the list |
@@ -1100,8 +1149,8 @@ Each row shows the kind of item, its repository, its title and a short descripti
 
 | Key | Action |
 |-----|--------|
-| `Enter` | Open a repository here in GHManage, and anything else on GitHub |
-| `Backspace` | From a repository opened here, come back to Favorites, on the same row |
+| `Enter` | Open it here in GHManage, in its own view, on it: a repository at its Issues & PRs, an issue or pull request, a commit, a branch's commits, a tag, a release, a label, a workflow, a run, a discussion, a milestone or a security alert. A file, a published page or a job has no view to land on, and GHManage says so |
+| `Backspace` | From what `Enter` opened, come back to Favorites, on the same row |
 | `Ctrl+O` | Open the favorite on GitHub |
 | `F` | Remove it from favorites |
 | `Ctrl+F` | Filter the list |
@@ -1251,7 +1300,7 @@ The details panel shows everything about the item you are on in the list, and ch
 
 Web addresses always have a line of their own, under a line reading "URL:", so you can arrow to one and read or copy it on its own.
 
-Many items end with the keys that act on them, for example "Press Enter to list this run's artifacts." Those keys work from the details panel too, where they are read, as well as from the list.
+Many items end with the keys that act on them, for example "Press Enter to list this run's artifacts." Those keys work from the details panel too, where they are read, as well as from the list: `Enter` in the details panel does what it does in the list, except where `Enter` is what brought you into the panel to read. `Backspace` in the details panel goes back to the item's row in the list.
 
 ### Moving between comments
 
@@ -1274,7 +1323,8 @@ Everything that acts on what the list is showing is on the **Actions** menu, whi
 
 | Item | Key | Works in |
 |------|-----|----------|
-| Open in Browser | `Ctrl+O` | Every view |
+| What `Enter` does, named for the view: **Read (Enter)**, **Show Commits (Enter)**, **Download… (Enter)** | `Enter` in the list | Every view, with an item selected |
+| Open on GitHub | `Ctrl+O` | Every view; **Open Its Release on GitHub** on a release's file, **Open Its Commit on GitHub** in GitHub Pages, **Open on the Web** on a published page; greyed out in Artifacts |
 | Copy → Link, Markdown Link, Title, Number, Details | `Ctrl+Shift+C`, `L`, `T`, `I`, `D` | Every view; see [Copying](#copying) |
 | Close Issue/PR | `Ctrl+W` | Issues & PRs |
 | Reopen Issue/PR | `Ctrl+Shift+W` | Issues & PRs |
@@ -1285,10 +1335,8 @@ Everything that acts on what the list is showing is on the **Actions** menu, whi
 | Pull Request → Checks, Review…, Merge…, Ready for Review or Back to Draft, Request Reviewers…, Update Branch… | `K`, `V`, `D` in the list | Issues & PRs, on a pull request |
 | Watch Settings… | `Ctrl+Shift+U` | Everywhere, for the repository in front of you |
 | Save Search… | `Ctrl+S` | Search results |
-| New Label… | `Ctrl+I` | Any view of a repository; switches to Labels to show the new one |
-| Delete | `Ctrl+D` | Labels (reads **Delete Label…**), Workflow Runs (reads **Delete Workflow Run…**) and Notifications (reads **Mark as Done**) |
-| Run Workflow on Branch… | | Workflows |
-| Download Artifact… | | A run's artifacts |
+| New Label… (Insert) | `Ctrl+I`, or `Insert` in Labels | Any view of a repository; switches to Labels to show the new one |
+| Delete | `Ctrl+D`, or `Delete` in the list | Labels (reads **Delete Label… (Delete)**), Workflow Runs (reads **Delete Workflow Run… (Delete)**) and Notifications (reads **Mark as Done (Delete)**) |
 | Open Published Site | | GitHub Pages, once a site is found |
 | Select Branch… | `Ctrl+B` | Commits; in Files it reads **Select Branch or Tag…** |
 | Compare Branches… | `Ctrl+Shift+B` | Branches |
@@ -1304,15 +1352,17 @@ Everything that acts on what the list is showing is on the **Actions** menu, whi
 
 On a Mac, use `Cmd` for `Ctrl`.
 
-`Ctrl+D` follows the same rule as the menu item, and so does the bare `Delete` key, which also works from the details panel. In other views neither does anything. `Delete` never acts from the repository list.
+`Ctrl+D` follows the same rule as the menu item, and so does the bare `Delete` key, which also works from the details panel. In other views neither does anything. `Delete` never acts from the repository list. `Insert` and `Delete` act only on their own: `Ctrl+Insert`, `Shift+Insert`, `Shift+Delete` and `Ctrl+Delete` are left to copy, paste and cut.
+
+The **File** menu has **Back (Backspace)**, named for where it goes, and **Clear Quick Filter (Escape)**; the **View** menu has **Next Pane (F6)** and **Previous Pane (Shift+F6)**. Each is greyed out where its key does nothing.
 
 ### Context menus
 
 The **Applications** key, `Shift+F10`, or a right-click opens a context menu (on a Mac, `VO+Shift+M` with VoiceOver, or `Ctrl`-click).
 
-In the item list it starts with what `Enter` does in that view, for example **Show Commits** on a branch or **Open Here** on a search result, and then offers everything the Actions menu offers in that view, with Copy and Pull Request as submenus. It is built from the Actions menu each time, so the two always agree. It ends with **View More** (`Ctrl++`) in every list that loads in pages. On a repository in Starred, Watched, Shared With Me, an organization's repositories or repository search results, it also has **Go To** (see below), and `Backspace` from where it takes you comes back to that row.
+In the item list it starts with what `Enter` does in that view, for example **Show Commits (Enter)** on a branch or **Open Here (Enter)** on a search result, as the Actions menu does, and then offers everything the Actions menu offers in that view, with Copy and Pull Request as submenus. It is built from the Actions menu each time, so the two always agree. It ends with **View More** (`Ctrl++`) in every list that loads in pages. On a repository in Starred, Watched, Shared With Me, an organization's repositories or repository search results, it also has **Go To** (see below), and `Backspace` from where it takes you comes back to that row.
 
-In the repository list, a repository's menu has **Open**, **Open on GitHub**, **Go To**, **New Issue…**, **Search This Repository…** (a search starting `repo:owner/name`), **Read README**, **Watch Settings…**, **Add to Favorites** or **Remove from Favorites**, Copy, and **Remove from List**. **Go To** opens the repository straight on one of its views: Issues & PRs, Branches, Commits, Tags, Releases, Workflows, Workflow Runs, Labels, GitHub Pages, Files, Security Alerts, Discussions, Milestones or Insights. Copy includes **Copy HTTPS Clone URL** and **Copy SSH Clone URL**, the addresses `git clone` takes. These are the same commands as on the Actions menu, for the repository selected. A saved search's menu has **Run Search** and **Remove Saved Search**; Favorites and the other entries at the top have **Open**.
+In the repository list, a repository's menu has **Open**, **Open on GitHub** (`Ctrl+O`), **Go To**, **New Issue…**, **Search This Repository…** (a search starting `repo:owner/name`), **Read README**, **Watch Settings…**, **Add to Favorites** or **Remove from Favorites**, Copy, and **Remove from List**. **Go To** opens the repository straight on one of its views: Issues & PRs, Branches, Commits, Tags, Releases, Workflows, Workflow Runs, Labels, GitHub Pages, Files, Security Alerts, Discussions, Milestones or Insights. Copy includes **Copy HTTPS Clone URL** and **Copy SSH Clone URL**, the addresses `git clone` takes. These are the same commands as on the Actions menu, for the repository selected. A saved search's menu has **Run Search** and **Remove Saved Search**; Favorites and the other entries at the top have **Open**.
 
 ---
 
@@ -1341,7 +1391,7 @@ On a Mac, use `Cmd` in place of `Ctrl` for every shortcut that has one, `Option`
 | `Ctrl+N` | New issue in the repository in front of you |
 | `Ctrl+Shift+S` | Search the repository in front of you |
 | `Ctrl+Shift+R` | Read the README of the repository in front of you |
-| `Ctrl+O` | Open the selected item on GitHub |
+| `Ctrl+O` | Open the selected item on GitHub; in the repository list, the repository |
 | `Ctrl+Shift+C` | Copy the selected item's link |
 | `Ctrl+Shift+L` | Copy a Markdown link to it |
 | `Ctrl+Shift+T` / `Ctrl+Shift+I` / `Ctrl+Shift+D` | Copy its title / number, SHA or name / details |
@@ -1357,17 +1407,25 @@ On a Mac, use `Cmd` in place of `Ctrl` for every shortcut that has one, `Option`
 
 | Key | Action |
 |-----|--------|
-| `Enter` | Open, or step into, the selected item; what it does depends on the view |
-| `Backspace` | Step back up to the view you came from |
+| `Enter` | Go in: a deeper list, the item in the details panel, or an action here; never the browser. The Actions menu's first item names it |
+| `Backspace` | Back to the list you came from (**File → Back**) |
 | `F` | Add to favorites, or remove |
 | `R` | Refresh |
-| `Escape` | Clear the quick filter |
+| `Escape` | Clear the quick filter (**File → Clear Quick Filter**) |
+
+### In the details panel
+
+| Key | Action |
+|-----|--------|
+| `Backspace` | Back to the item's row in the list |
+| `Enter` | What `Enter` does in the list, where that isn't reading what you are already reading |
 
 ### In Issues & PRs
 
 | Key | Action |
 |-----|--------|
-| `Enter` | Open on GitHub |
+| `Enter` | Read it, in the details panel |
+| `Ctrl+O` | Open it on GitHub |
 | `C` or `Ctrl+W` | Close |
 | `O` or `Ctrl+Shift+W` | Reopen |
 | `M` or `Ctrl+M` | Add a comment |
@@ -1402,7 +1460,7 @@ On a Mac, use `Cmd` in place of `Ctrl` for every shortcut that has one, `Option`
 | Key | Action |
 |-----|--------|
 | `Enter` | Into a folder; into a file's text |
-| `Backspace` | Up a folder, onto the one you were in; back to Changed Files when `W` opened it |
+| `Backspace` | Up a folder, onto the one you were in; at the top, back to Tags when `Enter` on a tag opened it, or to Changed Files when `W` did |
 | `H` | The file's history |
 | `B` | Blame: who last changed each line; `B` again shows the file |
 | `Alt+N` / `Alt+P` | Next / previous Markdown heading, or blame run |
@@ -1417,13 +1475,15 @@ On a Mac, use `Cmd` in place of `Ctrl` for every shortcut that has one, `Option`
 | `Alt+N` / `Alt+P` | Next / previous change to the file in the details panel |
 | `Backspace` | Back to the file in Files |
 
-### In Releases
+### In Tags and Releases
 
 | Key | Action |
 |-----|--------|
+| `Enter` on a tag | Its files, in Files at that tag |
 | `Enter` on a release | List its files and their download counts |
-| `Enter` on a file | Download it in your browser |
-| `Backspace` | Files back to releases |
+| `Enter` on a file | Download it into a folder you choose |
+| `Ctrl+O` on a file | Open its release on GitHub |
+| `Backspace` | Files back to releases; from Files at a tag, back to Tags |
 
 ### In Workflows and Workflow Runs
 
@@ -1431,7 +1491,7 @@ On a Mac, use `Cmd` in place of `Ctrl` for every shortcut that has one, `Option`
 |-----|--------|
 | `Enter` on a workflow | Run it on a branch |
 | `Enter` on a run | List its artifacts |
-| `J` | The run's jobs; `Enter` on a job reads its log |
+| `J` | The run's jobs, in Workflow Runs; `Enter` on a job reads its log |
 | `L` | What failed |
 | `E` / `X` | Rerun / cancel |
 | `Ctrl+D` or `Delete` | Delete the run |
@@ -1442,7 +1502,8 @@ On a Mac, use `Cmd` in place of `Ctrl` for every shortcut that has one, `Option`
 
 | Key | Action |
 |-----|--------|
-| `Enter` | Open the gist on GitHub |
+| `Enter` | Read it, in the details panel |
+| `Ctrl+O` | Open it on GitHub |
 | `Alt+N` / `Alt+P` | Next / previous file, in the details panel |
 
 ### In My Work and search results
@@ -1473,7 +1534,8 @@ On a Mac, use `Cmd` in place of `Ctrl` for every shortcut that has one, `Option`
 
 | Key | Action |
 |-----|--------|
-| `Enter` or `Ctrl+O` | Open the row on GitHub: the traffic page, the popular page, or the contributor's profile |
+| `Enter` | Read the row, in the details panel |
+| `Ctrl+O` | Open the row on GitHub: the traffic page, the popular page, or the contributor's profile |
 | `R` | Read the figures again |
 
 ### In GitHub Pages
@@ -1481,7 +1543,9 @@ On a Mac, use `Cmd` in place of `Ctrl` for every shortcut that has one, `Option`
 | Key | Action |
 |-----|--------|
 | `Enter` in the publish history | List the pages the site serves |
-| `Enter` on a page | Open it in your browser |
+| `Ctrl+O` in the publish history | Open the publish's commit on GitHub |
+| `Enter` on a page | Read it, in the details panel |
+| `Ctrl+O` on a page | Open it on the web |
 | `S` | Open the site's home page |
 | `Backspace` | Pages back to the publish history |
 
@@ -1489,14 +1553,16 @@ On a Mac, use `Cmd` in place of `Ctrl` for every shortcut that has one, `Option`
 
 | Key | Action |
 |-----|--------|
-| `Enter` or `Ctrl+O` | Open the alert on GitHub |
+| `Enter` | Read the alert, in the details panel |
+| `Ctrl+O` | Open the alert on GitHub |
 | `R` | Read the alerts again |
 
 ### In Discussions
 
 | Key | Action |
 |-----|--------|
-| `Enter` or `Ctrl+O` | Open the discussion on GitHub |
+| `Enter` | Read the discussion, in the details panel |
+| `Ctrl+O` | Open the discussion on GitHub |
 | `M` | Add a comment |
 | `Alt+N` / `Alt+P` | Next or previous comment or reply in the details panel |
 | `R` | Read the discussions again |
@@ -1505,7 +1571,8 @@ On a Mac, use `Cmd` in place of `Ctrl` for every shortcut that has one, `Option`
 
 | Key | Action |
 |-----|--------|
-| `Enter` | Open it: an issue or pull request here, anything else on GitHub |
+| `Enter` | Open it here, in its own view; or say GHManage has no view for it |
+| `Ctrl+O` | Open it on GitHub |
 | `M` | Mark read |
 | `Delete` or `Ctrl+D` | Mark done |
 | `U` | Unsubscribe from the thread |
@@ -1516,7 +1583,8 @@ On a Mac, use `Cmd` in place of `Ctrl` for every shortcut that has one, `Option`
 
 | Key | Action |
 |-----|--------|
-| `Enter` | Open what the event is about here, or on GitHub when GHManage has no view for it |
+| `Enter` | Open what the event is about here; or say GHManage has no view for it |
+| `Ctrl+O` | Open it on GitHub |
 | `G` or `Ctrl+Shift+G` | Open the event's repository in GHManage |
 | `F` | Favorite what the event is about |
 
@@ -1532,7 +1600,8 @@ On a Mac, use `Cmd` in place of `Ctrl` for every shortcut that has one, `Option`
 
 | Key | Action |
 |-----|--------|
-| `Enter` | Open a repository here, anything else on GitHub |
+| `Enter` | Open it here, in its own view; or say GHManage has no view for it |
+| `Ctrl+O` | Open it on GitHub |
 | `F` | Remove from favorites |
 
 ### In the repository list
@@ -1540,6 +1609,7 @@ On a Mac, use `Cmd` in place of `Ctrl` for every shortcut that has one, `Option`
 | Key | Action |
 |-----|--------|
 | `Enter` | Open the selected entry |
+| `Ctrl+O` | Open the selected repository on GitHub |
 | `F` | Add the selected repository to favorites, or remove it |
 | `Delete` | Remove the selected repository or saved search from the list |
 
@@ -1566,7 +1636,7 @@ The same notes are on each version's own page on GitHub, alongside its downloads
 
 ## Reporting Issues
 
-Found a bug, or have an idea? Open an issue at [github.com/TheIdeaPlace/GHManage/issues](https://github.com/TheIdeaPlace/GHManage/issues). You can do it from GHManage itself: open the repository with `Ctrl+Shift+O` and `TheIdeaPlace/GHManage`, then **Open in Browser** (`Ctrl+O`) on any issue to reach the site.
+Found a bug, or have an idea? Open an issue at [github.com/TheIdeaPlace/GHManage/issues](https://github.com/TheIdeaPlace/GHManage/issues). You can do it from GHManage itself: open the repository with `Ctrl+Shift+O` and `TheIdeaPlace/GHManage`, then **Open on GitHub** (`Ctrl+O`) on any issue to reach the site.
 
 A good report says:
 

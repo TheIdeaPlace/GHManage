@@ -229,7 +229,39 @@ UI thread via `wx.CallAfter`. Never touch wx widgets from a worker thread.
 - `_show_details(idx)` — dispatches to `_show_issue_details` or `_show_git_details`.
 - `_navigate_comment(direction)` — Alt+N/Alt+P comment jumping.
 - `_refresh_list_display` — re-populate list from `self.items` or `self.git_items` without re-fetching.
-- `on_item_activated` — context-dependent: in Branches view, Enter switches to Commits for that branch; otherwise opens in browser.
+- **The key contract** (Kelly's request after #78–#90): **Enter goes in, inside GHManage;
+  Ctrl+O goes to GitHub; Backspace comes back; every key is on a menu.**
+  - `on_item_activated` never opens the browser. `OPEN_LABELS` (module level; the class's
+    `_OPEN_LABELS` is the same dict) names Enter per view for every view in `VIEW_COLUMNS`;
+    `enter_label`/`enter_hint` give the menu name and the status bar's "Enter=…" from it
+    (`commands.hint_words` lowercases Title-case words, keeps PRs/GitHub). `READ_VIEWS`
+    (Issues, Discussions, Security, Insights, Gists, Published Pages, Changed Files): Enter
+    is `_read_item` — focus into the details panel at the top. Tags: `_open_tag_files`
+    (Files at the tag; `_code_back = {"view": VIEW_TAGS, …}`, which `_back_from_code`
+    restores). Release files: `_download_asset_flow` → `gh_data.download_release_asset`
+    (`gh release download TAG -p <glob-escaped name> -D dir [--clobber]`).
+  - Cross-repo lists open things here: `address_view(target)` is the view a
+    `parse_github_url` target opens in (None: no view, `NO_VIEW_SAID` spoken);
+    `_open_address_here(target, row)` lands on it via `_open_repo_from_list` + pending
+    target, so Backspace returns to the row. Favorites (`_open_favorite`; tags, labels and
+    workflows found by name via `FAVORITE_BY_NAME` and pending kinds tag/label/workflow),
+    Notifications (releases via `release_page` then `_on_release_page`, security alerts via
+    `NOTIFICATION_VIEWS`), Activity. `*_opens_here` say which, for the details text.
+    `_open_item_here(item, repo, number)`: a fork is refused aloud (`fork_said`).
+  - Ctrl+O: `on_open_browser` (also caught in `on_char_hook`, so it works from every pane
+    and speaks where the menu item is greyed). Repo-list focus → the repository. `_web_target`
+    gives a release file's release, a publish's commit. `CTRL_O_LABELS` renames the menu
+    item per view (None in Artifacts: greyed, "An artifact has no page…" told).
+  - Backspace: `_back_label(lower)` names where it goes and `_go_back` does it (list key and
+    File ▸ Back); `_set_view_status` replaces any "Backspace=" hint with `_back_label`'s.
+    In the details panel, `on_char_hook` sends Backspace to `_back_to_row` and Enter to
+    `_enter_from_details` (the list's Enter, except in READ_VIEWS and on a file in Files).
+  - Menus: the Actions menu's first item is `_act_enter` (ID_CTX_OPEN, "<label> (Enter)"),
+    so the context menu leads with it; `_act_back`, `_act_clear_filter`, Next/Previous
+    Pane (F6) items; `EVT_MENU_OPEN` refreshes labels/enables. Bare keys are "(Key)" in a
+    label, never accelerators. tests/test_consistent_keys.py asserts every `ord("X")` and
+    WXK_RETURN/BACK/ESCAPE/INSERT/DELETE/F6 a handler acts on appears in a menu label.
+  - Bare Insert/Delete in `on_char_hook` act only with no modifiers; J only in Workflow Runs.
 - **Files (`VIEW_CODE`) and File History (`VIEW_HISTORY`)** keep their own navigation, not
   `PARENT_VIEW`: `_code_ref`/`_code_at` (the branch, tag or SHA and how it is said: "on main",
   "at tag v1", "at commit abc12345"), `_code_path` (the folder; "" is the top), `_code_stack`
@@ -357,8 +389,8 @@ UI thread via `wx.CallAfter`. Never touch wx widgets from a worker thread.
   "queued") from `gh pr view --json state,autoMergeRequest`. K/V/D live in `on_char_hook`
   (they work from the details panel); D asks first. `format_checks` is pure.
 - **Context menus** — the item list's is **built from the Actions menu** each time
-  (`_context_entries` walks `_actions_menu`, keeping enabled items and submenus, after an
-  "Enter" entry from `_OPEN_LABELS`), so a new action belongs in the Actions menu and
+  (`_context_entries` walks `_actions_menu`, keeping enabled items and submenus; its first
+  item is Enter's own, `_act_enter`), so a new action belongs in the Actions menu and
   `_update_actions_menu` only. Bound to `EVT_CONTEXT_MENU` on Windows (not
   `EVT_LIST_ITEM_RIGHT_CLICK`, which is mouse-only) so the Applications key and Shift+F10
   work. The repo list's is `_repo_context_entries`.

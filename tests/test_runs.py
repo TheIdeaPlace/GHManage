@@ -226,6 +226,7 @@ def test_a_short_step_with_blank_lines_is_shown_whole():
 def test_enter_on_a_skipped_job_says_so():
     f = _frame(ghviewer.VIEW_JOBS, None)
     f.jobs_run = RUN
+    f._tell = lambda msg, *a, **k: f.announced.append(msg)
     Frame._show_job_log(f, _job("release", "skipped"))
     assert f.announced == ["release was skipped, so it has no log."]
 

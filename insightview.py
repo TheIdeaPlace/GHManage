@@ -11,6 +11,7 @@ visitors".
 
 from __future__ import annotations
 
+from commands import READ_KEYS
 from gh_data import InsightRow, Insights
 
 SECTIONS = ("Views", "Clones", "Referrer", "Page", "Contributor")
@@ -47,7 +48,7 @@ def insight_details(row: InsightRow) -> str:
     lines.append("URL:")
     lines.append(row.url or "(none)")
     lines.append("")
-    lines.append("Ctrl+O opens it on GitHub.")
+    lines.append(READ_KEYS)
     return "\n".join(lines)
 
 

@@ -139,7 +139,7 @@ def test_status_says_the_totals_and_what_is_missing():
 def test_details_say_the_row_in_full(row, first, second):
     lines = insightview.insight_details(row).split("\n")
     assert lines[:2] == [first, second]
-    assert lines[-1] == "Ctrl+O opens it on GitHub."
+    assert lines[-1] == "Backspace goes back to the list; Ctrl+O opens it on GitHub."
 
 
 def test_a_row_reads_whole():
@@ -211,7 +211,7 @@ def test_loaded_lands_on_the_first_row(monkeypatch):
     later[-1]()
     assert f.git_items == ROWS and focused == [0] and spoken == []
     message, keys = f.status[-1]
-    assert keys.startswith("Enter or Ctrl+O=open on GitHub")
+    assert keys.startswith("Enter=read  Ctrl+O=open on GitHub")
 
 
 def test_what_is_missing_is_said_after_the_first_row(monkeypatch):

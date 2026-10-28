@@ -199,7 +199,7 @@ def test_what_a_file_says_first(text, said):
 
 def test_what_rows_that_are_not_text_say():
     assert codeview.entry_text(RepoFile("src", "dir")) == (
-        "src/: a folder. Enter in the list opens it.")
+        "src/: a folder. Press Enter to open it.")
     assert codeview.entry_text(RepoFile("lib", "submodule", sha="abcdef123")) == (
         "lib: a submodule, another repository, at commit abcdef1. "
         "Ctrl+O opens the folder it is in on GitHub, which links to it.")

@@ -3,13 +3,59 @@
 GHManage is a desktop app for reading and managing your GitHub repositories from
 a fast, keyboard-driven list.
 
-This release lets you read a repository's code: browse its folders, read any
+This release makes `Enter`, `Ctrl+O` and `Backspace` work the same way
+everywhere, and puts every key on a menu. It lets you read a repository's code: browse its folders, read any
 file a line at a time, see who last changed each line, and read every change a
 file has had. In a pull request's changed files you can read reviewers'
 comments on its lines, and add your own. And you can read a repository's
 security alerts, its discussions, and its milestones.
 
 On a Mac, use `Cmd` where these notes say `Ctrl`, and `Option` where they say `Alt`.
+
+## Enter goes in, Ctrl+O goes to GitHub
+
+`Enter`, `Ctrl+O` and `Backspace` now mean the same thing in every view.
+`Enter` goes in, inside GHManage: to a deeper list, into the item in the
+details panel, or an action here such as a download. `Ctrl+O` opens the
+selected thing on GitHub. `Backspace` comes back out. If you are used to 0.9.7:
+
+- `Enter` on an issue or pull request no longer opens it in the browser. It
+  moves you into the details panel, at the top, to read it and its comments;
+  `Backspace` goes back to the list. `Ctrl+O` opens it on GitHub.
+- `Enter` on a tag opens its files, in Files at that tag. `Backspace` comes
+  back to Tags.
+- `Enter` on a release's file downloads it here, into a folder you choose.
+  `Ctrl+O` there opens the release on GitHub.
+- `Enter` on a discussion, a security alert, a row of Insights, a gist or a
+  published page moves into it in the details panel, rather than opening it on
+  GitHub.
+- In Favorites, Notifications and Activity, `Enter` opens the thing in its own
+  view here, on it, with `Backspace` back: an issue, pull request, commit,
+  branch, release, run, discussion or milestone, and from Favorites a tag,
+  label, workflow or security alert too. For
+  anything GHManage has no view for, it says so: "GHManage has no view for
+  that; Ctrl+O opens it on GitHub." An issue in a fork says why it can't open
+  here, instead of opening the browser.
+- **Open in Browser** is now **Open on GitHub** (`Ctrl+O`), in every view. In
+  the repository list it opens the repository. On a published page it is
+  **Open on the Web**, and in GitHub Pages **Open Its Commit on GitHub**. An
+  artifact has no page, so there it is greyed out and `Ctrl+O` says so.
+
+Every key is on a menu now, with the key in its name. The **Actions** menu
+starts with what `Enter` does in the view you are in, such as **Show Commits
+(Enter)** or **Read (Enter)**, and so does the context menu. **File → Back**
+is named for where `Backspace` goes, such as **Back to Branches (Backspace)**;
+**File → Clear Quick Filter (Escape)**, **View → Next Pane (F6)** and
+**Previous Pane (Shift+F6)** are new, and **New Label… (Insert)** and the
+Delete items name their keys. The status bar's key hints and the details
+panel use the same words, and `Enter` in the details panel does what it says
+there. **Run Workflow on Branch…** and **Download Artifact…** are now that
+first item, **Run on a Branch… (Enter)** and **Download… (Enter)**.
+
+Also fixed: `Ctrl+Insert` in Labels no longer opens New Label, and
+`Shift+Delete` or `Ctrl+Delete` no longer delete a label or a run or mark a
+notification done; only `Insert` and `Delete` on their own do. `J` in a run's
+jobs, where it did nothing, is left alone.
 
 ## Files: browse a repository's code
 
@@ -76,7 +122,8 @@ Where gives the manifest file, or the file and line. Selecting one shows
 everything GitHub says about it: the advisory, the affected and first patched
 versions, the CVE and GHSA ids and CVSS score, the rule and where it matched, or
 the kind of secret and whether it is still valid, and who dismissed it and why.
-`Enter` opens it on GitHub. **View → State** shows closed alerts, or all.
+`Enter` moves into it, and `Ctrl+O` opens it on GitHub. **View → State** shows
+closed alerts, or all.
 
 A kind of alert that isn't turned on, or that you can't see, is named in the
 status bar, for example "Code scanning isn't set up on this repository." or
@@ -91,7 +138,7 @@ category, author, whether they are answered, and how many comments they have.
 Selecting one shows its text and then its comments, each headed like an issue's,
 "Comment 2 of 5 — alice (2026-10-01):", with replies indented under them. The
 answer is marked. `Alt+N` and `Alt+P` move between comments and replies. `M`
-adds a comment, `Enter` opens the discussion on GitHub, and **View → State**
+adds a comment, `Enter` moves into it, `Ctrl+O` opens it on GitHub, and **View → State**
 shows closed discussions, or all. A repository with discussions turned off says
 so.
 
@@ -125,7 +172,7 @@ focus in its text at the top, so you can start reading at once. `Alt+N` and
 the last 14 days of views and clones, with a row for each day, the sites people
 came from, the most visited pages, and the contributors with their commits. Each
 row reads whole: "Views, Last 14 days, 1,234 views, 210 unique visitors".
-`Enter` opens it on GitHub. GitHub shows traffic only to people who can push to
+`Ctrl+O` opens it on GitHub. GitHub shows traffic only to people who can push to
 the repository; without that, GHManage says so and lists the contributors.
 
 ## Gists
@@ -133,7 +180,8 @@ the repository; without that, GHManage says so and lists the contributors.
 A **Gists** entry in the repository list (and **View → View Mode → Gists**)
 lists your gists, public and secret, with their files. Selecting one shows its
 details and then each file's text, headed by its name; `Alt+N` and `Alt+P` move
-between files. `Enter` opens it on GitHub, and Copy Link and Copy Details work.
+between files. `Enter` moves into it, `Ctrl+O` opens it on GitHub, and Copy Link
+and Copy Details work.
 
 ## Fixed
 

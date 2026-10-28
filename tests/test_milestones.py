@@ -217,7 +217,7 @@ def test_milestones_land_in_the_list(monkeypatch):
     Frame._on_milestones_loaded(frame, 1, ms, "open")
     assert frame.git_items == ms and calls == [(0,)]
     message, keys = frame.status[-1]
-    assert message == "o/r — 1 open milestone." and keys.startswith("Enter=issues and PRs")
+    assert message == "o/r — 1 open milestone." and keys.startswith("Enter=list its issues and PRs  Ctrl+O=open on GitHub")
 
 
 @needs_wx

@@ -190,7 +190,7 @@ def test_loaded_lists_them_and_counts_the_entry(monkeypatch):
     assert f.git_items == gists and later == [(0,)]
     assert f._category_counts == {ghviewer.GISTS_ENTRY: 2}
     assert f.status[-1] == ("Gists — 2 gists, 1 secret.",
-                            "Enter or Ctrl+O=open on GitHub  Alt+N/Alt+P=next/previous file  "
+                            "Enter=read  Ctrl+O=open on GitHub  Alt+N/Alt+P=next/previous file  "
                             "Ctrl++=view more  R=refresh  Ctrl+F=filter")
 
 

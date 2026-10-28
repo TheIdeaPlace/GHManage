@@ -18,6 +18,7 @@ from gh_data import (
     DISCUSSION_COLUMNS, DISCUSSION_DEFAULT_COLUMNS,
     MILESTONE_COLUMNS, MILESTONE_DEFAULT_COLUMNS,
     INSIGHT_COLUMNS, INSIGHT_DEFAULT_COLUMNS,
+    GIST_COLUMNS, GIST_DEFAULT_COLUMNS,
     COMMIT_COLUMNS, COMMIT_DEFAULT_COLUMNS,
     JOB_COLUMNS, JOB_DEFAULT_COLUMNS,
     LABEL_COLUMNS, LABEL_DEFAULT_COLUMNS,
@@ -135,6 +136,8 @@ CATALOG: dict[str, ColumnDef] = {c.id: c for c in [
     # They say what they count ("1,234 views"), so Full mode adds no name.
     _c("count", "Count", 130, STATE),
     _c("uniques", "Unique", 160, STATE),
+    # Gists
+    _c("visibility", "Visibility", 80, STATE),
 ]}
 
 
@@ -207,6 +210,10 @@ MILESTONE_SET = _set("milestones", "Milestones", MILESTONE_COLUMNS,
 # Each count says what it counts ("1,234 views"), so a row reads on its own.
 INSIGHT_SET = _set("insights", "Insights", INSIGHT_COLUMNS, INSIGHT_DEFAULT_COLUMNS,
                    {"name": {"width": 260}})
+# A gist is named by its description (or first file); Files lists its files.
+GIST_SET = _set("gists", "Gists", GIST_COLUMNS, GIST_DEFAULT_COLUMNS,
+                {"title": {"heading": "Gist", "width": 300}, "files": {"width": 220},
+                 "comments": {"width": 80}})
 FAVORITES_SET = _set("favorites", "Favorites", FAVORITES_COLUMNS,
                      FAVORITES_DEFAULT_COLUMNS)
 
@@ -215,5 +222,5 @@ COLUMN_SETS: list[ColumnSet] = [
     ASSET_SET, RELEASE_SET, WORKFLOW_RUN_SET, ARTIFACT_SET, WORKFLOW_SET,
     PAGES_SET, PAGEFILE_SET, ACTIVITY_SET, NOTIFICATION_SET, SEARCH_ITEM_SET,
     MY_WORK_SET, JOB_SET, FAVORITES_SET, CHANGED_FILE_SET, REPO_FILE_SET, SECURITY_SET,
-    DISCUSSION_SET, MILESTONE_SET, INSIGHT_SET,
+    DISCUSSION_SET, MILESTONE_SET, INSIGHT_SET, GIST_SET,
 ]

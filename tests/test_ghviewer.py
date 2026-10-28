@@ -360,7 +360,7 @@ def _row(name, desc=""):
 
 
 CATEGORIES = ["★ Favorites", "Activity", "Starred Repositories", "Watched Repositories",
-              "Notifications", "My Work", "My Organizations"]
+              "Notifications", "My Work", "My Organizations", "Gists"]
 
 
 def test_categories_come_first_then_pinned_then_your_own():
@@ -370,7 +370,7 @@ def test_categories_come_first_then_pinned_then_your_own():
     assert [d for _, d in f.repo_list.rows] == [
         ghviewer.FAVORITES_ENTRY, ghviewer.ACTIVITY_ENTRY, ghviewer.STARRED_ENTRY,
         ghviewer.WATCHED_ENTRY, ghviewer.NOTIFICATIONS_ENTRY, ghviewer.MY_WORK_ENTRY,
-        ghviewer.MY_ORGS_ENTRY, "p/pin", "me/a"]
+        ghviewer.MY_ORGS_ENTRY, ghviewer.GISTS_ENTRY, "p/pin", "me/a"]
     assert f.repo_list.selection == 0
     assert f.announced[-1] == "Loaded 2 repositories. Select one to view issues and PRs."
 
@@ -414,7 +414,7 @@ def test_rebuilt_list_keeps_the_current_repo_selected():
 def test_rebuilt_list_keeps_the_row_you_were_on():
     f = _repo_frame()
     Frame._on_repos_loaded(f, [_row("me/a"), _row("me/b")])
-    f.repo_list.SetSelection(8)  # me/b, after the seven fixed entries and me/a
+    f.repo_list.SetSelection(9)  # me/b, after the eight fixed entries and me/a
     Frame._on_repos_loaded(f, [_row("me/a"), _row("me/b")])
     assert f.repo_list.GetClientData(f.repo_list.selection) == "me/b"
 
@@ -1232,7 +1232,7 @@ def test_backspace_after_g_with_a_filter_lands_on_that_event(call_later):
 
 
 @pytest.mark.parametrize("view, row", [
-    (ghviewer.VIEW_WATCHED, 3), (ghviewer.VIEW_ACTIVITY, 1), (ghviewer.VIEW_ISSUES, 7),
+    (ghviewer.VIEW_WATCHED, 3), (ghviewer.VIEW_ACTIVITY, 1), (ghviewer.VIEW_ISSUES, 8), (ghviewer.VIEW_GISTS, 7),
     (ghviewer.VIEW_NOTIFICATIONS, 4), (ghviewer.VIEW_MY_WORK, 5),
 ])
 def test_switching_view_moves_the_repo_list_selection_with_it(view, row):
@@ -1317,13 +1317,14 @@ def test_modifiers_from_a_key_event_come_from_the_event():
 def test_category_entries_show_their_counts_once_known():
     f = _repo_frame()
     Frame._on_repos_loaded(f, [_row("me/a")])
-    assert f.repo_list.labels[:7] == CATEGORIES   # not known yet: just the name
-    f.repo_list.SetSelection(7)
-    Frame._on_category_counts(f, {ghviewer.STARRED_ENTRY: 7, ghviewer.WATCHED_ENTRY: 0})
-    assert f.repo_list.labels[:8] == [
+    assert f.repo_list.labels[:8] == CATEGORIES   # not known yet: just the name
+    f.repo_list.SetSelection(8)
+    Frame._on_category_counts(f, {ghviewer.STARRED_ENTRY: 7, ghviewer.WATCHED_ENTRY: 0,
+                                  ghviewer.GISTS_ENTRY: 3})
+    assert f.repo_list.labels[:9] == [
         "★ Favorites", "Activity", "Starred Repositories (7)", "Watched Repositories (0)",
-        "Notifications", "My Work", "My Organizations", "me/a"]
-    assert f.repo_list.selection == 7   # updated in place: you stay where you were
+        "Notifications", "My Work", "My Organizations", "Gists (3)", "me/a"]
+    assert f.repo_list.selection == 8   # updated in place: you stay where you were
     # A rebuild keeps them
     Frame._on_repos_loaded(f, [_row("me/a")])
     assert f.repo_list.labels[2] == "Starred Repositories (7)"
@@ -1347,6 +1348,7 @@ def test_load_repos_fetches_the_counts_after_the_list(monkeypatch, inline_worker
                         lambda: order.append("starred") or 7)
     monkeypatch.setitem(ghviewer.COUNTED_ENTRIES, ghviewer.WATCHED_ENTRY, watched)
     monkeypatch.setitem(ghviewer.COUNTED_ENTRIES, ghviewer.NOTIFICATIONS_ENTRY, watched)
+    monkeypatch.setitem(ghviewer.COUNTED_ENTRIES, ghviewer.GISTS_ENTRY, watched)
     f = _repo_frame()
     f._on_repos_loaded = lambda *a, **k: (order.append("shown"), Frame._on_repos_loaded(f, *a, **k))
     f._on_category_counts = lambda *a: Frame._on_category_counts(f, *a)
@@ -1432,21 +1434,21 @@ def test_my_organizations_is_one_entry_and_your_own_repos_stay_yours():
     Frame._on_repos_loaded(f, _listing([_row("me/a")], ORGS, shared=2))
     # One entry for all of them, with no emoji, then Shared With Me
     assert f.repo_list.labels == CATEGORIES[:6] + [
-        "My Organizations (2)", "Shared With Me (2)", "📌 p/pin", "me/a"]
-    assert [d for _, d in f.repo_list.rows][6:8] == [
-        ghviewer.MY_ORGS_ENTRY, ghviewer.SHARED_ENTRY]
+        "My Organizations (2)", "Gists", "Shared With Me (2)", "📌 p/pin", "me/a"]
+    assert [d for _, d in f.repo_list.rows][6:9] == [
+        ghviewer.MY_ORGS_ENTRY, ghviewer.GISTS_ENTRY, ghviewer.SHARED_ENTRY]
     # Only pinned and your own count as repositories
     assert f.announced[-1] == "Loaded 2 repositories. Select one to view issues and PRs."
     # A rebuild from the cache keeps them
     Frame._on_repos_loaded(f, f._all_repos)
-    assert f.repo_list.labels[6:8] == ["My Organizations (2)", "Shared With Me (2)"]
+    assert f.repo_list.labels[6:9] == ["My Organizations (2)", "Gists", "Shared With Me (2)"]
 
 
 @pytest.mark.parametrize("shared, label", [(0, None), (None, "Shared With Me")])
 def test_shared_with_me_is_there_only_when_something_is(shared, label):
     f = _repo_frame()
     Frame._on_repos_loaded(f, _listing([_row("me/a")], shared=shared))
-    assert f.repo_list.labels[7] == (label or "me/a")
+    assert f.repo_list.labels[8] == (label or "me/a")
 
 
 def test_enter_on_my_organizations_lists_them():
@@ -1539,7 +1541,7 @@ def test_a_count_no_longer_known_is_not_kept():
     Frame._on_repos_loaded(f, _listing(orgs=ORGS, shared=40))
     assert f._category_counts[ghviewer.SHARED_ENTRY] == 40
     Frame._on_repos_loaded(f, _listing(orgs=ORGS, shared=None))
-    assert f.repo_list.labels[7] == "Shared With Me"
+    assert f.repo_list.labels[8] == "Shared With Me"
 
 
 # ── Favoriting repositories ─────────────────────────────────────────────
@@ -1548,7 +1550,7 @@ def test_a_count_no_longer_known_is_not_kept():
 def test_f_in_the_repository_list_favorites_the_repository(monkeypatch):
     f = _repo_frame()
     Frame._on_repos_loaded(f, [_row("me/a", "Mine")])
-    f.repo_list.SetSelection(7)   # me/a, after the seven fixed entries
+    f.repo_list.SetSelection(8)   # me/a, after the eight fixed entries
     f.favorites = []
     f._build_favorite_entry = lambda item: Frame._build_favorite_entry(f, item)
     f._selected_repo_entry = lambda: Frame._selected_repo_entry(f)

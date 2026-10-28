@@ -5098,3 +5098,111 @@ def _contributors_with_retry(repo: str, limit: int) -> Optional[list[InsightRow]
         if attempt < CONTRIBUTOR_RETRIES:
             time.sleep(CONTRIBUTOR_WAIT)
     return None
+
+
+# ── Gists (#90) ────────────────────────────────────────────────────────
+
+GIST_COLUMNS = ["title", "files", "visibility", "updated", "comments", "created"]
+GIST_DEFAULT_COLUMNS = ["title", "files", "visibility", "updated"]
+
+
+@dataclass
+class GistFile:
+    """One file of a gist. ``content`` is None until the gist is read
+    (``fetch_gist``); ``truncated`` when GitHub sent only the start of it."""
+
+    name: str
+    size: int = 0
+    language: str = ""
+    raw_url: str = ""
+    content: Optional[str] = None
+    truncated: bool = False
+
+
+@dataclass
+class Gist:
+    """One of your gists. Its files' text comes with ``fetch_gist``."""
+
+    id: str
+    description: str = ""
+    public: bool = True
+    files: list[GistFile] = field(default_factory=list)
+    created_at: str = ""
+    updated_at: str = ""
+    comments: int = 0
+    url: str = ""
+    owner: str = ""
+    loaded: bool = False      # whether the files' text has been read
+    files_truncated: bool = False  # GitHub listed only some of its files
+
+    @property
+    def title(self) -> str:
+        """Its description, or with none its first file's name, as GitHub
+        names it."""
+        if self.description.strip():
+            return self.description.strip().splitlines()[0]
+        return self.files[0].name if self.files else self.id
+
+    @property
+    def visibility(self) -> str:
+        return "Public" if self.public else "Secret"
+
+    def to_row(self, columns: list[str]) -> dict[str, str]:
+        mapping = {
+            "title": self.title,
+            "files": ", ".join(f.name for f in self.files),
+            "visibility": self.visibility,
+            "updated": self.updated_at[:10] if self.updated_at else "",
+            "created": self.created_at[:10] if self.created_at else "",
+            "comments": str(self.comments),
+        }
+        return {col: mapping.get(col, "") for col in columns}
+
+
+def _gist_file(name: str, f: dict) -> GistFile:
+    content = f.get("content")
+    return GistFile(
+        name=f.get("filename") or name,
+        size=int(f.get("size") or 0),
+        language=f.get("language") or "",
+        raw_url=f.get("raw_url") or "",
+        content=content if isinstance(content, str) else None,
+        truncated=bool(f.get("truncated")),
+    )
+
+
+def _parse_gist(row: dict) -> Gist:
+    files = row.get("files") if isinstance(row.get("files"), dict) else {}
+    owner = row.get("owner") if isinstance(row.get("owner"), dict) else {}
+    return Gist(
+        id=row.get("id") or "",
+        description=row.get("description") or "",
+        public=bool(row.get("public")),
+        files=[_gist_file(name, f) for name, f in files.items() if isinstance(f, dict)],
+        created_at=row.get("created_at") or "",
+        updated_at=row.get("updated_at") or "",
+        comments=int(row.get("comments") or 0),
+        url=row.get("html_url") or "",
+        owner=owner.get("login") or "",
+        files_truncated=bool(row.get("truncated")),
+    )
+
+
+def fetch_gists(limit: int = 100) -> list[Gist]:
+    """Your gists, public and secret, most recently updated first, without
+    their files' text."""
+    return [_parse_gist(r) for r in _api_pages("gists", limit) if r.get("id")]
+
+
+def count_gists() -> int:
+    """How many gists the signed-in user has."""
+    return _count_items("gists")
+
+
+def fetch_gist(gist_id: str) -> Gist:
+    """One gist with its files' text. GitHub sends up to a megabyte of each
+    file (``truncated`` past that, and no text at all for a very large one)."""
+    data = _api_json([f"gists/{gist_id}"], None)
+    gist = _parse_gist(data if isinstance(data, dict) else {})
+    gist.loaded = True
+    return gist

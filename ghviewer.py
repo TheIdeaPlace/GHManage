@@ -6248,7 +6248,7 @@ class GhViewerFrame(wx.Frame):
         # In Releases view, Enter drills into that release's assets and their counts
         if self.view_mode == VIEW_RELEASES and isinstance(item, Release):
             if not item.assets:
-                self._announce(f"{item.tag} has no assets attached")
+                self._tell(f"{item.tag} has no files attached.")
                 return
             self.assets_release = item
             self._switch_view(VIEW_ASSETS)
@@ -6262,7 +6262,7 @@ class GhViewerFrame(wx.Frame):
         # it stands now, and GitHub keeps no per-publish snapshot to browse.
         if self.view_mode == VIEW_PAGES and isinstance(item, PagesBuild):
             if not self.pages_site:
-                self._announce("No Pages site for this repository")
+                self._tell("No Pages site for this repository.")
                 return
             self._switch_view(VIEW_PAGEFILES)
             self._announce(f"Browsing the pages published at {self.pages_site.url}")
@@ -7039,7 +7039,7 @@ class GhViewerFrame(wx.Frame):
     def _open_pages_site(self) -> None:
         """Open the site's home page (S key, or Actions ▸ Open Published Site)."""
         if not self.pages_site or not self.pages_site.url:
-            self._announce("No Pages site for this repository")
+            self._tell("No Pages site for this repository.")
             return
         webbrowser.open(self.pages_site.url)
         self._announce(f"Opened {self.pages_site.url} in browser")

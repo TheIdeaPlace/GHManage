@@ -604,8 +604,10 @@ def test_on_the_web():
 
 
 def _details(view, item, **attrs):
-    from tests.test_ghviewer import FakeText  # the panel stand-in
-    f = SimpleNamespace(view_mode=view, details_text=FakeText(), git_items=[item],
+    text = SimpleNamespace(value="")
+    text.SetValue = lambda v: setattr(text, "value", v)
+    text.GetValue = lambda: text.value
+    f = SimpleNamespace(view_mode=view, details_text=text, git_items=[item],
                         commit_branch="", pages_site=None, _comment_positions=[], repo="o/r")
     for k, v in attrs.items():
         setattr(f, k, v)

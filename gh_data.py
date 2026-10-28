@@ -4037,3 +4037,409 @@ def update_pr_branch(pr_url: str) -> None:
     _run_gh(["api", "-X", "PUT", f"repos/{repo}/pulls/{number}/update-branch"])
 
 
+
+
+# ── Security alerts ────────────────────────────────────────────────────
+#
+# A repository's Dependabot, code scanning and secret scanning alerts, read
+# together (#85). Read-only: nothing here dismisses or changes an alert.
+#
+# Each kind is switched on separately and needs its own rights, so each one
+# fails on its own: Dependabot answers 403 "disabled", code scanning 404 "no
+# analysis found" or 403 "not enabled", secret scanning 404 "disabled". gh
+# adds a "needs the admin:repo_hook scope" hint to every one of those, which
+# is wrong for them all, so the hint is only believed once "not set up" has
+# been ruled out, and the scope named is always security_events.
+#
+# The three page differently: Dependabot refuses ``page=`` (HTTP 400) and
+# pages by cursor in the Link header; the other two take ``page=``. Secret
+# scanning's state is open or resolved and nothing else (``all`` is a 400),
+# so View > State > All leaves the state out for every kind.
+
+SECURITY_COLUMNS = ["kind", "severity", "package", "summary", "where", "state", "created",
+                    "number", "updated"]
+SECURITY_DEFAULT_COLUMNS = ["kind", "severity", "package", "summary", "where", "state",
+                            "created"]
+
+ALERT_DEPENDABOT = "dependabot"
+ALERT_CODE = "code-scanning"
+ALERT_SECRET = "secret-scanning"
+ALERT_KINDS = (ALERT_DEPENDABOT, ALERT_CODE, ALERT_SECRET)
+ALERT_KIND_LABELS = {
+    ALERT_DEPENDABOT: "Dependabot",
+    ALERT_CODE: "Code scanning",
+    ALERT_SECRET: "Secret scanning",
+}
+SECURITY_SCOPE = "security_events"
+
+# Most severe first. Code scanning gives a security severity (critical to
+# low) for security rules; for the rest only the tool's own error, warning or
+# note, which come after every security severity. Secret scanning gives none.
+SEVERITY_RANK = {
+    "critical": 0, "high": 1, "medium": 2, "moderate": 2, "low": 3,
+    "error": 4, "warning": 5, "note": 6,
+}
+UNKNOWN_SEVERITY_RANK = 7
+
+# View > State as each kind's states.
+_ALERT_STATES = {
+    "open": {ALERT_DEPENDABOT: "open", ALERT_CODE: "open", ALERT_SECRET: "open"},
+    "closed": {ALERT_DEPENDABOT: "dismissed,fixed,auto_dismissed", ALERT_CODE: "closed",
+               ALERT_SECRET: "resolved"},
+}
+
+
+@dataclass
+class SecurityAlert:
+    """One Dependabot, code scanning or secret scanning alert."""
+    kind: str                     # ALERT_DEPENDABOT, ALERT_CODE or ALERT_SECRET
+    number: int
+    state: str                    # GitHub's word: open, dismissed, fixed, resolved…
+    severity: str = ""            # lower case; "" when GitHub gives none
+    package: str = ""             # the package, the rule, or the secret's type
+    summary: str = ""
+    where: str = ""               # manifest, file:line, or where the secret was found
+    created_at: str = ""
+    updated_at: str = ""
+    url: str = ""
+    ident: str = ""               # CVE or GHSA id, rule id, or secret type
+    ident_noun: str = "ID"
+    # Everything else the details panel shows; see alertview.alert_details.
+    info: dict = field(default_factory=dict)
+
+    @property
+    def kind_display(self) -> str:
+        return ALERT_KIND_LABELS.get(self.kind, self.kind)
+
+    @property
+    def state_display(self) -> str:
+        return self.state.replace("_", "-")
+
+    @property
+    def severity_rank(self) -> int:
+        if (self.kind == ALERT_SECRET and self.state == "open"
+                and (self.info.get("validity") == "active" or self.info.get("publicly_leaked"))):
+            # A secret that still works, or is out in public, has no severity
+            # from GitHub but is as urgent as anything: it goes with the high ones.
+            return SEVERITY_RANK["high"]
+        return SEVERITY_RANK.get(self.severity, UNKNOWN_SEVERITY_RANK)
+
+    def to_row(self, columns: list[str]) -> dict[str, str]:
+        mapping = {
+            "kind": self.kind_display,
+            "severity": self.severity,
+            "package": self.package,
+            "summary": self.summary,
+            "where": self.where,
+            "state": self.state_display,
+            "created": self.created_at[:10],
+            "updated": self.updated_at[:10],
+            "number": str(self.number) if self.number else "",
+        }
+        return {c: mapping.get(c, "") for c in columns}
+
+
+@dataclass
+class SecurityAlerts:
+    """What the Security Alerts view shows: the alerts, most severe first,
+    and a plain sentence for each kind GitHub wouldn't show."""
+    alerts: list[SecurityAlert]
+    unavailable: dict[str, str] = field(default_factory=dict)   # kind -> sentence
+    missing_scope: list[str] = field(default_factory=list)      # kinds needing the scope
+    full: list[str] = field(default_factory=list)               # kinds that hit the limit
+
+    def notes(self) -> list[str]:
+        """Sentences about the kinds that couldn't be read, in kind order;
+        those that need gh's security_events permission are said once."""
+        out = [self.unavailable[k] for k in ALERT_KINDS if k in self.unavailable]
+        if self.missing_scope:
+            out.append(scope_sentence(self.missing_scope))
+        return out
+
+
+def scope_sentence(kinds: list[str]) -> str:
+    """One sentence for the kinds that need gh's security_events permission."""
+    names = [ALERT_KIND_LABELS[k] for k in ALERT_KINDS if k in kinds] or ["Security"]
+    names = [names[0]] + [n.lower() for n in names[1:]]
+    joined = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+    return (f"{joined} alerts need gh's {SECURITY_SCOPE} permission. Run "
+            f"gh auth refresh -h github.com -s {SECURITY_SCOPE} in a terminal, "
+            f"then press R.")
+
+
+def sort_alerts(alerts: list[SecurityAlert]) -> list[SecurityAlert]:
+    """Most severe first (critical, high, medium, low, then the rest), then newest."""
+    newest = sorted(alerts, key=lambda a: a.created_at, reverse=True)
+    return sorted(newest, key=lambda a: a.severity_rank)
+
+
+def _login(user) -> str:
+    return (user.get("login") or "") if isinstance(user, dict) else ""
+
+
+def _dependabot_alert(raw: dict) -> SecurityAlert:
+    dep = raw.get("dependency") or {}
+    pkg = dep.get("package") or {}
+    adv = raw.get("security_advisory") or {}
+    vuln = raw.get("security_vulnerability") or {}
+    patched = (vuln.get("first_patched_version") or {}).get("identifier") or ""
+    ghsa = adv.get("ghsa_id") or ""
+    cve = adv.get("cve_id") or ""
+    score = (adv.get("cvss") or {}).get("score")
+    if not score:
+        # Newer advisories score under cvss_severities; take the newest version given.
+        sev = adv.get("cvss_severities") or {}
+        for key in ("cvss_v4", "cvss_v3"):
+            if (sev.get(key) or {}).get("score"):
+                score = sev[key]["score"]
+                break
+    name = pkg.get("name") or ""
+    eco = pkg.get("ecosystem") or ""
+    return SecurityAlert(
+        kind=ALERT_DEPENDABOT,
+        number=raw.get("number") or 0,
+        state=raw.get("state") or "",
+        severity=(vuln.get("severity") or adv.get("severity") or "").lower(),
+        package=f"{name} ({eco})" if name and eco else name,
+        summary=adv.get("summary") or "",
+        where=dep.get("manifest_path") or "",
+        created_at=raw.get("created_at") or "",
+        updated_at=raw.get("updated_at") or "",
+        url=raw.get("html_url") or "",
+        ident=cve or ghsa,
+        ident_noun="CVE" if cve else "GHSA ID",
+        info={
+            "ghsa": ghsa, "cve": cve, "cvss": score or "",
+            "description": adv.get("description") or "",
+            "range": vuln.get("vulnerable_version_range") or "",
+            "patched": patched,
+            "scope": dep.get("scope") or "",
+            "relationship": dep.get("relationship") or "",
+            "advisory_url": f"https://github.com/advisories/{ghsa}" if ghsa else "",
+            "dismissed_at": raw.get("dismissed_at") or "",
+            "dismissed_by": _login(raw.get("dismissed_by")),
+            "dismissed_reason": raw.get("dismissed_reason") or "",
+            "dismissed_comment": raw.get("dismissed_comment") or "",
+            "fixed_at": raw.get("fixed_at") or "",
+            "auto_dismissed_at": raw.get("auto_dismissed_at") or "",
+        },
+    )
+
+
+def _code_alert(raw: dict) -> SecurityAlert:
+    rule = raw.get("rule") or {}
+    tool = raw.get("tool") or {}
+    inst = raw.get("most_recent_instance") or {}
+    loc = inst.get("location") or {}
+    path = loc.get("path") or ""
+    line = loc.get("start_line") or 0
+    rule_id = rule.get("id") or rule.get("name") or ""
+    return SecurityAlert(
+        kind=ALERT_CODE,
+        number=raw.get("number") or 0,
+        state=raw.get("state") or "",
+        severity=(rule.get("security_severity_level") or rule.get("severity") or "").lower(),
+        package=rule_id,
+        summary=rule.get("description") or rule.get("name") or "",
+        where=f"{path}:{line}" if path and line else path,
+        created_at=raw.get("created_at") or "",
+        updated_at=raw.get("updated_at") or "",
+        url=raw.get("html_url") or "",
+        ident=rule_id,
+        ident_noun="Rule ID",
+        info={
+            "rule_description": rule.get("full_description") or "",
+            "tool_severity": (rule.get("severity") or "").lower(),
+            "tags": [t for t in rule.get("tags") or [] if isinstance(t, str)],
+            "tool": " ".join(x for x in (tool.get("name"), tool.get("version")) if x),
+            "path": path, "start_line": line, "end_line": loc.get("end_line") or 0,
+            "ref": inst.get("ref") or "",
+            "message": (inst.get("message") or {}).get("text") or "",
+            "classifications": [c for c in inst.get("classifications") or []
+                                if isinstance(c, str)],
+            "dismissed_at": raw.get("dismissed_at") or "",
+            "dismissed_by": _login(raw.get("dismissed_by")),
+            "dismissed_reason": raw.get("dismissed_reason") or "",
+            "dismissed_comment": raw.get("dismissed_comment") or "",
+            "fixed_at": raw.get("fixed_at") or "",
+        },
+    )
+
+
+def _secret_alert(raw: dict) -> SecurityAlert:
+    secret_type = raw.get("secret_type") or ""
+    first = raw.get("first_location_detected") or {}
+    path = first.get("path") or ""
+    line = first.get("start_line") or 0
+    return SecurityAlert(
+        kind=ALERT_SECRET,
+        number=raw.get("number") or 0,
+        state=raw.get("state") or "",
+        severity="",
+        package=secret_type,
+        summary=raw.get("secret_type_display_name") or secret_type,
+        where=f"{path}:{line}" if path and line else path,
+        created_at=raw.get("created_at") or "",
+        updated_at=raw.get("updated_at") or "",
+        url=raw.get("html_url") or "",
+        ident=secret_type,
+        ident_noun="Secret Type",
+        info={
+            "validity": raw.get("validity") or "",
+            "path": path, "start_line": line,
+            "more_locations": bool(raw.get("has_more_locations")),
+            "publicly_leaked": bool(raw.get("publicly_leaked")),
+            "bypassed": bool(raw.get("push_protection_bypassed")),
+            "bypassed_by": _login(raw.get("push_protection_bypassed_by")),
+            "bypassed_at": raw.get("push_protection_bypassed_at") or "",
+            "resolution": raw.get("resolution") or "",
+            "resolved_by": _login(raw.get("resolved_by")),
+            "resolved_at": raw.get("resolved_at") or "",
+            "resolution_comment": raw.get("resolution_comment") or "",
+        },
+    )
+
+
+_ALERT_PARSERS = {
+    ALERT_DEPENDABOT: _dependabot_alert,
+    ALERT_CODE: _code_alert,
+    ALERT_SECRET: _secret_alert,
+}
+
+
+def _next_link(head: str) -> str:
+    """The rel="next" address in an HTTP header block, or ""."""
+    for line in head.splitlines():
+        if not line.lower().startswith("link:"):
+            continue
+        for part in line.split(":", 1)[1].split(","):
+            url, _, params = part.partition(";")
+            if 'rel="next"' in params:
+                return url.strip().strip("<>")
+    return ""
+
+
+def _api_cursor_pages(endpoint: str, limit: int) -> list[dict]:
+    """Up to ``limit`` entries of a REST list paged by cursor (the Link
+    header's next address), as Dependabot's alerts are."""
+    sep = "&" if "?" in endpoint else "?"
+    url = f"{endpoint}{sep}per_page={max(1, min(limit, 100))}"
+    out: list[dict] = []
+    while url and len(out) < limit:
+        raw = _run_gh(["api", "-i", url])
+        head, blank, body = raw.replace("\r\n", "\n").partition("\n\n")
+        if not blank:
+            raise GhError(f"Unexpected reply from {endpoint}")
+        try:
+            rows = json.loads(body) if body.strip() else []
+        except ValueError:
+            raise GhError(f"Unexpected reply from {endpoint}")
+        if not isinstance(rows, list):
+            break
+        out.extend(r for r in rows if isinstance(r, dict))
+        nxt = _next_link(head)
+        # gh api takes a path; the Link header gives a whole address.
+        url = nxt.split("api.github.com/", 1)[1] if "api.github.com/" in nxt else nxt
+    return out[:limit]
+
+
+def _alerts_endpoint(repo: str, kind: str, state: str) -> str:
+    query = []
+    wanted = _ALERT_STATES.get(state, {}).get(kind)
+    if wanted:
+        query.append(f"state={wanted}")
+    if kind == ALERT_SECRET:
+        query.append("hide_secret=true")  # never fetch the secret itself
+    return f"repos/{repo}/{kind}/alerts" + (f"?{'&'.join(query)}" if query else "")
+
+
+# What GitHub says when a kind simply isn't switched on.
+_NOT_SET_UP = ("disabled", "not enabled", "no analysis found", "not set up")
+_NOT_SET_UP_SENTENCES = {
+    ALERT_DEPENDABOT: "Dependabot alerts aren't turned on for this repository.",
+    ALERT_CODE: "Code scanning isn't set up on this repository.",
+    ALERT_SECRET: "Secret scanning isn't turned on for this repository.",
+}
+
+
+def classify_alert_error(kind: str, exc: GhError) -> tuple[str, str]:
+    """Why ``kind`` couldn't be read: ("off" | "scope" | "rights" | "error",
+    a sentence). The sentence is "" for "scope", which is said once for all
+    the kinds that need it (scope_sentence)."""
+    # gh's own hint about a scope is wrong for these endpoints (it names
+    # admin:repo_hook whatever the failure), so it is set aside: GitHub's
+    # message is what says what happened.
+    lines = []
+    for ln in str(exc).splitlines():
+        ln = ln.strip()
+        if ln.startswith("{") and "}gh: " in ln:
+            ln = ln[ln.index("}gh: ") + 1:]  # the reply's JSON, then gh's line
+        if ln and not ln.startswith("{") and "scope" not in ln:
+            lines.append(ln)
+    text = "\n".join(lines)
+    low = text.lower()
+    label = ALERT_KIND_LABELS.get(kind, kind)
+    if any(s in low for s in _NOT_SET_UP):
+        return "off", _NOT_SET_UP_SENTENCES.get(kind, f"{label} isn't set up on this repository.")
+    if ("not authorized" in low or "admin rights" in low or "must be an admin" in low):
+        # What a repository you don't administer answers: Dependabot "You are
+        # not authorized to perform this operation.", code scanning "You are
+        # not authorized to read code scanning alerts." (both HTTP 403).
+        return "rights", (f"{label} alerts need admin or security manager rights on this "
+                          "repository.")
+    if "not found" in low and "(http 404)" in low:
+        # Secret scanning's answer without rights; one that is off says "disabled".
+        return "rights", (f"{label} alerts can't be read here: either it isn't turned on, "
+                          "or it needs admin or security manager rights on this repository.")
+    if "not accessible by" in low:
+        # A token GitHub won't let read security alerts: gh's sign-in lacks
+        # the permission, or a fine-grained token lacks it.
+        return "scope", ""
+    first = lines[0] if lines else str(exc).strip()
+    if first.startswith("gh: "):
+        first = first[4:]
+    return "error", f"Couldn't read {label.lower()} alerts: {first}"
+
+
+def _fetch_alert_kind(repo: str, kind: str, state: str, limit: int) -> list[SecurityAlert]:
+    endpoint = _alerts_endpoint(repo, kind, state)
+    rows = (_api_cursor_pages(endpoint, limit) if kind == ALERT_DEPENDABOT
+            else _api_pages(endpoint, limit))
+    parse = _ALERT_PARSERS[kind]
+    return [parse(r) for r in rows]
+
+
+def fetch_security_alerts(repo: str, state: str = "open", limit: int = 100) -> SecurityAlerts:
+    """``repo``'s Dependabot, code scanning and secret scanning alerts in
+    ``state`` (open, closed or all), up to ``limit`` of each, most severe
+    first. The three are read at once and each may fail on its own; what
+    can be read is returned, with a sentence for each kind that couldn't be."""
+    found: dict[str, list[SecurityAlert]] = {}
+    failed: dict[str, GhError] = {}
+    with ThreadPoolExecutor(max_workers=len(ALERT_KINDS)) as pool:
+        futures = {pool.submit(_fetch_alert_kind, repo, k, state, limit): k
+                   for k in ALERT_KINDS}
+        for fut in as_completed(futures):
+            kind = futures[fut]
+            try:
+                found[kind] = fut.result()
+            except GhError as exc:
+                failed[kind] = exc
+            except ValueError as exc:
+                # A reply that isn't JSON; the other kinds still show.
+                failed[kind] = GhError(f"Unexpected reply from GitHub ({exc})")
+    result = SecurityAlerts(alerts=[])
+    for kind in ALERT_KINDS:
+        if kind in failed:
+            why, sentence = classify_alert_error(kind, failed[kind])
+            if why == "scope":
+                result.missing_scope.append(kind)
+            else:
+                result.unavailable[kind] = sentence
+            continue
+        alerts = found.get(kind, [])
+        if len(alerts) >= limit:
+            result.full.append(kind)
+        result.alerts.extend(alerts)
+    result.alerts = sort_alerts(result.alerts)
+    return result

@@ -16,6 +16,7 @@ GHManage is a keyboard-driven desktop app for your GitHub repositories, built fo
 - [Branches and Commits](#branches-and-commits)
 - [Changed Files](#changed-files)
 - [Files](#files)
+- [Security Alerts](#security-alerts)
 - [Tags and Releases](#tags-and-releases)
 - [Workflows and Workflow Runs](#workflows-and-workflow-runs)
 - [GitHub Pages](#github-pages)
@@ -221,7 +222,7 @@ Each repository has several views. `Ctrl` and a number jumps straight to one fro
 | `Ctrl+Shift+M` | My Work |
 | `Ctrl+Shift+A` | Activity |
 
-**Files**, a repository's code, is on the same menu after GitHub Pages, without a number; see [Files](#files). **Starred Repositories** and **Watched Repositories** are on the same menu, after Activity.
+**Files**, a repository's code, and **Security Alerts** are on the same menu after GitHub Pages, without a number; see [Files](#files) and [Security Alerts](#security-alerts). **Starred Repositories** and **Watched Repositories** are on the same menu, after Activity.
 
 Favorites, Notifications, My Work, Activity, Starred Repositories, Watched Repositories, Shared With Me, an organization's repositories and search results are not about one repository, so they work at any time. Every other view needs a repository: with none chosen, the status bar says "Select a repository first." and the view stays as it was.
 
@@ -618,6 +619,45 @@ GitHub lists a file's history by its path, so it stops where the file was rename
 ### The whole file, from Changed Files
 
 In [Changed Files](#changed-files), `W` on a file, or **Actions → Open Whole File**, opens it in Files: the folder it is in, on the file, as it is at the commit, or at the pull request's latest commit. Use it to read the code around a change. `Backspace` from that folder goes back to Changed Files, on the file. A file the change deleted has no whole file to open, and GHManage says so.
+
+---
+
+## Security Alerts
+
+**View → View Mode → Security Alerts**, or **Go To → Security Alerts** on a repository in the repository list, lists the repository's security alerts from GitHub: Dependabot alerts about the packages it depends on, code scanning alerts about its code, and secret scanning alerts about passwords and keys committed to it, all in one list. The Kind column says which each one is. GHManage only reads alerts; to dismiss or reopen one, open it on GitHub.
+
+The columns are Kind, Severity, Package or rule, Summary, Where, State and Created. Where is the manifest file for a Dependabot alert (such as `requirements.txt`), the file and line for code scanning, and where a secret was found. The most severe come first, critical, high, medium and low, and newest first within each. Code scanning rules that aren't about security have only the scanning tool's own error, warning or note, which come after low; secret scanning alerts have no severity, so an open secret that still works, or has leaked publicly, comes with the high ones and the rest come last. **View → Sort Order** doesn't apply here.
+
+**View → State** chooses what is listed: **Open** (the default), **Closed** (dismissed, fixed or, for secrets, resolved) or **All**. `Ctrl++` loads more of each kind when there are more than one page.
+
+Selecting an alert shows everything GitHub says about it in the details panel:
+
+- **Dependabot**: the advisory's summary, the package, the manifest, whether it is a direct or indirect dependency and for runtime or development, the affected versions, the first patched version, the GHSA and CVE ids, the CVSS score, and the advisory's description.
+- **Code scanning**: the rule, the tool, the file and line, the branch, the tool's message about this place, the CWE, and the rule's description.
+- **Secret scanning**: the kind of secret, whether it is still valid, where it was found, and whether someone pushed it past push protection. The secret itself is never fetched or shown.
+
+A closed alert also says who dismissed or resolved it, when and why. The alert's address is on the line after "URL:", and a Dependabot advisory's after "Advisory URL:".
+
+`Enter` or `Ctrl+O` opens the alert on GitHub. **Copy** works as everywhere else; Copy Advisory, Rule or Secret Type (`Ctrl+Shift+I`) copies the CVE id (or the GHSA id when there is no CVE), the code scanning rule id, or the secret's type.
+
+### When a kind of alert can't be shown
+
+Each kind of alert is turned on separately on GitHub, and each needs its own rights, so GHManage shows what it can and says plainly what it can't, in the status bar and, when the list is empty, in the details panel. For example:
+
+- "Dependabot alerts aren't turned on for this repository."
+- "Code scanning isn't set up on this repository."
+- "Secret scanning isn't turned on for this repository."
+- "Code scanning alerts need admin or security manager rights on this repository."
+
+On a repository you don't administer, the last is the usual answer: GitHub shows security alerts only to admins and security managers. Secret scanning doesn't say which of the two it is, so for it the message names both.
+
+Rarely, the way `gh` signs in isn't allowed to read security alerts at all, and GitHub says so. Then the status bar gives the command that adds `gh`'s "security_events" permission:
+
+```
+gh auth refresh -h github.com -s security_events
+```
+
+Run it in a terminal, approve it in your browser, then press `R`.
 
 ---
 
@@ -1029,6 +1069,7 @@ The fourth item is named for what it copies in the view you are in:
 | Activity | Copy Number, Tag or Repository | the issue or pull request number, the release's tag, or the repository for events about a whole repository |
 | Starred, Watched, Shared With Me, an organization's repositories | Copy Repository Name | `owner/name` |
 | My Organizations | Copy Organization Name | the organization's name |
+| Security Alerts | Copy Advisory, Rule or Secret Type | a Dependabot alert's CVE id (its GHSA id when it has no CVE), a code scanning alert's rule id, or a secret's type |
 
 In Activity, Copy Link and Copy Markdown Link copy what the event is about (the issue, pull request or release) rather than the event itself, the same thing `F` favorites.
 
@@ -1173,7 +1214,7 @@ The **Applications** key, `Shift+F10`, or a right-click opens a context menu (on
 
 In the item list it starts with what `Enter` does in that view, for example **Show Commits** on a branch or **Open Here** on a search result, and then offers everything the Actions menu offers in that view, with Copy and Pull Request as submenus. It is built from the Actions menu each time, so the two always agree. It ends with **View More** (`Ctrl++`) in every list that loads in pages. On a repository in Starred, Watched, Shared With Me, an organization's repositories or repository search results, it also has **Go To** (see below), and `Backspace` from where it takes you comes back to that row.
 
-In the repository list, a repository's menu has **Open**, **Open on GitHub**, **Go To**, **New Issue…**, **Search This Repository…** (a search starting `repo:owner/name`), **Watch Settings…**, **Add to Favorites** or **Remove from Favorites**, Copy, and **Remove from List**. **Go To** opens the repository straight on one of its views: Issues & PRs, Branches, Commits, Tags, Releases, Workflows, Workflow Runs, Labels, GitHub Pages or Files. Copy includes **Copy HTTPS Clone URL** and **Copy SSH Clone URL**, the addresses `git clone` takes. These are the same commands as on the Actions menu, for the repository selected. A saved search's menu has **Run Search** and **Remove Saved Search**; Favorites and the other entries at the top have **Open**.
+In the repository list, a repository's menu has **Open**, **Open on GitHub**, **Go To**, **New Issue…**, **Search This Repository…** (a search starting `repo:owner/name`), **Watch Settings…**, **Add to Favorites** or **Remove from Favorites**, Copy, and **Remove from List**. **Go To** opens the repository straight on one of its views: Issues & PRs, Branches, Commits, Tags, Releases, Workflows, Workflow Runs, Labels, GitHub Pages, Files or Security Alerts. Copy includes **Copy HTTPS Clone URL** and **Copy SSH Clone URL**, the addresses `git clone` takes. These are the same commands as on the Actions menu, for the repository selected. A saved search's menu has **Run Search** and **Remove Saved Search**; Favorites and the other entries at the top have **Open**.
 
 ---
 
@@ -1323,6 +1364,13 @@ On a Mac, use `Cmd` in place of `Ctrl` for every shortcut that has one, `Option`
 | `Enter` on a page | Open it in your browser |
 | `S` | Open the site's home page |
 | `Backspace` | Pages back to the publish history |
+
+### In Security Alerts
+
+| Key | Action |
+|-----|--------|
+| `Enter` or `Ctrl+O` | Open the alert on GitHub |
+| `R` | Read the alerts again |
 
 ### In Notifications
 

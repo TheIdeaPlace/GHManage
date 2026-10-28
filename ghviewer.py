@@ -27,6 +27,7 @@ from pinned_repos import (
     add_pinned, hide_repo, load_hidden, load_pinned, remove_pinned, unhide_repos,
 )
 import announce
+import alertview
 import codeview
 import commands
 import diffview
@@ -45,7 +46,7 @@ from gh_columns import (
     FAVORITES_SET,
     ISSUE_SET, JOB_SET, LABEL_SET, MY_WORK_SET, NOTIFICATION_SET, ORG_SET,
     PAGEFILE_SET, PAGES_SET, RELEASE_SET, REPO_FILE_SET, REPO_SET, SEARCH_ITEM_SET, TAG_SET,
-    WORKFLOW_RUN_SET, WORKFLOW_SET,
+    SECURITY_SET, WORKFLOW_RUN_SET, WORKFLOW_SET,
 )
 from gh_data import (
     ACTIVITY_MAX,
@@ -53,6 +54,11 @@ from gh_data import (
     Notification,
     RepoEntry,
     RepoFile,
+    ALERT_DEPENDABOT,
+    ALERT_KIND_LABELS,
+    ALERT_KINDS,
+    SecurityAlert,
+    fetch_security_alerts,
     ALL_BRANCHES,
     ALL_BRANCHES_PER_BRANCH_MAX,
     GhError,
@@ -588,11 +594,34 @@ def copy_values(item) -> CopyValues | None:
             return CopyValues(item.url, item.title, number, "Number",
                               f"{number} {item.title}")
         return CopyValues(item.url, item.title, item.repo, "Repository Name", item.title)
+    if isinstance(item, SecurityAlert):
+        text = f"{item.ident} {item.summary}".strip()
+        return CopyValues(item.url, item.summary, item.ident, item.ident_noun, text)
     if isinstance(item, FavoriteEntry):
         # A favorite keeps no number or SHA of its own, only how it was
         # titled, so Copy Name and Copy Title give the same thing.
         return CopyValues(item.url, item.title, item.title, "Name", item.title)
     return None
+
+
+def security_status(repo: str, report, state: str, limit: int) -> str:
+    """The Security Alerts status message: how many of each kind, then why
+    any kind is missing, then whether there may be more."""
+    alerts = report.alerts
+    n = len(alerts)
+    which = {"open": "open ", "closed": "closed "}.get(state, "")
+    head = f"{repo} — {n} {which}security alert{'s' if n != 1 else ''}"
+    counts = []
+    for kind in ALERT_KINDS:
+        k = sum(1 for a in alerts if a.kind == kind)
+        if k:
+            label = ALERT_KIND_LABELS[kind]
+            counts.append(f"{k} {label if kind == ALERT_DEPENDABOT else label.lower()}")
+    parts = [head + (": " + ", ".join(counts) if counts else "") + "."]
+    parts += report.notes()
+    if report.full:
+        parts.append(f"Showing up to {limit} of each kind; Ctrl++ shows more.")
+    return " ".join(parts)
 
 
 def write_diff_file(stem: str, text: str) -> str:
@@ -733,6 +762,7 @@ ID_FILE_HISTORY = wx.NewIdRef()
 ID_BLAME = wx.NewIdRef()
 ID_WHOLE_FILE = wx.NewIdRef()
 ID_COMMENT_LINE = wx.NewIdRef()
+ID_VIEW_SECURITY = wx.NewIdRef()
 
 
 # View modes
@@ -763,6 +793,7 @@ VIEW_SEARCH_REPOS = "search_repos"    # GitHub-wide search: repositories
 VIEW_ORGS = "orgs"             # the organizations you belong to
 VIEW_ORG = "org"               # one organization's repositories (drill-down; which: _org)
 VIEW_SHARED = "shared"         # others' repositories you are a collaborator on
+VIEW_SECURITY = "security"     # Dependabot, code scanning and secret scanning alerts
 
 # Views that are not views *of a repo*, so they work with none selected.
 REPOLESS_VIEWS = (VIEW_FAVORITES, VIEW_NOTIFICATIONS, VIEW_MY_WORK, VIEW_ACTIVITY,
@@ -792,6 +823,7 @@ REPO_GO_TO = [
     (VIEW_LABELS, "Labels"),
     (VIEW_PAGES, "GitHub Pages"),
     (VIEW_CODE, "Files"),
+    (VIEW_SECURITY, "Security Alerts"),
 ]
 ID_GO_TO_VIEW = {view: wx.NewIdRef() for view, _ in REPO_GO_TO}
 
@@ -912,6 +944,7 @@ VIEW_COLUMNS = {
     VIEW_ORGS: ORG_SET,
     VIEW_ORG: REPO_SET,
     VIEW_SHARED: REPO_SET,
+    VIEW_SECURITY: SECURITY_SET,
 }
 
 
@@ -2758,6 +2791,7 @@ class GhViewerFrame(wx.Frame):
         show_menu.AppendRadioItem(ID_VIEW_PAGES, "GitHub Pages\tCtrl+0")
         # A repository's code. No Ctrl+number is left; checked in File History too.
         show_menu.AppendRadioItem(ID_VIEW_CODE, "Files")
+        show_menu.AppendRadioItem(ID_VIEW_SECURITY, "Security Alerts")
         show_menu.AppendRadioItem(ID_VIEW_NOTIFICATIONS, "Notifications\tCtrl+Shift+N")
         show_menu.AppendRadioItem(ID_VIEW_MY_WORK, "My Work\tCtrl+Shift+M")
         # Checked while search results are showing; choosing it asks for a
@@ -2871,6 +2905,7 @@ class GhViewerFrame(wx.Frame):
         self.Bind(wx.EVT_MENU, self.on_view_labels, id=ID_VIEW_LABELS)
         self.Bind(wx.EVT_MENU, self.on_view_favorites, id=ID_VIEW_FAVORITES)
         self.Bind(wx.EVT_MENU, self.on_view_pages, id=ID_VIEW_PAGES)
+        self.Bind(wx.EVT_MENU, self.on_view_security, id=ID_VIEW_SECURITY)
         self.Bind(wx.EVT_MENU, self.on_view_activity, id=ID_VIEW_ACTIVITY)
         self.Bind(wx.EVT_MENU, self.on_view_notifications, id=ID_VIEW_NOTIFICATIONS)
         self.Bind(wx.EVT_MENU, lambda e: self._toggle_include_read(), id=ID_SHOW_READ)
@@ -3100,6 +3135,7 @@ class GhViewerFrame(wx.Frame):
         menu_bar.Check(ID_VIEW_FAVORITES, self.view_mode == VIEW_FAVORITES)
         menu_bar.Check(ID_VIEW_PAGES, self.view_mode == VIEW_PAGES)
         menu_bar.Check(ID_VIEW_CODE, self.view_mode in (VIEW_CODE, VIEW_HISTORY))
+        menu_bar.Check(ID_VIEW_SECURITY, self.view_mode == VIEW_SECURITY)
         menu_bar.Check(ID_VIEW_NOTIFICATIONS, self.view_mode == VIEW_NOTIFICATIONS)
         menu_bar.Check(ID_VIEW_MY_WORK, self.view_mode == VIEW_MY_WORK)
         menu_bar.Check(ID_VIEW_SEARCH_RESULTS, self.view_mode in SEARCH_VIEWS)
@@ -3762,6 +3798,7 @@ class GhViewerFrame(wx.Frame):
         code_ref, code_path = getattr(self, "_code_ref", ""), getattr(self, "_code_path", "")
         history_of = getattr(self, "_history_of", None)
         repo = self.repo
+        state = self.state_filter
         include_read = self._include_read
         org = self._org
         org_logins = [o.login for o in self._orgs]
@@ -3922,6 +3959,9 @@ class GhViewerFrame(wx.Frame):
                         except GhError:
                             pass
                     wx.CallAfter(self._on_repo_list_loaded, token, repos, focus_row, count)
+                elif view == VIEW_SECURITY:
+                    report = fetch_security_alerts(repo, state, limit)
+                    wx.CallAfter(self._on_security_loaded, token, report, state)
                 elif view == VIEW_PAGES:
                     # The config comes first: with Pages off it is the whole
                     # answer, and when it is on it says where to read the rest.
@@ -3988,6 +4028,7 @@ class GhViewerFrame(wx.Frame):
         VIEW_ORGS: "My Organizations",
         VIEW_ORG: "Organization Repositories",
         VIEW_SHARED: SHARED_LABEL,
+        VIEW_SECURITY: "Security Alerts",
     }
 
     def _view_label(self, view: str, lower: bool = False) -> str:
@@ -4134,6 +4175,32 @@ class GhViewerFrame(wx.Frame):
             self._show_pages_disabled()
             return
         self._on_git_items_loaded(token, files, "published files")
+
+    def _on_security_loaded(self, token: int, report, state: str) -> None:
+        """Security Alerts: the alerts GitHub would show, most severe first,
+        and a sentence for each kind it wouldn't (not set up, no rights, or
+        gh lacking the security_events permission)."""
+        if not self._fetch_is_current(token):
+            return  # the user has moved on; these belong to a view they left
+        alerts = report.alerts
+        self.git_items = alerts
+        self.items = []
+        filtered = self._populate_filtered_list(alerts, use_favorite_prefix=True)
+        message = security_status(self.repo, report, state, self.current_limit)
+        keys = "R=refresh  Ctrl+F=filter"
+        if alerts:  # nothing to open, or more to show, in an empty list
+            keys = ("Enter or Ctrl+O=open on GitHub  F=favorite  Ctrl++=view more  "
+                    + keys)
+        self._set_view_status(message, keys)
+        self._update_title()
+        if not alerts:
+            # Nothing in the list to read, so say why here and out loud.
+            self.details_text.SetValue(alertview.empty_text(report, state))
+            announce.announce(message, announce.STATUS)
+            return
+        row = self._take_pending_row(alerts, token)
+        if filtered:
+            wx.CallLater(100, self._focus_list, row)
 
     def _show_pages_disabled(self) -> None:
         """Pages is switched off for this repo — say so instead of showing nothing.
@@ -4648,8 +4715,30 @@ class GhViewerFrame(wx.Frame):
             self._show_history_details(idx)
         elif self.view_mode == VIEW_FAVORITES:
             self._show_favorite_details(idx)
+        elif self.view_mode == VIEW_SECURITY:
+            self._show_security_details(idx)
         else:
             self._show_git_details(idx)
+
+    def _show_security_details(self, idx: int) -> None:
+        """A security alert: everything GitHub says about it (alertview)."""
+        if idx < 0 or idx >= len(self.git_items):
+            self.details_text.Clear()
+            return
+        item = self.git_items[idx]
+        if not isinstance(item, SecurityAlert):
+            self.details_text.Clear()
+            return
+        self.details_text.SetValue(alertview.alert_details(item))
+
+    def _open_alert(self, alert: SecurityAlert) -> None:
+        """Enter or Ctrl+O on a security alert: its page on GitHub."""
+        name = f"{alert.kind_display} alert {alert.number}".strip()
+        if not alert.url:
+            self._tell(f"{name} has no page to open.")
+            return
+        webbrowser.open(alert.url)
+        self._announce(f"Opened {name} in browser")
 
     def _show_favorite_details(self, idx: int) -> None:
         """Show details for a favorited item in the details panel."""
@@ -5128,6 +5217,8 @@ class GhViewerFrame(wx.Frame):
         VIEW_MY_WORK: "Number",
         VIEW_SEARCH_ISSUES: "Number",
         VIEW_SEARCH_REPOS: "Repository Name",
+        # CVE or GHSA ID, rule ID, or secret type, by the kind of alert.
+        VIEW_SECURITY: "Advisory, Rule or Secret Type",
     }
 
     _COPY_WHAT = {
@@ -5354,6 +5445,9 @@ class GhViewerFrame(wx.Frame):
         # In Activity view, Enter opens what the event was about
         if self.view_mode == VIEW_ACTIVITY and isinstance(item, ActivityEvent):
             self._open_event(item)
+            return
+        if isinstance(item, SecurityAlert):
+            self._open_alert(item)
             return
         # All other views: open in browser
         url = getattr(item, "url", "") or ""
@@ -6219,6 +6313,10 @@ class GhViewerFrame(wx.Frame):
             item_type = item.kind_display.lower()
             title = item.path
             subtitle = self._code_where() if self.view_mode == VIEW_CODE else ""
+        elif isinstance(item, SecurityAlert):
+            item_type = "security alert"
+            title = f"{item.kind_display} #{item.number} — {item.summary}"
+            subtitle = " — ".join(x for x in (item.severity, item.package) if x)
         elif isinstance(item, RepoEntry):
             item_type = "repository"
             repo = item.name
@@ -6415,6 +6513,9 @@ class GhViewerFrame(wx.Frame):
             return
         if isinstance(item, Notification):
             self._open_notification(item, in_browser=True)
+            return
+        if isinstance(item, SecurityAlert):
+            self._open_alert(item)
             return
         url = getattr(item, "url", "") or ""
         if url:
@@ -7281,6 +7382,11 @@ class GhViewerFrame(wx.Frame):
             self._announce("Search results are in GitHub's order, best match first. To sort, "
                            "add a qualifier such as sort:updated-desc to the search.")
             return
+        if self.view_mode == VIEW_SECURITY:
+            self._update_menu_checks()
+            self._tell("Security alerts are listed most severe first, then newest, "
+                       "so they aren't sorted.")
+            return
         self.sort_order = self._sort_menu_items.get(event.GetId(), SORT_ORDERS[0])
         self._update_menu_checks()
         back = self._files_back if self.view_mode == VIEW_FILES else None
@@ -7422,6 +7528,9 @@ class GhViewerFrame(wx.Frame):
 
     def on_view_pages(self, event: wx.CommandEvent) -> None:
         self._switch_view(VIEW_PAGES)
+
+    def on_view_security(self, event: wx.CommandEvent) -> None:
+        self._switch_view(VIEW_SECURITY)
 
     def on_view_activity(self, event: wx.CommandEvent) -> None:
         self._select_category(VIEW_ACTIVITY)

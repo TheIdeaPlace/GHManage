@@ -185,6 +185,10 @@ and Copy Details work.
 
 ## Fixed
 
+- `Alt+N` on a long comment made NVDA say only "592 characters selected". It now
+  selects the comment's first line, which says whose it is, so it is read; `Down
+  Arrow` reads on. To copy a long comment, select it with `Shift+Down Arrow`.
+
 - Branches, and the branch pickers (Select Branch, Compare Branches, Run
   Workflow), failed to load on a repository with more than 30 branches. They now
   list them, and the pickers open faster.

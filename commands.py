@@ -91,6 +91,7 @@ LIST_KEYS: list[Command] = [
     Command("Read the file's changes", "Enter", FILES),
     Command("Back to the pull request or commit", "Backspace", FILES),
     Command("Open the file whole, in Files", "W", FILES),
+    Command("Comment on the pull request's line the caret is on, in its lines", "M", FILES),
     Command("Open the folder, or read the file", "Enter", CODE),
     Command("Up a folder", "Backspace", CODE),
     Command("The file's history", "H", CODE),

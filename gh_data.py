@@ -1940,8 +1940,8 @@ def fetch_compare(repo: Optional[str], base: str, head: str) -> CompareResult:
 # without its ---/+++ header. GitHub leaves the patch out for a binary file
 # and for one whose changes are too big to show; those still have a row.
 
-CHANGED_FILE_COLUMNS = ["path", "status", "added", "removed"]
-CHANGED_FILE_DEFAULT_COLUMNS = ["path", "status", "added", "removed"]
+CHANGED_FILE_COLUMNS = ["path", "status", "added", "removed", "comments"]
+CHANGED_FILE_DEFAULT_COLUMNS = ["path", "status", "added", "removed", "comments"]
 
 # GitHub's word for a file's status, and the one shown. "Deleted" rather
 # than GitHub's "removed": "Removed" is what a removed line is marked with.
@@ -1969,6 +1969,9 @@ class ChangedFile:
     patch: Optional[str] = None    # None when GitHub doesn't show the lines
     previous_filename: str = ""    # set for a rename
     url: str = ""                  # the file on GitHub, as it is after the change
+    # A pull request's review comments on the file, oldest first; None for a
+    # commit's file, or when the comments couldn't be read.
+    comments: Optional[list["ReviewComment"]] = None
 
     @property
     def status_display(self) -> str:
@@ -1980,6 +1983,7 @@ class ChangedFile:
             "status": self.status_display,
             "added": str(self.additions),
             "removed": str(self.deletions),
+            "comments": "" if self.comments is None else str(len(self.comments)),
         }
         return {c: mapping.get(c, "") for c in columns}
 
@@ -2060,6 +2064,82 @@ def fetch_pr_head_sha(pr_url: str) -> str:
     _pr_parts(pr_url)
     return _run_gh(["pr", "view", pr_url, "--json", "headRefOid",
                     "-q", ".headRefOid"]).strip()
+
+
+# ── Review comments ────────────────────────────────────────────────────
+#
+# The comments reviewers leave on a pull request's lines. ``line`` is where
+# the comment is in the diff as it is now, on ``side`` RIGHT (the new file)
+# or LEFT (the old); GitHub sets it to null once later commits have changed
+# the line, and ``original_line`` still says where it was. A reply's
+# ``in_reply_to_id`` is the first comment of its thread.
+
+MAX_REVIEW_COMMENTS = 3000
+
+
+@dataclass
+class ReviewComment:
+    id: int
+    path: str
+    body: str = ""
+    author: str = ""
+    line: Optional[int] = None        # None: outdated, or on the whole file
+    side: str = "RIGHT"
+    start_line: Optional[int] = None  # set when it is on several lines
+    original_line: Optional[int] = None
+    in_reply_to: Optional[int] = None
+    on_file: bool = False             # on the file as a whole, not a line
+    created_at: str = ""
+    url: str = ""
+
+
+def _review_comment(row: dict) -> ReviewComment:
+    def num(key: str) -> Optional[int]:
+        value = row.get(key)
+        return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+    return ReviewComment(
+        id=row.get("id") or 0,
+        path=row.get("path") or "",
+        body=row.get("body") or "",
+        author=((row.get("user") or {}).get("login") or "ghost"),
+        line=num("line"),
+        side=row.get("side") or "RIGHT",
+        start_line=num("start_line"),
+        original_line=num("original_line"),
+        in_reply_to=num("in_reply_to_id"),
+        on_file=row.get("subject_type") == "file",
+        created_at=row.get("created_at") or "",
+        url=row.get("html_url") or "",
+    )
+
+
+def fetch_pr_review_comments(pr_url: str) -> list[ReviewComment]:
+    """A pull request's review comments, on every file, oldest first."""
+    repo, number = _pr_parts(pr_url)
+    rows = _api_pages(f"repos/{repo}/pulls/{number}/comments", MAX_REVIEW_COMMENTS)
+    return [_review_comment(r) for r in rows]
+
+
+def comments_by_path(comments: list[ReviewComment]) -> dict[str, list[ReviewComment]]:
+    out: dict[str, list[ReviewComment]] = {}
+    for c in comments:
+        out.setdefault(c.path, []).append(c)
+    return out
+
+
+def add_review_comment(pr_url: str, commit_id: str, path: str, line: int,
+                       side: str, body: str) -> None:
+    """Comment on one line of a pull request's file: ``side`` RIGHT for a
+    line of the new file (added or unchanged), LEFT for a removed one. The
+    body goes in on stdin, so nothing in it is read as an option."""
+    if side not in ("RIGHT", "LEFT"):
+        raise ValueError(side)
+    repo, number = _pr_parts(pr_url)
+    payload = {"body": body, "commit_id": commit_id, "path": path,
+               "line": line, "side": side}
+    _run_gh(["api", "-X", "POST", f"repos/{repo}/pulls/{number}/comments",
+             "--input", "-"], stdin=json.dumps(payload))
 
 
 # ── A repository's files ───────────────────────────────────────────────

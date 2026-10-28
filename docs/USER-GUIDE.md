@@ -484,7 +484,7 @@ Each commit shows its short SHA, message, author and date; **View → Columns…
 
 To open it, press `Enter` on a commit in Commits, or `H` on a pull request in Issues & PRs or on a commit. **Actions → Changed Files** (`Ctrl+Shift+H`) and the context menu do the same. When the files have loaded, GHManage says how many there are and how many lines were added and removed, for example "3 files changed, 40 lines added, 12 removed." `Backspace` takes you back to the pull request or commit, in the list as you left it.
 
-Each file has a row with its path, what happened to it (Added, Modified, Deleted or Renamed) and how many lines were added and removed. The quick filter (`Ctrl+F`) finds a file by part of its name.
+Each file has a row with its path, what happened to it (Added, Modified, Deleted or Renamed), how many lines were added and removed and, for a pull request, how many review comments it has. The quick filter (`Ctrl+F`) finds a file by part of its name.
 
 ### Reading a file's changes
 
@@ -493,6 +493,22 @@ The details panel shows the selected file. Its first line sums the file up, for 
 `Enter` on a file moves into its lines, at the top. Read them with your screen reader's reading keys, as in any text. `Alt+N` and `Alt+P` move to the next and previous run of changes, selecting its "Lines…" line; the status bar says "Change 2 of 5". On a Mac, use `Option+N` and `Option+P`. In this view, the **File** menu's Next Comment and Previous Comment read Next Change and Previous Change.
 
 GitHub doesn't give the lines of a binary file, such as an image, or of a file whose changes are very large. Such a file still has its row, and the details panel says why there are no lines to show. `Ctrl+O` opens the file on GitHub.
+
+### Review comments on a pull request's lines
+
+For a pull request, the comments reviewers left on its lines are part of each file's text. A comment comes straight after the line it is on, starting "Comment by alice:", and the rest of a long comment follows it, indented. Replies come after it, starting "Reply by bob:", indented a little further. A comment on several lines says so: "Comment by alice on lines 10 to 12:", after the last of them.
+
+Comments on lines that later commits changed are no longer on any line shown, so they are listed at the end of the file under "Earlier comments, on lines changed since:", each saying the line it was on, for example "Comment by alice on line 12 as it was:". Comments on the file as a whole come under "Comments on the whole file:", and comments on lines this view doesn't show, such as the lines of a file too large for GitHub to show, under "Comments on lines not shown here:", each saying its line.
+
+`Alt+N` and `Alt+P` stop at each comment and reply as well as at each run of changes, selecting the whole comment. The status bar counts each kind on its own: "Change 2 of 7", then "Comment 1 of 3". In this view the **File** menu's items read Next Change or Comment and Previous Change or Comment. When the files load, GHManage also says how many comments there are, for example "9 files changed, 251 lines added, 28 removed. 2 comments."
+
+A commit's changed files have no review comments, so its rows leave the Comments column empty.
+
+### Commenting on a line
+
+To comment on a line of a pull request, move into the file's lines, put the caret on the line and press `M`, or choose **Actions → Comment on This Line…**. A box asks for the comment, naming the line and showing it, for example "Comment on line 12 of src/app.py:". Type the comment and press `Tab` to the OK button, or press `Escape` to leave without commenting. The comment goes on the pull request's latest commit, and GHManage says "Comment added on line 12." Your comment then appears after the line, after any comments already on it, with the caret still on the line, so `Alt+N` reads the comments on it in turn. If the pull request has had new commits since you opened its files, GHManage doesn't post the comment, since the line numbers may have moved; it asks you to press `R` in the list of files to read them again first. The file's Comments column counts it too.
+
+An added or unchanged line takes a comment on the file as it is after the change. A removed line takes one on the file as it was, and the box says "removed line 12" to show which. The summary line, a "Lines…" line, a comment, and the "No newline at end of file" notes can't take a comment; `M` on one of them says why. `M` in the list of files asks you to move into the lines first, and a commit's lines can't take comments here.
 
 ### How lines are marked
 
@@ -1072,6 +1088,7 @@ A screen reader reads a row's columns from left to right, so the order of the co
 | Search results: issues and pull requests | Type, Number, State, Title, Repository, Updated | Author, Labels, Comments |
 | My Organizations | Organization, Role, Repositories | |
 | Activity | Actor, Action, Repository, Title, Date | |
+| Changed Files | File, Status, Added, Removed, Comments | |
 | Every list of repositories: Starred, Watched, Shared With Me, an organization's, and repository search | Repository, Description, Language, Stars, Pushed | Owner |
 
 The pull-request columns (Changes, Files, Base branch, Head branch) are empty on issues.
@@ -1141,6 +1158,7 @@ Everything that acts on what the list is showing is on the **Actions** menu, whi
 | File History | `H` in the list | Files, on a file |
 | Blame | `B` in the list | Files, on a file |
 | Open Whole File | `W` in the list | Changed Files |
+| Comment on This Line… | `M` in the file's lines | Changed Files, for a pull request |
 | Go to Event's Repository | `Ctrl+Shift+G` | Activity, and Notifications where it reads **Go to Notification's Repository** |
 | Mark as Read, Unsubscribe from Thread | `M`, `U` in the list | Notifications |
 | Mark All as Read… | | Notifications |
@@ -1188,7 +1206,7 @@ On a Mac, use `Cmd` in place of `Ctrl` for every shortcut that has one, `Option`
 | `Ctrl+Shift+L` | Copy a Markdown link to it |
 | `Ctrl+Shift+T` / `Ctrl+Shift+I` / `Ctrl+Shift+D` | Copy its title / number, SHA or name / details |
 | `Ctrl+Shift+O` | Open a repository, or an issue, pull request, commit, release or run, by its address |
-| `Alt+N` / `Alt+P` | Next / previous comment in the details panel; change in Changed Files and File History; Markdown heading, or blame run, in Files |
+| `Alt+N` / `Alt+P` | Next / previous comment in the details panel; change in File History, and change or review comment in Changed Files; Markdown heading, or blame run, in Files |
 | `Ctrl+Shift+H` | The changed files of the selected pull request or commit |
 | `Ctrl+Shift+U` | Watch settings for the repository |
 | `Ctrl+Shift+K` | Switch GitHub account |
@@ -1234,7 +1252,8 @@ On a Mac, use `Cmd` in place of `Ctrl` for every shortcut that has one, `Option`
 | Key | Action |
 |-----|--------|
 | `Enter` | Into the file's changed lines |
-| `Alt+N` / `Alt+P` | Next / previous change in the details panel |
+| `Alt+N` / `Alt+P` | Next / previous change or review comment in the details panel |
+| `M` | In a pull request's file's lines: comment on the line the caret is on |
 | `Backspace` | Back to the pull request or commit |
 | `W` | Open the file whole, in Files |
 

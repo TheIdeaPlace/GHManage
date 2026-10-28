@@ -12,10 +12,14 @@ On a Mac, use `Cmd` where these notes say `Ctrl`, and `Option` where they say `A
 
 ## Changed Files
 
-Select a pull request in Issues & PRs, or a commit in Commits, and press `H`
-(or choose **Actions → Changed Files**, `Ctrl+Shift+H`). GHManage lists the
-files it changed and says how many lines were added and removed. `Backspace`
-goes back to where you were.
+Press `Enter` on a commit in Commits, or `H` on a pull request in Issues & PRs
+(**Actions → Changed Files**, `Ctrl+Shift+H`, does the same for either).
+GHManage lists the files it changed and says how many lines were added and
+removed. `Backspace` goes back to where you were.
+
+`Enter` on a commit used to open it on GitHub. It now shows its changed files,
+as `Enter` on a branch shows its commits. To open a commit on GitHub, press
+`Ctrl+O`, which opens whatever is selected in any list.
 
 Select a file, and the details panel shows its changes. Each run of changes
 starts with where it is, such as "Lines 10 to 15:". `Enter` moves into the

@@ -281,3 +281,14 @@ def test_never_two_separators_together_or_at_either_end():
     kinds = [e[0] for e in entries]
     assert kinds[0] != "sep" and kinds[-1] != "sep"
     assert all(not (a == b == "sep") for a, b in zip(kinds, kinds[1:]))
+
+
+def test_a_commit_s_menu_leads_with_changed_files_once():
+    # Enter on a commit opens its changed files, so the Actions entry that
+    # does the same is not listed again below it.
+    actions = FakeMenu(FakeItem(1, "Open in Browser"),
+                       FakeItem(int(ghviewer.ID_CHANGED_FILES), "Changed Files (H)"))
+    commit = ghviewer.Commit("a" * 40, "aaaaaaaa", "m", "me", "", url="u")
+    entries = Frame._context_entries(_frame(ghviewer.VIEW_COMMITS, commit, actions))
+    assert entries[0] == ("item", ghviewer.ID_CTX_OPEN, "Changed Files\tEnter")
+    assert [e for e in entries if e[0] == "item" and "Changed Files" in e[2]] == [entries[0]]

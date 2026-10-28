@@ -2281,6 +2281,20 @@ def fetch_blob_text(repo: str, sha: str) -> str:
     return text[1:] if text.startswith("﻿") else text
 
 
+def fetch_readme_path(repo: str) -> str | None:
+    """Where the repository's README is on its default branch (``README.md``,
+    ``docs/README.rst``, ``.github/README.md``…), as GitHub picks it for the
+    repository's page; None when it has none."""
+    try:
+        # Only the path: the reply also carries the whole file, base64.
+        path = _api([f"repos/{repo}/readme", "-q", ".path"], None).strip()
+    except GhError as exc:
+        if _is_not_found(exc):
+            return None
+        raise
+    return path or None
+
+
 def fetch_file_history(repo: str, path: str, ref: str, limit: int = 100) -> list[Commit]:
     """The commits that changed ``path`` on ``ref``, newest first. GitHub
     doesn't follow a file back past a rename."""

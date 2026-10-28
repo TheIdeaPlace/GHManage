@@ -627,9 +627,10 @@ def test_landing_on_a_discussion_by_number_or_title(monkeypatch):
                                _describe_landing=Frame._describe_landing,
                                _announce=lambda m: None, _tell=told.append,
                                _if_still_current="check", _goto_discussion=fetch.append,
+                               _say_landing="say",
                                state_filter="open")
     assert Frame._take_pending_row(frame("discussion", "9"), items, 1) == 1
-    assert later[-1][1] == ("Opened discussion #9 — B",)
+    assert later[-1] == ("say", ("Opened discussion #9 — B",))
     assert Frame._take_pending_row(frame("discussion_title", "A"), items, 1) == 0
     # Not in the list (closed, or older): fetched by its number.
     f = frame("discussion", "44")

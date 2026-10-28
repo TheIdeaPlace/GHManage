@@ -282,6 +282,7 @@ def inline_worker(monkeypatch):
 
 def _goto_frame():
     f = _frame(view_mode=ghviewer.VIEW_ISSUES)
+    f._say_landing = lambda m, final=True: Frame._say_landing(f, m, final)
     f._goto_error = lambda n, m: Frame._goto_error(f, n, m)
     f._on_goto_fetched = lambda item, n, repo=None: Frame._on_goto_fetched(f, item, n, repo)
     return f

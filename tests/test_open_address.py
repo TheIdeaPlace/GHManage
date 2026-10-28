@@ -112,12 +112,14 @@ def later(monkeypatch):
 def _frame(view, target, items, token=1):
     frame = SimpleNamespace(
         view_mode=view, _pending_target=(token, *target) if target else None,
-        _shown=list(items), _announce=lambda m: None, _goto_issue=lambda n: None,
+        _shown=list(items), _announce=lambda m: None, _tell=lambda *a: None,
+        _goto_issue=lambda n: None,
         _goto_commit=lambda sha: None,
     )
     frame._if_still_current = "if_still_current"
     frame._row_of = lambda it: Frame._row_of(frame, it)
     frame._describe_landing = Frame._describe_landing
+    frame._say_landing = lambda m, final=True: Frame._say_landing(frame, m, final)
     return frame
 
 
@@ -127,6 +129,89 @@ ISSUES = [Item(n, f"T{n}", "open", f"u{n}", False) for n in (5, 4, 3)]
 def test_lands_on_the_issue(later):
     f = _frame(ghviewer.VIEW_ISSUES, (ghviewer.VIEW_ISSUES, "item", "4"), ISSUES)
     assert Frame._take_pending_row(f, ISSUES, 1) == 1
+    assert f._pending_target is None
+    # Said, queued after the row: a big repository loads for seconds, and
+    # the status bar alone left you hearing just a list.
+    fn, args = later.calls[-1]
+    assert fn == f._say_landing and args == ("Opened #4 — T4",)
+
+
+@pytest.mark.parametrize("kind, ref, said", [
+    ("item", "14845", "#14845"),
+    ("commit", "abcdef0123456", "commit abcdef0"),
+    ("release", "v1.2", "release v1.2"),
+    ("run", "42", "run 42"),
+])
+def test_opening_label(kind, ref, said):
+    assert ghviewer.opening_label(kind, ref) == said
+
+
+def _address_frame():
+    calls = []
+    f = SimpleNamespace(_hidden_repos=[], _tell="tell", calls=calls)
+    f._select_repo = lambda repo, view=None: calls.append(("select", repo, view))
+    f._set_pending_target = lambda *a: calls.append(("pending",) + a)
+    f._select_in_repo_list = lambda repo: calls.append(("list", repo))
+    return f
+
+
+def test_opening_an_item_address_says_what_is_coming(later):
+    f = _address_frame()
+    Frame._open_address(f, "https://github.com/cli/cli/pull/14845")
+    assert f.calls == [("select", "cli/cli", ghviewer.VIEW_ISSUES),
+                       ("pending", ghviewer.VIEW_ISSUES, "item", "14845"),
+                       ("list", "cli/cli")]
+    # Said a moment later, after the dialog's focus has gone back, which
+    # would otherwise cut it off; and the landing will be said too.
+    assert later.calls == [("tell", ("Opening #14845 in cli/cli…",))]
+    assert f._speak_landing is True
+
+
+def test_a_branch_address_has_nothing_to_land_on(later):
+    f = _address_frame()
+    Frame._open_address(f, "https://github.com/cli/cli/tree/trunk")
+    assert later.calls == [] and not getattr(f, "_speak_landing", False)
+
+
+def _landing_frame(speak):
+    f = SimpleNamespace(_speak_landing=speak, announced=[], told=[])
+    f._announce = f.announced.append
+    f._tell = lambda m, cat=None: f.told.append((m, cat))
+    return f
+
+
+def test_a_landing_from_an_address_is_said_once():
+    f = _landing_frame(True)
+    Frame._say_landing(f, "#5 not in current list, fetching…", final=False)
+    Frame._say_landing(f, "Jumped to #5 — T")
+    Frame._say_landing(f, "Something later")
+    assert f.told == [("#5 not in current list, fetching…", ghviewer.announce.STATUS),
+                      ("Jumped to #5 — T", ghviewer.announce.STATUS)]
+    assert f.announced == ["Something later"]
+
+
+def test_any_other_landing_stays_in_the_status_bar():
+    # Backspace back to a list, a new issue, Go To: the row focus says it.
+    f = _landing_frame(False)
+    Frame._say_landing(f, "Opened #12 — T")
+    assert f.told == [] and f.announced == ["Opened #12 — T"]
+
+
+def test_a_new_load_forgets_the_landing():
+    f = SimpleNamespace(_fetch_token=1, _speak_landing=True)
+    Frame._begin_fetch(f)
+    assert f._speak_landing is False
+
+
+def test_a_failed_load_after_opening_says_why():
+    f = _landing_frame(True)
+    f._fetch_is_current = lambda t: True
+    f.view_mode = ghviewer.VIEW_ISSUES
+    f._pending_target = (1, ghviewer.VIEW_ISSUES, "item", "5")
+    f._on_items_error = lambda msg: f.announced.append(f"Error: {msg}")
+    f._say_landing = lambda m, final=True: Frame._say_landing(f, m, final)
+    Frame._on_fetch_error(f, 1, "Could not resolve to a Repository")
+    assert f.told == [("Error: Could not resolve to a Repository", ghviewer.announce.STATUS)]
     assert f._pending_target is None
 
 
@@ -213,6 +298,7 @@ def _commit_frame():
     f._announce = f.announced.append
     f._populate_filtered_list = lambda items, use_favorite_prefix=False: list(items)
     f._focus_list = lambda row=0: f.focused.append(row)
+    f._say_landing = lambda m, final=True: Frame._say_landing(f, m, final)
     return f
 
 

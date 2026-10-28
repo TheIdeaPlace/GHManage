@@ -286,7 +286,8 @@ def test_landing_back_on_the_milestone(monkeypatch):
     frame = SimpleNamespace(_pending_target=(1, v, "milestone", "91"), view_mode=v,
                             _row_of=lambda it: items.index(it),
                             _describe_landing=Frame._describe_landing,
-                            _announce=lambda m: None, _tell="tell", state_filter="open")
+                            _announce=lambda m: None, _tell="tell", state_filter="open",
+                            _say_landing="say")
     assert Frame._take_pending_row(frame, items, 1) == 1
     assert later[-1] == ("Milestone 2027.1",)
     # A closed one, from its address: said aloud, with how to see it.

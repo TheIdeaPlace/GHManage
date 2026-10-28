@@ -4769,6 +4769,7 @@ class GhViewerFrame(wx.Frame):
         items = result.items
         self.git_items = items
         self.items = []
+        self._discussions_off = not result.enabled
         filtered = self._populate_filtered_list(items, use_favorite_prefix=True)
         message = discussionview.status_message(result, self.repo, state,
                                                 self.current_limit)
@@ -4862,7 +4863,9 @@ class GhViewerFrame(wx.Frame):
             return
         item = self._focused_item()
         if not isinstance(item, Discussion):
-            self._tell("Select a discussion first.")
+            self._tell(f"{self.repo} has discussions turned off."
+                       if getattr(self, "_discussions_off", False)
+                       else "Select a discussion first.")
             return
         if item.locked:
             self._tell(f"Discussion #{item.number} is locked, so it can't take comments.")

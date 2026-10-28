@@ -31,6 +31,7 @@ import alertview
 import codeview
 import commands
 import diffview
+import discussionview
 import settings
 import search_help
 import speech
@@ -46,7 +47,7 @@ from gh_columns import (
     FAVORITES_SET,
     ISSUE_SET, JOB_SET, LABEL_SET, MY_WORK_SET, NOTIFICATION_SET, ORG_SET,
     PAGEFILE_SET, PAGES_SET, RELEASE_SET, REPO_FILE_SET, REPO_SET, SEARCH_ITEM_SET, TAG_SET,
-    SECURITY_SET, WORKFLOW_RUN_SET, WORKFLOW_SET,
+    SECURITY_SET, WORKFLOW_RUN_SET, WORKFLOW_SET, DISCUSSION_SET,
 )
 from gh_data import (
     ACTIVITY_MAX,
@@ -59,6 +60,11 @@ from gh_data import (
     ALERT_KINDS,
     SecurityAlert,
     fetch_security_alerts,
+    Discussion,
+    add_discussion_comment,
+    fetch_discussion,
+    fetch_discussion_comments,
+    fetch_discussions,
     ALL_BRANCHES,
     ALL_BRANCHES_PER_BRANCH_MAX,
     GhError,
@@ -225,8 +231,9 @@ class GitHubTarget:
     ``kind`` is one of:
       repo     the repository itself
       inside   a page in the repository GHManage has no view for (a file,
-               the wiki, a discussion); it opens the repository
+               the wiki); it opens the repository
       item     an issue or pull request; ``ref`` is its number
+      discussion  a discussion; ``ref`` is its number
       commit   a commit; ``ref`` is its SHA (possibly abbreviated)
       release  a release; ``ref`` is its tag
       run      a workflow run; ``ref`` is its id
@@ -250,6 +257,7 @@ _URL_VIEWS = {
     "releases": "releases",
     "actions": "workflow",
     "labels": "labels",
+    "discussions": "discussions",
 }
 
 # github.com pages that are not OWNER/NAME, though they look like it.
@@ -345,6 +353,8 @@ def parse_github_url(value: str) -> GitHubTarget | None:
     arg = rest[1] if len(rest) > 1 else ""
     if section in ("issues", "pull") and arg.isdigit():
         return GitHubTarget(repo, "item", arg)
+    if section == "discussions" and arg.isdigit():
+        return GitHubTarget(repo, "discussion", arg)
     if section == "commit" and arg:
         sha = arg
         for suffix in (".patch", ".diff"):
@@ -594,6 +604,9 @@ def copy_values(item) -> CopyValues | None:
             return CopyValues(item.url, item.title, number, "Number",
                               f"{number} {item.title}")
         return CopyValues(item.url, item.title, item.repo, "Repository Name", item.title)
+    if isinstance(item, Discussion):
+        number = f"#{item.number}"
+        return CopyValues(item.url, item.title, number, "Number", f"{number} {item.title}")
     if isinstance(item, SecurityAlert):
         text = f"{item.ident} {item.summary}".strip()
         return CopyValues(item.url, item.summary, item.ident, item.ident_noun, text)
@@ -763,6 +776,7 @@ ID_BLAME = wx.NewIdRef()
 ID_WHOLE_FILE = wx.NewIdRef()
 ID_COMMENT_LINE = wx.NewIdRef()
 ID_VIEW_SECURITY = wx.NewIdRef()
+ID_VIEW_DISCUSSIONS = wx.NewIdRef()
 
 
 # View modes
@@ -794,6 +808,7 @@ VIEW_ORGS = "orgs"             # the organizations you belong to
 VIEW_ORG = "org"               # one organization's repositories (drill-down; which: _org)
 VIEW_SHARED = "shared"         # others' repositories you are a collaborator on
 VIEW_SECURITY = "security"     # Dependabot, code scanning and secret scanning alerts
+VIEW_DISCUSSIONS = "discussions"  # a repository's discussions (GraphQL)
 
 # Views that are not views *of a repo*, so they work with none selected.
 REPOLESS_VIEWS = (VIEW_FAVORITES, VIEW_NOTIFICATIONS, VIEW_MY_WORK, VIEW_ACTIVITY,
@@ -824,6 +839,7 @@ REPO_GO_TO = [
     (VIEW_PAGES, "GitHub Pages"),
     (VIEW_CODE, "Files"),
     (VIEW_SECURITY, "Security Alerts"),
+    (VIEW_DISCUSSIONS, "Discussions"),
 ]
 ID_GO_TO_VIEW = {view: wx.NewIdRef() for view, _ in REPO_GO_TO}
 
@@ -841,8 +857,9 @@ ADDRESS_VIEWS = {
     "branch": VIEW_COMMITS,
     "release": VIEW_RELEASES,
     "run": VIEW_WORKFLOW,
+    "discussion": VIEW_DISCUSSIONS,
 }
-PENDING_KINDS = ("item", "commit", "release", "run")
+PENDING_KINDS = ("item", "commit", "release", "run", "discussion")
 # Views that load everything at once, where View More has nothing to add.
 NO_MORE_VIEWS = (VIEW_FAVORITES, VIEW_MY_WORK, VIEW_ORGS, VIEW_JOBS, VIEW_ARTIFACTS,
                  VIEW_PAGES, VIEW_PAGEFILES, VIEW_FILES, VIEW_CODE)
@@ -945,6 +962,7 @@ VIEW_COLUMNS = {
     VIEW_ORG: REPO_SET,
     VIEW_SHARED: REPO_SET,
     VIEW_SECURITY: SECURITY_SET,
+    VIEW_DISCUSSIONS: DISCUSSION_SET,
 }
 
 
@@ -2792,6 +2810,7 @@ class GhViewerFrame(wx.Frame):
         # A repository's code. No Ctrl+number is left; checked in File History too.
         show_menu.AppendRadioItem(ID_VIEW_CODE, "Files")
         show_menu.AppendRadioItem(ID_VIEW_SECURITY, "Security Alerts")
+        show_menu.AppendRadioItem(ID_VIEW_DISCUSSIONS, "Discussions")
         show_menu.AppendRadioItem(ID_VIEW_NOTIFICATIONS, "Notifications\tCtrl+Shift+N")
         show_menu.AppendRadioItem(ID_VIEW_MY_WORK, "My Work\tCtrl+Shift+M")
         # Checked while search results are showing; choosing it asks for a
@@ -2906,6 +2925,7 @@ class GhViewerFrame(wx.Frame):
         self.Bind(wx.EVT_MENU, self.on_view_favorites, id=ID_VIEW_FAVORITES)
         self.Bind(wx.EVT_MENU, self.on_view_pages, id=ID_VIEW_PAGES)
         self.Bind(wx.EVT_MENU, self.on_view_security, id=ID_VIEW_SECURITY)
+        self.Bind(wx.EVT_MENU, self.on_view_discussions, id=ID_VIEW_DISCUSSIONS)
         self.Bind(wx.EVT_MENU, self.on_view_activity, id=ID_VIEW_ACTIVITY)
         self.Bind(wx.EVT_MENU, self.on_view_notifications, id=ID_VIEW_NOTIFICATIONS)
         self.Bind(wx.EVT_MENU, lambda e: self._toggle_include_read(), id=ID_SHOW_READ)
@@ -3136,6 +3156,7 @@ class GhViewerFrame(wx.Frame):
         menu_bar.Check(ID_VIEW_PAGES, self.view_mode == VIEW_PAGES)
         menu_bar.Check(ID_VIEW_CODE, self.view_mode in (VIEW_CODE, VIEW_HISTORY))
         menu_bar.Check(ID_VIEW_SECURITY, self.view_mode == VIEW_SECURITY)
+        menu_bar.Check(ID_VIEW_DISCUSSIONS, self.view_mode == VIEW_DISCUSSIONS)
         menu_bar.Check(ID_VIEW_NOTIFICATIONS, self.view_mode == VIEW_NOTIFICATIONS)
         menu_bar.Check(ID_VIEW_MY_WORK, self.view_mode == VIEW_MY_WORK)
         menu_bar.Check(ID_VIEW_SEARCH_RESULTS, self.view_mode in SEARCH_VIEWS)
@@ -3173,7 +3194,7 @@ class GhViewerFrame(wx.Frame):
         issues = self.view_mode == VIEW_ISSUES
         self._act_close.Enable(issues)
         self._act_reopen.Enable(issues)
-        self._act_comment.Enable(issues)
+        self._act_comment.Enable(issues or self.view_mode == VIEW_DISCUSSIONS)
 
         in_repo = bool(self.repo) and self.view_mode not in REPOLESS_VIEWS
         self._act_new.Enable(in_repo)
@@ -3962,6 +3983,9 @@ class GhViewerFrame(wx.Frame):
                 elif view == VIEW_SECURITY:
                     report = fetch_security_alerts(repo, state, limit)
                     wx.CallAfter(self._on_security_loaded, token, report, state)
+                elif view == VIEW_DISCUSSIONS:
+                    result = fetch_discussions(repo, state, limit)
+                    wx.CallAfter(self._on_discussions_loaded, token, result, state)
                 elif view == VIEW_PAGES:
                     # The config comes first: with Pages off it is the whole
                     # answer, and when it is on it says where to read the rest.
@@ -4029,6 +4053,7 @@ class GhViewerFrame(wx.Frame):
         VIEW_ORG: "Organization Repositories",
         VIEW_SHARED: SHARED_LABEL,
         VIEW_SECURITY: "Security Alerts",
+        VIEW_DISCUSSIONS: "Discussions",
     }
 
     def _view_label(self, view: str, lower: bool = False) -> str:
@@ -4598,6 +4623,10 @@ class GhViewerFrame(wx.Frame):
                 return isinstance(it, Release) and it.tag == ref
             if kind == "run":
                 return isinstance(it, WorkflowRun) and str(it.run_id) == ref
+            if kind == "discussion":
+                return isinstance(it, Discussion) and str(it.number) == ref
+            if kind == "discussion_title":
+                return isinstance(it, Discussion) and it.title == ref
             return False
 
         found = next((it for it in items if matches(it)), None)
@@ -4613,18 +4642,33 @@ class GhViewerFrame(wx.Frame):
         # one on screen when they run.
         if kind == "item":
             wx.CallLater(150, self._if_still_current, token, self._goto_issue, int(ref))
+        elif kind == "discussion" and found is None:
+            wx.CallLater(150, self._if_still_current, token, self._goto_discussion, int(ref))
         elif kind == "commit":
             wx.CallLater(150, self._if_still_current, token, self._goto_commit, ref)
-        elif kind in ("release", "run"):
-            what = f"Release {ref}" if kind == "release" else f"Run {ref}"
-            plural = "releases" if kind == "release" else "workflow runs"
+        elif kind in ("release", "run", "discussion", "discussion_title"):
+            # (what it is, the newest of its kind, its kind)
+            what, newest, plural = {
+                "release": (f"Release {ref}", "newest releases", "releases"),
+                "run": (f"Run {ref}", "newest workflow runs", "workflow runs"),
+                "discussion": (f"Discussion #{ref}", "most recently active discussions",
+                               "discussions"),
+                "discussion_title": (f"The discussion “{ref}”",
+                                     "most recently active discussions", "discussions"),
+            }[kind]
             if found is not None:
                 said = f"{what} is hidden by the quick filter. Escape clears it."
             elif items:
-                said = f"{what} isn't among the {len(items)} newest {plural}."
+                said = f"{what} isn't among the {len(items)} {newest}."
             else:
                 said = f"{what} wasn't found: there are no {plural} to show."
-            wx.CallLater(150, self._announce, said)
+            if kind == "discussion_title":
+                # Enter was pressed to land on it: say aloud that it didn't.
+                if getattr(self, "state_filter", "all") != "all":
+                    said += " A closed one shows with View, State, All."
+                wx.CallLater(150, self._tell, said)
+            else:
+                wx.CallLater(150, self._announce, said)
         return 0
 
     def _if_still_current(self, token: int, fn, *args) -> None:
@@ -4641,7 +4685,46 @@ class GhViewerFrame(wx.Frame):
             return f"Opened release {item.tag}"
         if isinstance(item, WorkflowRun):
             return f"Opened run #{item.run_number} {item.name}"
+        if isinstance(item, Discussion):
+            return f"Opened discussion #{item.number} — {item.title}"
         return "Opened"
+
+    def _goto_discussion(self, number: int) -> None:
+        """Show a discussion that isn't in the list (closed, or not among the
+        most recently active): fetched, and put at the top."""
+        if self.view_mode != VIEW_DISCUSSIONS or not self.repo:
+            return
+        self._announce(f"Discussion #{number} isn't in this list, fetching…")
+        repo, token = self.repo, self._fetch_token
+
+        def worker() -> None:
+            try:
+                found = fetch_discussion(repo, number)
+            except GhError as exc:
+                wx.CallAfter(self._on_discussion_fetched, None, repo, token, str(exc), number)
+                return
+            wx.CallAfter(self._on_discussion_fetched, found, repo, token, "", number)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_discussion_fetched(self, found, repo: str, token: int, err: str,
+                               number: int) -> None:
+        if (self.view_mode != VIEW_DISCUSSIONS or self.repo != repo
+                or token != self._fetch_token):
+            return  # moved on, or the list was read again since
+        if found is None:
+            self._tell(f"Couldn't open discussion #{number}: {err}")
+            return
+        self.filter_text = ""
+        self.git_items = [found] + [d for d in self.git_items
+                                    if getattr(d, "number", None) != found.number]
+        self._populate_filtered_list(self.git_items, use_favorite_prefix=True)
+        self._focus_list(0)
+        where = "closed, so" if found.closed else "not among the most recently active, so"
+        said = (f"Opened discussion #{found.number} — {found.title}. It is {where} "
+                "it is shown first.")
+        self._announce(said)
+        announce.announce(said, announce.STATUS)
 
     def _goto_commit(self, sha: str) -> None:
         """Show a commit that isn't in the list: fetched, and put at the top."""
@@ -4717,8 +4800,202 @@ class GhViewerFrame(wx.Frame):
             self._show_favorite_details(idx)
         elif self.view_mode == VIEW_SECURITY:
             self._show_security_details(idx)
+        elif self.view_mode == VIEW_DISCUSSIONS:
+            self._show_discussion_details(idx)
         else:
             self._show_git_details(idx)
+
+    # ── Discussions ─────────────────────────────────────────────────────
+
+    def _on_discussions_loaded(self, token: int, result, state: str) -> None:
+        """Discussions: most recently active first; with discussions turned
+        off, or none to show, the details panel and speech say so."""
+        if not self._fetch_is_current(token):
+            return  # the user has moved on; these belong to a view they left
+        items = result.items
+        self.git_items = items
+        self.items = []
+        self._discussions_off = not result.enabled
+        filtered = self._populate_filtered_list(items, use_favorite_prefix=True)
+        message = discussionview.status_message(result, self.repo, state,
+                                                self.current_limit)
+        keys = "R=refresh  Ctrl+F=filter"
+        if items:
+            keys = ("Enter or Ctrl+O=open on GitHub  M=comment  Alt+N/Alt+P=comments  "
+                    "F=favorite  Ctrl++=view more  " + keys)
+        self._set_view_status(message, keys)
+        self._update_title()
+        if not items:
+            self.details_text.SetValue(discussionview.empty_text(result, self.repo, state))
+            announce.announce(message, announce.STATUS)
+            if result.enabled:
+                # A notification or event about a discussion was on its way
+                # here: a closed one is still fetched by its number.
+                self._take_pending_row(items, token)
+            else:
+                self._pending_target = None  # turned off says it all
+            return
+        row = self._take_pending_row(items, token)
+        if filtered:
+            wx.CallLater(100, self._focus_list, row)
+
+    def _show_discussion_details(self, idx: int) -> None:
+        """A discussion: its fields and body now, its comments once read
+        (fetched when the selection has rested on it a moment)."""
+        if idx < 0 or idx >= len(self.git_items):
+            self.details_text.Clear()
+            return
+        item = self.git_items[idx]
+        if not isinstance(item, Discussion):
+            self.details_text.Clear()
+            return
+        self._render_discussion(item)
+        if item.comments is None and item.comment_count:
+            self._fetch_discussion_comments_later(item, self._detail_gen)
+
+    def _render_discussion(self, item: Discussion, keep_place: bool = False) -> None:
+        """Put ``item`` in the details panel. With ``keep_place``, the caret
+        stays on the line and column it was on, so text arriving under what
+        is being read doesn't move it."""
+        line = col = 0
+        if keep_place:
+            caret = self.details_text.GetInsertionPoint()
+            old = self.details_text.GetValue()
+            line = old.count("\n", 0, caret)
+            col = caret - (old.rfind("\n", 0, caret) + 1)
+        text, positions = discussionview.discussion_details(item)
+        self.details_text.SetValue(text)
+        self._comment_positions = list(positions)
+        self._current_comment = -1
+        if keep_place and (line or col):
+            start = self._line_to_position(line)
+            end = self._line_to_position(line + 1)
+            self.details_text.SetInsertionPoint(min(start + col, max(start, end - 1)))
+            # Alt+N from here goes on to the next comment after the caret.
+            self._current_comment = sum(1 for p in positions if p[0] <= line) - 1
+
+    def _fetch_discussion_comments_later(self, item: Discussion, gen: int) -> None:
+        """Read a discussion's comments once the selection has rested on it,
+        so arrowing down the list doesn't read every discussion passed."""
+        repo = self.repo
+        version = item.comments_version
+
+        def worker() -> None:
+            try:
+                comments, cut = fetch_discussion_comments(repo, item.number)
+                err = ""
+            except GhError as exc:
+                comments, cut, err = None, False, str(exc)
+            wx.CallAfter(self._on_discussion_comments, gen, item, comments, cut, err, version)
+
+        def start() -> None:
+            if gen == self._detail_gen:
+                threading.Thread(target=worker, daemon=True).start()
+
+        wx.CallLater(250, start)
+
+    def _on_discussion_comments(self, gen: int, item: Discussion, comments, cut: bool,
+                                err: str, version: int = 0) -> None:
+        if version != item.comments_version:
+            return  # read again since (after M posted); that reading is newer
+        if comments is not None:
+            item.comments, item.comments_cut = comments, cut
+        if not self._shows(VIEW_DISCUSSIONS, item, gen):
+            return
+        reading = self.FindFocus() is self.details_text
+        if comments is None:
+            caret = self.details_text.GetInsertionPoint()
+            text = self.details_text.GetValue()
+            said = f"Couldn't read the comments: {err}"
+            self.details_text.SetValue(text.rsplit("\n", 1)[0] + "\n" + said)
+            self.details_text.SetInsertionPoint(caret)
+        else:
+            self._render_discussion(item, keep_place=reading)
+            n = len(comments)
+            said = f"{n} comment{'' if n == 1 else 's'} read." if n else ""
+        if reading and said:
+            # A focused text box's new value isn't read: say it arrived.
+            announce.announce(said, announce.STATUS)
+
+    def _comment_on_discussion(self) -> None:
+        """M, or Actions > Add Comment, in Discussions: a comment on the
+        selected discussion, then its comments read again."""
+        if self.view_mode != VIEW_DISCUSSIONS:
+            return
+        item = self._focused_item()
+        if not isinstance(item, Discussion):
+            self._tell(f"{self.repo} has discussions turned off."
+                       if getattr(self, "_discussions_off", False)
+                       else "Select a discussion first.")
+            return
+        if item.locked:
+            self._tell(f"Discussion #{item.number} is locked, so it can't take comments.")
+            return
+        if getattr(self, "_discussion_comment_busy", False):
+            self._tell("Still adding the last comment.")
+            return
+        dlg = wx.TextEntryDialog(
+            self, f"Add a comment to discussion #{item.number}:\n{item.title}",
+            "Add Comment", "", style=wx.TE_MULTILINE | wx.OK | wx.CANCEL)
+        try:
+            if dlg.ShowModal() != wx.ID_OK:
+                return
+            body = dlg.GetValue().strip()
+        finally:
+            dlg.Destroy()
+        if not body:
+            return
+        self._discussion_comment_busy = True
+        self._announce(f"Adding a comment to discussion #{item.number}…")
+        repo = self.repo
+        # Any read of the comments still on its way is older than the one
+        # after this post.
+        item.comments_version += 1
+
+        def worker() -> None:
+            # Any failure, not only gh's, comes back to clear the busy flag.
+            try:
+                add_discussion_comment(item, body)
+            except Exception as exc:  # noqa: BLE001
+                wx.CallAfter(self._on_discussion_comment_done, item, False, None, False,
+                             str(exc))
+                return
+            try:
+                comments, cut = fetch_discussion_comments(repo, item.number)
+                err = ""
+            except Exception as exc:  # noqa: BLE001
+                comments, cut, err = None, False, str(exc)
+            wx.CallAfter(self._on_discussion_comment_done, item, True, comments, cut, err)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_discussion_comment_done(self, item: Discussion, posted: bool, comments,
+                                    cut: bool, err: str) -> None:
+        """The comment is in (or isn't): the discussion read again with it,
+        the caret kept where it was, and its Comments column brought up to date."""
+        self._discussion_comment_busy = False
+        if not posted:
+            self._tell(f"Couldn't add the comment. {err}".strip())
+            return
+        msg = f"Comment added to discussion #{item.number}."
+        if comments is None:
+            item.comment_count += 1
+            # What was read is out of date: read it again when next shown.
+            item.comments = None
+            msg += f" Couldn't read the comments again: {err}"
+        else:
+            item.comments, item.comments_cut = comments, cut
+            item.comment_count = (max(item.comment_count + 1, len(comments)) if cut
+                                  else len(comments))
+        if self.view_mode == VIEW_DISCUSSIONS:
+            row = self._row_of(item)
+            if row >= 0:
+                self._redraw_row(row, item)
+            if self._focused_item() is item:
+                self._render_discussion(item, keep_place=True)
+                if item.comments is None:
+                    self._fetch_discussion_comments_later(item, self._detail_gen)
+        self._tell(msg)
 
     def _show_security_details(self, idx: int) -> None:
         """A security alert: everything GitHub says about it (alertview)."""
@@ -5219,6 +5496,7 @@ class GhViewerFrame(wx.Frame):
         VIEW_SEARCH_REPOS: "Repository Name",
         # CVE or GHSA ID, rule ID, or secret type, by the kind of alert.
         VIEW_SECURITY: "Advisory, Rule or Secret Type",
+        VIEW_DISCUSSIONS: "Number",
     }
 
     _COPY_WHAT = {
@@ -5942,6 +6220,12 @@ class GhViewerFrame(wx.Frame):
                 return
             self._comment_on_line()
             return
+        if (key == ord("M") and not event.HasAnyModifiers()
+                and self.view_mode == VIEW_DISCUSSIONS):
+            # Here so it works from the details panel too, where the
+            # discussion being commented on is read.
+            self._comment_on_discussion()
+            return
         if self.view_mode == VIEW_ISSUES and not event.HasAnyModifiers():
             # Pull request keys, here so they work from the details panel,
             # where the line naming them is read.
@@ -6313,6 +6597,11 @@ class GhViewerFrame(wx.Frame):
             item_type = item.kind_display.lower()
             title = item.path
             subtitle = self._code_where() if self.view_mode == VIEW_CODE else ""
+        elif isinstance(item, Discussion):
+            # As F on a discussion's Activity event makes it.
+            item_type = "discussion"
+            title = f"#{item.number} — {item.title}"
+            subtitle = item.category
         elif isinstance(item, SecurityAlert):
             item_type = "security alert"
             title = f"{item.kind_display} #{item.number} — {item.summary}"
@@ -6535,6 +6824,9 @@ class GhViewerFrame(wx.Frame):
         self._do_reopen()
 
     def on_comment(self, event: wx.CommandEvent) -> None:
+        if self.view_mode == VIEW_DISCUSSIONS:
+            self._comment_on_discussion()
+            return
         self._do_comment()
 
     def on_open_repo(self, event: wx.CommandEvent) -> None:
@@ -7387,6 +7679,11 @@ class GhViewerFrame(wx.Frame):
             self._tell("Security alerts are listed most severe first, then newest, "
                        "so they aren't sorted.")
             return
+        if self.view_mode == VIEW_DISCUSSIONS:
+            self._update_menu_checks()
+            self._tell("Discussions are listed most recently active first, "
+                       "so they aren't sorted.")
+            return
         self.sort_order = self._sort_menu_items.get(event.GetId(), SORT_ORDERS[0])
         self._update_menu_checks()
         back = self._files_back if self.view_mode == VIEW_FILES else None
@@ -7531,6 +7828,9 @@ class GhViewerFrame(wx.Frame):
 
     def on_view_security(self, event: wx.CommandEvent) -> None:
         self._switch_view(VIEW_SECURITY)
+
+    def on_view_discussions(self, event: wx.CommandEvent) -> None:
+        self._switch_view(VIEW_DISCUSSIONS)
 
     def on_view_activity(self, event: wx.CommandEvent) -> None:
         self._select_category(VIEW_ACTIVITY)
@@ -7806,6 +8106,9 @@ class GhViewerFrame(wx.Frame):
         if note.is_item and not in_browser:
             self._open_item_here(note)
             return
+        if note.subject_type == "Discussion" and note.repo and not in_browser:
+            self._open_discussion_here(note)
+            return
         if note.subject_type == "Release" and note.api_url:
             # Its own page needs its tag, which only GitHub can tell us.
             self._announce(f"Opening {note.title}…")
@@ -7822,6 +8125,17 @@ class GhViewerFrame(wx.Frame):
             self._announce(f"Opened {note.title} in browser")
         else:
             self._announce("No address for this notification.")
+
+    def _open_discussion_here(self, note: Notification) -> None:
+        """A discussion's notification: its repository's Discussions, on it,
+        with Backspace back to the notifications. GitHub doesn't always give
+        a discussion's number here; then it is found by its title."""
+        target = parse_github_url(note.url) if note.own_page else None
+        self._open_repo_from_list(note.repo, note, VIEW_DISCUSSIONS)
+        if target is not None and target.kind == "discussion":
+            self._set_pending_target(VIEW_DISCUSSIONS, "discussion", target.ref)
+        elif note.title:
+            self._set_pending_target(VIEW_DISCUSSIONS, "discussion_title", note.title)
 
     def _mark_notification_read(self) -> None:
         note = self._focused_notification()

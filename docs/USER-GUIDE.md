@@ -17,6 +17,7 @@ GHManage is a keyboard-driven desktop app for your GitHub repositories, built fo
 - [Changed Files](#changed-files)
 - [Files](#files)
 - [Security Alerts](#security-alerts)
+- [Discussions](#discussions)
 - [Tags and Releases](#tags-and-releases)
 - [Workflows and Workflow Runs](#workflows-and-workflow-runs)
 - [GitHub Pages](#github-pages)
@@ -222,7 +223,7 @@ Each repository has several views. `Ctrl` and a number jumps straight to one fro
 | `Ctrl+Shift+M` | My Work |
 | `Ctrl+Shift+A` | Activity |
 
-**Files**, a repository's code, and **Security Alerts** are on the same menu after GitHub Pages, without a number; see [Files](#files) and [Security Alerts](#security-alerts). **Starred Repositories** and **Watched Repositories** are on the same menu, after Activity.
+**Files**, a repository's code, **Security Alerts** and **Discussions** are on the same menu after GitHub Pages, without a number; see [Files](#files), [Security Alerts](#security-alerts) and [Discussions](#discussions). **Starred Repositories** and **Watched Repositories** are on the same menu, after Activity.
 
 Favorites, Notifications, My Work, Activity, Starred Repositories, Watched Repositories, Shared With Me, an organization's repositories and search results are not about one repository, so they work at any time. Every other view needs a repository: with none chosen, the status bar says "Select a repository first." and the view stays as it was.
 
@@ -303,7 +304,7 @@ Opening a repository shows its **Issues & PRs**. Use `Ctrl+2` through `Ctrl+0` t
 
 - A branch's history (`…/commits/<branch>`) opens that branch's commits; a workflow file (`…/actions/workflows/ci.yml`) opens Workflows.
 
-Any other address inside a repository, a file, the wiki or a discussion say, opens the repository on its issues, and the status bar says GHManage has no view for that page. A branch whose name has a `/` in it can't be told apart from a folder in a `…/tree/` address, so that opens the repository too. Only a repository's own address pins it: a link from an email to an issue, a file or anything else in a repository opens without adding to your list.
+A discussion's address opens the repository's Discussions with the discussion selected. Any other address inside a repository, a file or the wiki say, opens the repository on its issues, and the status bar says GHManage has no view for that page. A branch whose name has a `/` in it can't be told apart from a folder in a `…/tree/` address, so that opens the repository too. Only a repository's own address pins it: a link from an email to an issue, a file or anything else in a repository opens without adding to your list.
 
 Addresses can be pasted as they come: wrapped in `<…>` or brackets, followed by a full stop or comma, in any mix of upper and lower case. Only github.com is read; addresses on other GitHub hosts, gists, raw files and the API get the "Couldn't read that" message.
 
@@ -659,6 +660,20 @@ gh auth refresh -h github.com -s security_events
 
 Run it in a terminal, approve it in your browser, then press `R`.
 
+## Discussions
+
+**View → View Mode → Discussions**, or **Go To → Discussions** on a repository in the repository list, lists the repository's discussions, the most recently active first. The columns are Number, Category, Title, Author, Answered, Comments and Updated; Created, State and Upvotes can be added under **View → Columns…**. Answered says "Answered" or "Unanswered" for a discussion in a category that takes an answer, such as Q&A, and is blank in the others. **View → Sort Order** doesn't apply here.
+
+**View → State** chooses what is listed: **Open** (the default), **Closed** or **All**. `Ctrl++` loads more when the status bar says there are more.
+
+Selecting a discussion shows it in the details panel: its number, category and title, then its state, author, when it was started and last active, whether it is answered and by whom, its upvotes and how many comments it has, its address on the line after "URL:", and its text. Its comments follow, read when the selection rests on it a moment (the panel says "Getting the comments…" until then), each under a heading such as "Comment 2 of 5 — alice (2026-10-01):", with its replies indented under it, such as "Reply 1 of 2 to comment 2 — bob (2026-10-02):". The comment or reply chosen as the answer has ", the answer" at the end of its heading, and the Answered line says which it is: "Answered: Yes by bob in reply 1 to comment 2". A comment hidden on GitHub shows its heading only. `Alt+N` and `Alt+P` move from comment to comment and reply to reply.
+
+`M`, or **Actions → Add Comment…** (`Ctrl+M`), comments on the selected discussion. Type the comment and choose OK. The comments are read again with yours among them, and the caret stays where it was. A locked discussion can't take comments, and GHManage says so.
+
+`Enter` or `Ctrl+O` opens the discussion on GitHub. **Copy** works as everywhere else; Copy Number copies `#7`. `F` adds it to your favorites.
+
+A repository with discussions turned off says so, in the details panel and aloud.
+
 ---
 
 ## Tags and Releases
@@ -794,7 +809,7 @@ Why you were told is GitHub's reason in words: review requested, mention, team m
 
 | Key | Action |
 |-----|--------|
-| `Enter` | An issue or pull request opens here in GHManage, selected in its repository's list. A discussion, commit, release or security advisory opens on its own page on GitHub (a discussion GitHub doesn't give an address for opens the repository's discussions); a workflow run, which notifications don't identify, opens the repository's Actions page. Either way it is marked read |
+| `Enter` | An issue or pull request opens here in GHManage, selected in its repository's list. A discussion opens here too, selected in its repository's Discussions (found by its title when GitHub doesn't give its number), and `Backspace` comes back. A commit, release or security advisory opens on its own page on GitHub; a workflow run, which notifications don't identify, opens the repository's Actions page. Either way it is marked read |
 | `Backspace` | From the issue or pull request, come back to the same notification |
 | `M` | Mark it read |
 | `Delete` or `Ctrl+D` | Mark it done: it leaves your inbox, as the Done button on github.com does. GHManage can't bring it back; github.com's **Done** tab can |
@@ -908,7 +923,7 @@ The details panel gives the whole event as one sentence, then who, what, the rep
 
 | Key | Action |
 |-----|--------|
-| `Enter` | Open what the event is about here in GHManage: an issue or pull request in its repository's Issues & PRs, a release in Releases, a commit in Commits. Anything GHManage has no view for (a push's comparison, a discussion, a wiki page) opens on GitHub |
+| `Enter` | Open what the event is about here in GHManage: an issue or pull request in its repository's Issues & PRs, a release in Releases, a commit in Commits, a discussion in Discussions. Anything GHManage has no view for (a push's comparison, a wiki page) opens on GitHub |
 | `G` or `Ctrl+Shift+G` | Open the event's repository here in GHManage |
 | `Backspace` | From what `Enter` or `G` opened, come back to the same event |
 | `F` | Add what the event is about to favorites, or remove it |
@@ -1069,6 +1084,7 @@ The fourth item is named for what it copies in the view you are in:
 | Activity | Copy Number, Tag or Repository | the issue or pull request number, the release's tag, or the repository for events about a whole repository |
 | Starred, Watched, Shared With Me, an organization's repositories | Copy Repository Name | `owner/name` |
 | My Organizations | Copy Organization Name | the organization's name |
+| Discussions | Copy Number | `#7` |
 | Security Alerts | Copy Advisory, Rule or Secret Type | a Dependabot alert's CVE id (its GHSA id when it has no CVE), a code scanning alert's rule id, or a secret's type |
 
 In Activity, Copy Link and Copy Markdown Link copy what the event is about (the issue, pull request or release) rather than the event itself, the same thing `F` favorites.
@@ -1181,7 +1197,7 @@ Everything that acts on what the list is showing is on the **Actions** menu, whi
 | Copy → Link, Markdown Link, Title, Number, Details | `Ctrl+Shift+C`, `L`, `T`, `I`, `D` | Every view; see [Copying](#copying) |
 | Close Issue/PR | `Ctrl+W` | Issues & PRs |
 | Reopen Issue/PR | `Ctrl+Shift+W` | Issues & PRs |
-| Add Comment… | `Ctrl+M` | Issues & PRs |
+| Add Comment… | `Ctrl+M`, or `M` in the list | Issues & PRs; Discussions |
 | New Issue… | `Ctrl+N` | Everywhere, for the repository in front of you; shows the new issue in its Issues & PRs |
 | Search This Repository… | `Ctrl+Shift+S` | Everywhere, for the repository in front of you: a search starting `repo:owner/name` |
 | Pull Request → Checks, Review…, Merge…, Ready for Review or Back to Draft, Request Reviewers…, Update Branch… | `K`, `V`, `D` in the list | Issues & PRs, on a pull request |
@@ -1371,6 +1387,15 @@ On a Mac, use `Cmd` in place of `Ctrl` for every shortcut that has one, `Option`
 |-----|--------|
 | `Enter` or `Ctrl+O` | Open the alert on GitHub |
 | `R` | Read the alerts again |
+
+### In Discussions
+
+| Key | Action |
+|-----|--------|
+| `Enter` or `Ctrl+O` | Open the discussion on GitHub |
+| `M` | Add a comment |
+| `Alt+N` / `Alt+P` | Next or previous comment or reply in the details panel |
+| `R` | Read the discussions again |
 
 ### In Notifications
 

@@ -43,7 +43,9 @@ T = ghviewer.GitHubTarget
     ("https://github.com/o/r/actions", T("o/r", "view", "workflow")),
     ("https://github.com/o/r/labels", T("o/r", "view", "labels")),
     ("https://github.com/o/r/wiki", T("o/r", "inside")),
-    ("https://github.com/o/r/discussions/5", T("o/r", "inside")),
+    ("https://github.com/o/r/discussions/5", T("o/r", "discussion", "5")),
+    ("https://github.com/o/r/discussions", T("o/r", "view", "discussions")),
+    ("https://github.com/o/r/discussions/categories/q-a", T("o/r", "inside")),
     ("https://github.com/o/r/compare/a...b", T("o/r", "inside")),
     # Pasted from email, chat and Markdown
     ("<https://github.com/o/r>", T("o/r")),

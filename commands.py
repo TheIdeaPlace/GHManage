@@ -58,6 +58,7 @@ ISSUES = "Issues & PRs list"
 LABELS = "Labels list"
 RUNS = "Workflow runs and jobs"
 NOTIFICATIONS = "Notifications list"
+DISCUSSIONS = "Discussions list"
 FEEDS = "Activity, Notifications, My Work and search results"
 PAGES = "GitHub Pages"
 CHANGES = "Issues & PRs list and Commits list"
@@ -106,6 +107,9 @@ LIST_KEYS: list[Command] = [
     Command("Rerun", "E", RUNS),
     Command("Cancel the run", "X", RUNS),
     Command("Delete the run", "Delete", RUNS),
+    Command("Add a comment to the discussion", "M", DISCUSSIONS),
+    Command("Next or previous comment or reply, in the details panel", "Alt+N, Alt+P",
+            DISCUSSIONS),
     Command("Mark as read", "M", NOTIFICATIONS),
     Command("Mark as done", "Delete", NOTIFICATIONS),
     Command("Unsubscribe from the thread", "U", NOTIFICATIONS),

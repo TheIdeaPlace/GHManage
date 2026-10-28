@@ -110,6 +110,15 @@ it. **View → State** shows closed milestones, or all.
 Very large pull requests that GitHub can't measure in time are now listed
 without their sizes, instead of the list failing.
 
+## Read a README
+
+**Actions → Read README** (`Ctrl+Shift+R`), also on a repository's context menu
+in the repository list, reads the README of the repository in front of you: the
+one selected in the repository list, the selected row in Starred, Notifications
+or search results, or the repository open. It opens in Files on the README, with
+focus in its text at the top, so you can start reading at once. `Alt+N` and
+`Alt+P` move between its headings, and `Backspace` goes to the files around it.
+
 ## Before you start
 
 GHManage drives the [GitHub CLI](https://cli.github.com/), so install it and sign

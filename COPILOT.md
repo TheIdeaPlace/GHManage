@@ -72,7 +72,8 @@ UI thread via `wx.CallAfter`. Never touch wx widgets from a worker thread.
   submodules (type commit), which contents lists as files, and have no 1,000-entry cap.
   `fetch_blob_text(repo, sha)` reads a file by blob SHA with `Accept: application/vnd.github.raw`
   (UTF-8 with replacement, via `_run_gh`); `MAX_FILE_BYTES` (1 MB) is the most shown.
-  `fetch_file_history(repo, path, ref, limit)` (`commits?path=&sha=`, doesn't follow renames),
+  `fetch_readme_path(repo)` (`repos/{r}/readme`: the path GitHub picks, None on 404) is Read
+  README's (#88). `fetch_file_history(repo, path, ref, limit)` (`commits?path=&sha=`, doesn't follow renames),
   `fetch_commit_file(repo, sha, path)` (one file of `fetch_commit_files`), `fetch_blame(repo,
   ref, path)` (GraphQL `object(expression:).blame(path:)`, values quoted with json.dumps),
   `fetch_ref_names(repo)` (branch and tag names only, for Ctrl+B in Files), and
@@ -219,6 +220,14 @@ UI thread via `wx.CallAfter`. Never touch wx widgets from a worker thread.
   `history_of`/`history_back`) that the Backspace handlers (`_code_up`, `_back_from_history`,
   `_back_from_files`, `_back_from_code`) restore after their own `_switch_view`. Chains nest:
   Files → H → History → Enter → Changed Files → W → Files.
+- **Read README** (Actions, Ctrl+Shift+R, repo-list context menu; #88) is Files, not a window
+  of its own: `_read_readme` sets `_code_readme` to the repository in front of you and opens
+  it on Files (`_open_repo_from_list` from a row, so Backspace returns). The next `_load_items`
+  of Files takes `_code_readme` (one load only; `_reset_code` doesn't clear it), asks
+  `fetch_readme_path`, opens that folder and passes the path to `_on_code_loaded(readme=)`,
+  which lands on it and, via `_read_readme_text`, puts focus in the details panel at the top:
+  at once when the text is cached, else when `_on_blob_fetched` draws it (`_readme_focus`).
+  No README: the top, and the note says so.
 - Details that arrive later (a file's text, a history commit's patch) are fetched 250 ms after
   the row is selected, carry `_detail_gen` (bumped in every `_show_details`), and are drawn only
   if `_shows(view, item, gen)`; what arrives is cached either way (`_blob_cache` by blob SHA,

@@ -17,6 +17,7 @@ GHManage is a keyboard-driven desktop app for your GitHub repositories, built fo
 - [Branches and Commits](#branches-and-commits)
 - [Changed Files](#changed-files)
 - [Files](#files)
+- [Reading a README](#reading-a-readme)
 - [Security Alerts](#security-alerts)
 - [Discussions](#discussions)
 - [Tags and Releases](#tags-and-releases)
@@ -649,6 +650,16 @@ In [Changed Files](#changed-files), `W` on a file, or **Actions → Open Whole F
 
 ---
 
+## Reading a README
+
+**Actions → Read README** (`Ctrl+Shift+R`) reads the README of the repository in front of you: the one selected in the repository list when that has focus, the selected row's repository in a list of many (Starred, Notifications, search results and the like), and otherwise the repository open. It is also on a repository's context menu in the repository list.
+
+The README opens in [Files](#files), on the default branch, in the folder GitHub found it in (usually the top; sometimes `docs` or `.github`), with the README selected and focus in its text at the first line, which names the file and says how many lines it has. Everything Files does works on it: in a Markdown README, `Alt+N` and `Alt+P` move from heading to heading; `B` shows its blame and `H` its history; `Ctrl+B` reads it on another branch or tag. `Backspace` moves out of the text to the list of files around it. From a row of a list of many, `Backspace` from the top of the repository goes back to that row.
+
+A repository without a README opens at the top of its files, and GHManage says it has none.
+
+---
+
 ## Security Alerts
 
 **View → View Mode → Security Alerts**, or **Go To → Security Alerts** on a repository in the repository list, lists the repository's security alerts from GitHub: Dependabot alerts about the packages it depends on, code scanning alerts about its code, and secret scanning alerts about passwords and keys committed to it, all in one list. The Kind column says which each one is. GHManage only reads alerts; to dismiss or reopen one, open it on GitHub.
@@ -1227,6 +1238,7 @@ Everything that acts on what the list is showing is on the **Actions** menu, whi
 | Add Comment… | `Ctrl+M`, or `M` in the list | Issues & PRs; Discussions |
 | New Issue… | `Ctrl+N` | Everywhere, for the repository in front of you; shows the new issue in its Issues & PRs |
 | Search This Repository… | `Ctrl+Shift+S` | Everywhere, for the repository in front of you: a search starting `repo:owner/name` |
+| Read README | `Ctrl+Shift+R` | Everywhere, for the repository in front of you: its README, in Files |
 | Pull Request → Checks, Review…, Merge…, Ready for Review or Back to Draft, Request Reviewers…, Update Branch… | `K`, `V`, `D` in the list | Issues & PRs, on a pull request |
 | Watch Settings… | `Ctrl+Shift+U` | Everywhere, for the repository in front of you |
 | Save Search… | `Ctrl+S` | Search results |
@@ -1257,7 +1269,7 @@ The **Applications** key, `Shift+F10`, or a right-click opens a context menu (on
 
 In the item list it starts with what `Enter` does in that view, for example **Show Commits** on a branch or **Open Here** on a search result, and then offers everything the Actions menu offers in that view, with Copy and Pull Request as submenus. It is built from the Actions menu each time, so the two always agree. It ends with **View More** (`Ctrl++`) in every list that loads in pages. On a repository in Starred, Watched, Shared With Me, an organization's repositories or repository search results, it also has **Go To** (see below), and `Backspace` from where it takes you comes back to that row.
 
-In the repository list, a repository's menu has **Open**, **Open on GitHub**, **Go To**, **New Issue…**, **Search This Repository…** (a search starting `repo:owner/name`), **Watch Settings…**, **Add to Favorites** or **Remove from Favorites**, Copy, and **Remove from List**. **Go To** opens the repository straight on one of its views: Issues & PRs, Branches, Commits, Tags, Releases, Workflows, Workflow Runs, Labels, GitHub Pages, Files, Security Alerts, Discussions or Milestones. Copy includes **Copy HTTPS Clone URL** and **Copy SSH Clone URL**, the addresses `git clone` takes. These are the same commands as on the Actions menu, for the repository selected. A saved search's menu has **Run Search** and **Remove Saved Search**; Favorites and the other entries at the top have **Open**.
+In the repository list, a repository's menu has **Open**, **Open on GitHub**, **Go To**, **New Issue…**, **Search This Repository…** (a search starting `repo:owner/name`), **Read README**, **Watch Settings…**, **Add to Favorites** or **Remove from Favorites**, Copy, and **Remove from List**. **Go To** opens the repository straight on one of its views: Issues & PRs, Branches, Commits, Tags, Releases, Workflows, Workflow Runs, Labels, GitHub Pages, Files, Security Alerts, Discussions or Milestones. Copy includes **Copy HTTPS Clone URL** and **Copy SSH Clone URL**, the addresses `git clone` takes. These are the same commands as on the Actions menu, for the repository selected. A saved search's menu has **Run Search** and **Remove Saved Search**; Favorites and the other entries at the top have **Open**.
 
 ---
 
@@ -1285,6 +1297,7 @@ On a Mac, use `Cmd` in place of `Ctrl` for every shortcut that has one, `Option`
 | `Ctrl+G` | Go to an issue or pull request by number |
 | `Ctrl+N` | New issue in the repository in front of you |
 | `Ctrl+Shift+S` | Search the repository in front of you |
+| `Ctrl+Shift+R` | Read the README of the repository in front of you |
 | `Ctrl+O` | Open the selected item on GitHub |
 | `Ctrl+Shift+C` | Copy the selected item's link |
 | `Ctrl+Shift+L` | Copy a Markdown link to it |

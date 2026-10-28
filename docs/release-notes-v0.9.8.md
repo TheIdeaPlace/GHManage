@@ -119,6 +119,15 @@ or search results, or the repository open. It opens in Files on the README, with
 focus in its text at the top, so you can start reading at once. `Alt+N` and
 `Alt+P` move between its headings, and `Backspace` goes to the files around it.
 
+## Insights: traffic and contributors
+
+**View → View Mode → Insights** (or **Go To → Insights** on a repository) shows
+the last 14 days of views and clones, with a row for each day, the sites people
+came from, the most visited pages, and the contributors with their commits. Each
+row reads whole: "Views, Last 14 days, 1,234 views, 210 unique visitors".
+`Enter` opens it on GitHub. GitHub shows traffic only to people who can push to
+the repository; without that, GHManage says so and lists the contributors.
+
 ## Before you start
 
 GHManage drives the [GitHub CLI](https://cli.github.com/), so install it and sign

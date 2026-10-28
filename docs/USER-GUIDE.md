@@ -14,6 +14,7 @@ GHManage is a keyboard-driven desktop app for your GitHub repositories, built fo
 - [Issues and Pull Requests](#issues-and-pull-requests)
 - [Labels](#labels)
 - [Milestones](#milestones)
+- [Insights](#insights)
 - [Branches and Commits](#branches-and-commits)
 - [Changed Files](#changed-files)
 - [Files](#files)
@@ -225,7 +226,7 @@ Each repository has several views. `Ctrl` and a number jumps straight to one fro
 | `Ctrl+Shift+M` | My Work |
 | `Ctrl+Shift+A` | Activity |
 
-**Files**, a repository's code, **Security Alerts**, **Discussions** and **Milestones** are on the same menu after GitHub Pages, without a number; see [Files](#files), [Security Alerts](#security-alerts), [Discussions](#discussions) and [Milestones](#milestones). **Starred Repositories** and **Watched Repositories** are on the same menu, after Activity.
+**Files**, a repository's code, **Security Alerts**, **Discussions**, **Milestones** and **Insights** are on the same menu after GitHub Pages, without a number; see [Files](#files), [Security Alerts](#security-alerts), [Discussions](#discussions), [Milestones](#milestones) and [Insights](#insights). **Starred Repositories** and **Watched Repositories** are on the same menu, after Activity.
 
 Favorites, Notifications, My Work, Activity, Starred Repositories, Watched Repositories, Shared With Me, an organization's repositories and search results are not about one repository, so they work at any time. Every other view needs a repository: with none chosen, the status bar says "Select a repository first." and the view stays as it was.
 
@@ -474,6 +475,24 @@ Selecting a milestone shows it in the details panel: its title, state, due date,
 On a fork, milestones come from the upstream repository, the same one the issues come from.
 
 A list of very large pull requests can take GitHub too long to measure. Then GHManage lists them without their sizes, and the Changes and Files columns are blank, rather than showing nothing at all.
+
+---
+
+## Insights
+
+**View → View Mode → Insights**, or **Go To → Insights** on a repository in the repository list, shows who visits the repository and who has built it: one list whose rows are the figures themselves. The Section column says what each row is, and each count says what it counts, so a row reads whole on its own:
+
+- **Views**: first the total for the last 14 days, "Views, Last 14 days, 1,234 views, 210 unique visitors", then a row for each day, newest first.
+- **Clones**: the same for clones and unique cloners.
+- **Referrer**: the sites people came from, most first.
+- **Page**: the repository's most visited pages, most first.
+- **Contributor**: each contributor with their commits on the default branch, most first, up to 500.
+
+The status bar sums it up, for example "owner/name — 1,234 views (210 unique) and 56 clones (12 unique) in the last 14 days, 30 contributors." Selecting a row shows it in full in the details panel. `Enter` or `Ctrl+O` opens it on GitHub: the repository's traffic page for views, clones and referrers, the page itself for a popular page, and the person's profile for a contributor. The quick filter (`Ctrl+F`) finds rows by section or name, for example "contributor". **Copy Details** copies the row as it reads.
+
+GitHub keeps traffic for 14 days only, and shows it only to people who can push to the repository. Without that access the Views, Clones, Referrer and Page rows are left out, and GHManage says "Traffic needs push access to owner/name, which you don't have." after the first row. GitHub won't list the contributors of a very large repository, and says so; and when it is still counting them, GHManage says "GitHub is still counting the contributors; press R in a moment."
+
+**View → Sort Order** doesn't apply here, and `F` doesn't make a row a favorite: favorite the repository from the repository list instead.
 
 ---
 
@@ -1269,7 +1288,7 @@ The **Applications** key, `Shift+F10`, or a right-click opens a context menu (on
 
 In the item list it starts with what `Enter` does in that view, for example **Show Commits** on a branch or **Open Here** on a search result, and then offers everything the Actions menu offers in that view, with Copy and Pull Request as submenus. It is built from the Actions menu each time, so the two always agree. It ends with **View More** (`Ctrl++`) in every list that loads in pages. On a repository in Starred, Watched, Shared With Me, an organization's repositories or repository search results, it also has **Go To** (see below), and `Backspace` from where it takes you comes back to that row.
 
-In the repository list, a repository's menu has **Open**, **Open on GitHub**, **Go To**, **New Issue…**, **Search This Repository…** (a search starting `repo:owner/name`), **Read README**, **Watch Settings…**, **Add to Favorites** or **Remove from Favorites**, Copy, and **Remove from List**. **Go To** opens the repository straight on one of its views: Issues & PRs, Branches, Commits, Tags, Releases, Workflows, Workflow Runs, Labels, GitHub Pages, Files, Security Alerts, Discussions or Milestones. Copy includes **Copy HTTPS Clone URL** and **Copy SSH Clone URL**, the addresses `git clone` takes. These are the same commands as on the Actions menu, for the repository selected. A saved search's menu has **Run Search** and **Remove Saved Search**; Favorites and the other entries at the top have **Open**.
+In the repository list, a repository's menu has **Open**, **Open on GitHub**, **Go To**, **New Issue…**, **Search This Repository…** (a search starting `repo:owner/name`), **Read README**, **Watch Settings…**, **Add to Favorites** or **Remove from Favorites**, Copy, and **Remove from List**. **Go To** opens the repository straight on one of its views: Issues & PRs, Branches, Commits, Tags, Releases, Workflows, Workflow Runs, Labels, GitHub Pages, Files, Security Alerts, Discussions, Milestones or Insights. Copy includes **Copy HTTPS Clone URL** and **Copy SSH Clone URL**, the addresses `git clone` takes. These are the same commands as on the Actions menu, for the repository selected. A saved search's menu has **Run Search** and **Remove Saved Search**; Favorites and the other entries at the top have **Open**.
 
 ---
 
@@ -1418,6 +1437,13 @@ On a Mac, use `Cmd` in place of `Ctrl` for every shortcut that has one, `Option`
 |-----|--------|
 | `Enter` | List the milestone's issues and pull requests |
 | `Backspace` | From those, back to the milestones |
+
+### In Insights
+
+| Key | Action |
+|-----|--------|
+| `Enter` or `Ctrl+O` | Open the row on GitHub: the traffic page, the popular page, or the contributor's profile |
+| `R` | Read the figures again |
 
 ### In GitHub Pages
 

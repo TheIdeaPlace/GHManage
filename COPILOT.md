@@ -26,6 +26,7 @@ codeview.py   — A repository's files as text to read (no wx): a file one line 
                 in, Markdown headings, blame runs, one commit of a file's history.
 alertview.py  — A security alert as text to read (no wx): alert_details, empty_text.
 milestoneview.py — A milestone as text to read (no wx): milestone_details, progress, status_message.
+insightview.py — Insights as text to read (no wx): insight_details, notes, status_message.
 discussionview.py — A discussion as text to read (no wx): discussion_details (text and
                 Alt+N/Alt+P stops per comment and reply), answer_line, status_message.
 ```
@@ -123,6 +124,17 @@ UI thread via `wx.CallAfter`. Never touch wx widgets from a worker thread.
   "milestone". `fetch_prs` retries an HTTP 502/504 without `PR_STAT_FIELDS`
   (additions, deletions, changedFiles), which GitHub times out on for very large PRs
   (nvaccess/nvda); those Items have `has_stats` False and blank Changes/Files cells.
+- `InsightRow`, `Insights`, `fetch_insights(repo, limit)` — the Insights view (`VIEW_INSIGHTS`,
+  #89, read-only). One list whose rows are the figures (`section`: Views, Clones, Referrer,
+  Page, Contributor); `count_display`/`uniques_display` name what they count ("1,234 views",
+  "210 unique visitors", `INSIGHT_NOUNS`) so a row reads on its own in Quick mode. The four
+  `traffic/*` calls run side by side; they need push access, and their 403 becomes
+  `traffic_error` (`traffic_sentence`) while contributors still show. `repos/{r}/contributors`
+  is paged by hand (`_fetch_contributors`): a non-list reply (202, still counting) is retried
+  `CONTRIBUTOR_RETRIES` times `CONTRIBUTOR_WAIT` apart, then `contributors_pending`; a too-large
+  repository's 403 is `contributors_error`. ghviewer lists up to `INSIGHT_CONTRIBUTORS` (500);
+  Insights is in `NO_MORE_VIEWS`; F and sorting are refused aloud; the notes are spoken
+  (STATUS) after the first row.
 - `fetch_tags(repo, limit)` / `fetch_releases(repo, limit)` / `fetch_workflow_runs(repo, limit)`.
 - `fetch_release_assets(repo, release_id, release_tag, limit)` — a release's files with their
   download counts. The releases endpoint already returns assets inline, so the Releases list

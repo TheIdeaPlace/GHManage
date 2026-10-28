@@ -4988,8 +4988,7 @@ def traffic_sentence(exc: GhError, repo: str) -> str:
     """Why there is no traffic, in a sentence."""
     text = str(exc)
     if "push access" in text.lower():
-        return (f"Traffic needs push access to {repo}, which you don't have, "
-                "so only contributors are shown.")
+        return f"Traffic needs push access to {repo}, which you don't have."
     return f"Couldn't read the traffic: {text}"
 
 

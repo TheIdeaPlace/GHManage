@@ -25,6 +25,7 @@ diffview.py   — A changed file as text to read (no wx). Lines are marked by ap
 codeview.py   — A repository's files as text to read (no wx): a file one line out per line
                 in, Markdown headings, blame runs, one commit of a file's history.
 alertview.py  — A security alert as text to read (no wx): alert_details, empty_text.
+milestoneview.py — A milestone as text to read (no wx): milestone_details, progress, status_message.
 discussionview.py — A discussion as text to read (no wx): discussion_details (text and
                 Alt+N/Alt+P stops per comment and reply), answer_line, status_message.
 ```
@@ -110,6 +111,17 @@ UI thread via `wx.CallAfter`. Never touch wx widgets from a worker thread.
   stops a comment read begun before M posted from replacing the read after it. A field
   GitHub refuses in a partial reply (`discussions: null` with `errors`) raises, never
   reads as an empty list.
+- `Milestone`, `fetch_milestones(repo, state, limit)` — the Milestones view (`VIEW_MILESTONES`,
+  #87): REST `repos/{r}/milestones?state=` through `_api_pages`, GitHub's order (due_on asc),
+  on a fork the upstream's (`resolve_issue_repo`, like labels). Enter (`_browse_milestone`)
+  sets `milestone_filter` (a Milestone) on Issues & PRs, which `fetch_issues` passes as
+  `--milestone <number>` (a numeric title would be read as a number) and `fetch_prs` as
+  `--search 'milestone:"title"'` (gh pr list has no --milestone; quotes can't be escaped in
+  search, so they are dropped). Cleared like `label_filter` (switching view, repo, Ctrl+1,
+  a label); Backspace (`_back_to_milestones`) lands on the milestone via pending kind
+  "milestone". `fetch_prs` retries an HTTP 502/504 without `PR_STAT_FIELDS`
+  (additions, deletions, changedFiles), which GitHub times out on for very large PRs
+  (nvaccess/nvda); those Items have `has_stats` False and blank Changes/Files cells.
 - `fetch_tags(repo, limit)` / `fetch_releases(repo, limit)` / `fetch_workflow_runs(repo, limit)`.
 - `fetch_release_assets(repo, release_id, release_tag, limit)` — a release's files with their
   download counts. The releases endpoint already returns assets inline, so the Releases list
@@ -456,6 +468,7 @@ UI thread via `wx.CallAfter`. Never touch wx widgets from a worker thread.
 | Notifications | `notifications?all=false|true&per_page=50&page=` |
 | Mark read / done / unsubscribe | `PATCH`/`DELETE notifications/threads/{id}`, `DELETE …/{id}/subscription` |
 | Mark all read | `PUT notifications -F read=true` |
+| Milestones | `repos/{owner}/{repo}/milestones?state=`; their issues `gh issue list --milestone N`, PRs `gh pr list --search 'milestone:"T"'` |
 | Discussions | GraphQL `repository.discussions`, `discussion(number:).comments{replies}`, mutation `addDiscussionComment` |
 | Security alerts | `repos/{owner}/{repo}/dependabot/alerts` (cursor paging), `…/code-scanning/alerts`, `…/secret-scanning/alerts?hide_secret=true` |
 | Activity feed | `users/{login}/received_events?per_page=100&page=` (max 3 pages; page 4 is HTTP 422; pages are not reliably full) |
@@ -533,7 +546,7 @@ including the checks either side. The short version:
 - v0.9.5 — View ▸ Columns… dialog (order, show/hide, Speak column names) replaces the Columns submenu; columns per kind of list and list mode remembered (settings.py, settings.json); plain-word headings and Full mode names only text columns after the first (columns.py, gh_columns.py); Commits: All branches and a Branches column
 - v0.9.6 — File ▸ Archive or Unarchive Repository… and Delete Repository from GitHub… (typed-name confirmation, admin check, delete_repo scope via MissingScope); spoken results through UIA notifications from a served provider (announce.py, speech.py), View ▸ Speak Results; Search dialog examples in a read-only box, not dialog text; Mac labels through _name/speech.set_label, macOS CI runs the tests
 - v0.9.7 — Changed Files (VIEW_FILES): Enter on a commit or H on a PR lists its files; each file's lines marked by app-kit's difftext (diffview.py) in a style from View > Mark Changed Lines With; Alt+N/Alt+P between hunks; Copy Diff and Open Diff in Default App
-- v0.9.8 — Files (VIEW_CODE): browse a repository at a branch, tag or commit, read a file one line out per line in (codeview.py), Alt+N/Alt+P between Markdown headings, Ctrl+B Select Branch or Tag; B blame in runs; H File History (VIEW_HISTORY), each commit's change to the file in the chosen marking style, Enter to Changed Files; W in Changed Files opens the file whole; a PR's review comments after their lines in Changed Files, Alt+N/Alt+P stop at them, M comments on the caret's line, Comments column (#84); Security Alerts (VIEW_SECURITY, alertview.py): Dependabot, code scanning and secret scanning alerts, most severe first (#85); Discussions (VIEW_DISCUSSIONS, discussionview.py): list, read with comments and replies, M comments, opened here from Notifications/Activity/addresses (#86)
+- v0.9.8 — Files (VIEW_CODE): browse a repository at a branch, tag or commit, read a file one line out per line in (codeview.py), Alt+N/Alt+P between Markdown headings, Ctrl+B Select Branch or Tag; B blame in runs; H File History (VIEW_HISTORY), each commit's change to the file in the chosen marking style, Enter to Changed Files; W in Changed Files opens the file whole; a PR's review comments after their lines in Changed Files, Alt+N/Alt+P stop at them, M comments on the caret's line, Comments column (#84); Security Alerts (VIEW_SECURITY, alertview.py): Dependabot, code scanning and secret scanning alerts, most severe first (#85); Discussions (VIEW_DISCUSSIONS, discussionview.py): list, read with comments and replies, M comments, opened here from Notifications/Activity/addresses (#86); Milestones (VIEW_MILESTONES, milestoneview.py): progress, Enter for their issues and PRs, Backspace back (#87)
 
 ## Roadmap
 

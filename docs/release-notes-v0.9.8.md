@@ -7,7 +7,7 @@ This release lets you read a repository's code: browse its folders, read any
 file a line at a time, see who last changed each line, and read every change a
 file has had. In a pull request's changed files you can read reviewers'
 comments on its lines, and add your own. And you can read a repository's
-security alerts and its discussions.
+security alerts, its discussions, and its milestones.
 
 On a Mac, use `Cmd` where these notes say `Ctrl`, and `Option` where they say `Alt`.
 
@@ -97,6 +97,18 @@ so.
 
 `Enter` on a discussion in Notifications or Activity, or a discussion's address
 in **File → Open Repository or Address…**, now opens it here in Discussions, and `Backspace` goes back.
+
+## Milestones
+
+**View → View Mode → Milestones** (or **Go To → Milestones** on a repository)
+lists a repository's milestones with their due date, how many issues and pull
+requests are open and closed, and how far along each is ("82%"). Selecting one
+shows its progress and description. `Enter` lists its issues and pull requests
+in Issues & PRs, the way `Enter` on a label does, and `Backspace` goes back to
+it. **View → State** shows closed milestones, or all.
+
+Very large pull requests that GitHub can't measure in time are now listed
+without their sizes, instead of the list failing.
 
 ## Before you start
 

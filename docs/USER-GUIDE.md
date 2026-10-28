@@ -13,6 +13,7 @@ GHManage is a keyboard-driven desktop app for your GitHub repositories, built fo
 - [The Repository List](#the-repository-list)
 - [Issues and Pull Requests](#issues-and-pull-requests)
 - [Labels](#labels)
+- [Milestones](#milestones)
 - [Branches and Commits](#branches-and-commits)
 - [Changed Files](#changed-files)
 - [Files](#files)
@@ -223,7 +224,7 @@ Each repository has several views. `Ctrl` and a number jumps straight to one fro
 | `Ctrl+Shift+M` | My Work |
 | `Ctrl+Shift+A` | Activity |
 
-**Files**, a repository's code, **Security Alerts** and **Discussions** are on the same menu after GitHub Pages, without a number; see [Files](#files), [Security Alerts](#security-alerts) and [Discussions](#discussions). **Starred Repositories** and **Watched Repositories** are on the same menu, after Activity.
+**Files**, a repository's code, **Security Alerts**, **Discussions** and **Milestones** are on the same menu after GitHub Pages, without a number; see [Files](#files), [Security Alerts](#security-alerts), [Discussions](#discussions) and [Milestones](#milestones). **Starred Repositories** and **Watched Repositories** are on the same menu, after Activity.
 
 Favorites, Notifications, My Work, Activity, Starred Repositories, Watched Repositories, Shared With Me, an organization's repositories and search results are not about one repository, so they work at any time. Every other view needs a repository: with none chosen, the status bar says "Select a repository first." and the view stays as it was.
 
@@ -447,6 +448,31 @@ Deleting a label removes it from every issue and pull request that carries it, a
 After either change the labels list reloads, so you can see the result.
 
 On a fork, labels come from the upstream repository, the same one the issues come from.
+
+---
+
+## Milestones
+
+**View → View Mode → Milestones**, or **Go To → Milestones** on a repository in the repository list, lists the repository's milestones in GitHub's order: the nearest due date first, then those without one. The columns are Title, Due, Open, Closed, Done and State; Description and Updated can be added under **View → Columns…**. Open and Closed count the milestone's issues and pull requests together, as GitHub does, and Done is the closed ones as a percentage, such as "82%". **View → Sort Order** doesn't apply here.
+
+**View → State** chooses what is listed: **Open** (the default), **Closed** or **All**.
+
+Selecting a milestone shows it in the details panel: its title, state, due date, progress ("76 of 92 closed, 82% done"), the open and closed counts, who created it, when it was created, updated and closed, its address on the line after "URL:", and its description.
+
+| Key | Action |
+|-----|--------|
+| `Enter` | List the milestone's issues and pull requests |
+| `Ctrl+O` | Open the milestone on GitHub |
+
+### Browsing by milestone
+
+`Enter` on a milestone shows **Issues & PRs** restricted to it, as `Enter` on a label does. The window title and the status bar name it, for example "owner/name — 16 issues, 0 PRs (open) in milestone '2027.1'". Everything in Issues & PRs still works there, including the state filter, sorting and columns. `Backspace` returns to the milestones, on the one you came from. `Ctrl+1` drops the restriction.
+
+**View → State** is shared: choose **All** in a milestone's issues to see the closed ones as well, and the milestones list shows all of its milestones too when you go back.
+
+On a fork, milestones come from the upstream repository, the same one the issues come from.
+
+A list of very large pull requests can take GitHub too long to measure. Then GHManage lists them without their sizes, and the Changes and Files columns are blank, rather than showing nothing at all.
 
 ---
 
@@ -1076,6 +1102,7 @@ The fourth item is named for what it copies in the view you are in:
 | A run's jobs | Copy Job ID | the job's id |
 | A run's artifacts | Copy Name | the artifact's name |
 | Labels | Copy Label Name | the label |
+| Milestones | Copy Milestone Title | the milestone's title |
 | GitHub Pages | Copy Commit | the commit the publish was built from |
 | Published Pages | Copy Path | the page's path in the repository |
 | Favorites | Copy Name | the favorite's title, the same as Copy Title |
@@ -1230,7 +1257,7 @@ The **Applications** key, `Shift+F10`, or a right-click opens a context menu (on
 
 In the item list it starts with what `Enter` does in that view, for example **Show Commits** on a branch or **Open Here** on a search result, and then offers everything the Actions menu offers in that view, with Copy and Pull Request as submenus. It is built from the Actions menu each time, so the two always agree. It ends with **View More** (`Ctrl++`) in every list that loads in pages. On a repository in Starred, Watched, Shared With Me, an organization's repositories or repository search results, it also has **Go To** (see below), and `Backspace` from where it takes you comes back to that row.
 
-In the repository list, a repository's menu has **Open**, **Open on GitHub**, **Go To**, **New Issue…**, **Search This Repository…** (a search starting `repo:owner/name`), **Watch Settings…**, **Add to Favorites** or **Remove from Favorites**, Copy, and **Remove from List**. **Go To** opens the repository straight on one of its views: Issues & PRs, Branches, Commits, Tags, Releases, Workflows, Workflow Runs, Labels, GitHub Pages, Files or Security Alerts. Copy includes **Copy HTTPS Clone URL** and **Copy SSH Clone URL**, the addresses `git clone` takes. These are the same commands as on the Actions menu, for the repository selected. A saved search's menu has **Run Search** and **Remove Saved Search**; Favorites and the other entries at the top have **Open**.
+In the repository list, a repository's menu has **Open**, **Open on GitHub**, **Go To**, **New Issue…**, **Search This Repository…** (a search starting `repo:owner/name`), **Watch Settings…**, **Add to Favorites** or **Remove from Favorites**, Copy, and **Remove from List**. **Go To** opens the repository straight on one of its views: Issues & PRs, Branches, Commits, Tags, Releases, Workflows, Workflow Runs, Labels, GitHub Pages, Files, Security Alerts, Discussions or Milestones. Copy includes **Copy HTTPS Clone URL** and **Copy SSH Clone URL**, the addresses `git clone` takes. These are the same commands as on the Actions menu, for the repository selected. A saved search's menu has **Run Search** and **Remove Saved Search**; Favorites and the other entries at the top have **Open**.
 
 ---
 
@@ -1371,6 +1398,13 @@ On a Mac, use `Cmd` in place of `Ctrl` for every shortcut that has one, `Option`
 | `Enter` | List the issues and pull requests with the label |
 | `Ctrl+I` or `Insert` | New label |
 | `Ctrl+D` or `Delete` | Delete the label |
+
+### In Milestones
+
+| Key | Action |
+|-----|--------|
+| `Enter` | List the milestone's issues and pull requests |
+| `Backspace` | From those, back to the milestones |
 
 ### In GitHub Pages
 

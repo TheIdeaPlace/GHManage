@@ -9,6 +9,7 @@ Alt+P count the same lines the panel does.
 
 from __future__ import annotations
 
+from commands import READ_KEYS
 from gh_data import Discussion, DiscussionComment, Discussions, _local_time
 
 RULE = "─" * 60
@@ -86,6 +87,7 @@ def discussion_details(d: Discussion) -> tuple[str, list[tuple[int, int, str]]]:
     lines.append(f"Comments: {d.comment_count}")
     lines.append("URL:")
     lines.append(d.url or "(none)")
+    lines.append(READ_KEYS)
     lines.append("")
     lines.append(RULE)
     lines.append("")
@@ -124,7 +126,7 @@ def discussion_details(d: Discussion) -> tuple[str, list[tuple[int, int, str]]]:
                          "on GitHub.")
     if d.comments_cut:
         lines.append("")
-        lines.append("More comments on GitHub: press Enter to open the discussion there.")
+        lines.append("More comments on GitHub: Ctrl+O opens the discussion there.")
     return "\n".join(lines), positions
 
 

@@ -52,6 +52,11 @@ def matching(commands: list[Command], text: str) -> list[Command]:
     return sorted(hits, key=lambda c: not c.name.lower().startswith(typed))
 
 
+# The keys line of a details panel that Enter brought you into (Issues &
+# PRs, Discussions, Security Alerts, Insights, Gists): read where it works.
+READ_KEYS = "Backspace goes back to the list; Ctrl+O opens it on GitHub."
+
+
 def hint_words(label: str) -> str:
     """A menu label as the status bar's key hints say it: "Show Commits" is
     "show commits", "Run on a Branch…" is "run on a branch". Words that are

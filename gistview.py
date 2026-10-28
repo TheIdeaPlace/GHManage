@@ -8,6 +8,7 @@ the panel. Alt+N and Alt+P move between the file headings.
 from __future__ import annotations
 
 import codeview
+from commands import READ_KEYS
 from gh_data import Gist, GistFile, _local_time
 
 RULE = "─" * 60
@@ -58,6 +59,7 @@ def gist_text(g: Gist) -> tuple[str, list[int]]:
     lines.append(f"Comments: {g.comments}")
     lines.append("URL:")
     lines.append(g.url or "(none)")
+    lines.append(READ_KEYS)
     lines.append("")
     lines.append(RULE)
     positions: list[int] = []

@@ -102,7 +102,7 @@ def entry_text(f: RepoFile, target: str | None = None) -> str:
     a submodule, a link (with where it points, once known), or a file too
     large to show."""
     if f.kind == "dir":
-        return f"{f.path}/: a folder. Enter in the list opens it."
+        return f"{f.path}/: a folder. Press Enter to open it."
     if f.kind == "submodule":
         return (f"{f.path}: a submodule, another repository, at commit {f.sha[:7]}. "
                 "Ctrl+O opens the folder it is in on GitHub, which links to it.")

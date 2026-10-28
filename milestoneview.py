@@ -43,8 +43,8 @@ def milestone_details(m: Milestone) -> str:
     lines.append("")
     lines.extend(m.description.splitlines() or ["(no description)"])
     lines.append("")
-    # Enter works in the list, not here; Ctrl+O works from both.
-    lines.append("Enter in the list shows its issues and pull requests. "
+    # Enter does here what it does in the list (ghviewer._enter_from_details).
+    lines.append("Press Enter to list its issues and pull requests; "
                  "Ctrl+O opens it on GitHub.")
     return "\n".join(lines)
 

@@ -257,7 +257,7 @@ def test_an_answered_comment_and_a_cut_list():
     assert "Answered: Yes by bob in comment 1" in text
     # Cut short, "of" is GitHub's count of comments, not the number read.
     assert "Comment 1 of 2 — a (), the answer:" in text
-    assert text.endswith("More comments on GitHub: press Enter to open the discussion there.")
+    assert text.endswith("More comments on GitHub: Ctrl+O opens the discussion there.")
 
 
 def test_answer_line_by_category():

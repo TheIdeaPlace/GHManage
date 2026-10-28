@@ -1018,7 +1018,7 @@ def test_activity_loaded_status(call_later):
     Frame._on_activity_loaded(f, 1, [EVENT] * 100, True)
     msg, keys = f.statuses[-1]
     assert msg == "Activity — 100 events, newest first. Ctrl++ loads older ones."
-    assert "G=go to repository" in keys and "Enter=open  " in keys
+    assert "G=go to repository" in keys and keys.startswith("Enter=open here  Ctrl+O=open on GitHub  ")
     assert f._activity_more is True
     assert f.git_items == [EVENT] * 100
     assert call_later[-1][1] == (0,)  # focus on the newest

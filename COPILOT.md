@@ -22,6 +22,8 @@ ghviewer.py   — UI layer (wxPython). All event handlers, menus, dialogs, list 
 gh_data.py    — Data layer. All `gh` CLI and `gh api` calls, data classes, parsing.
 diffview.py   — A changed file as text to read (no wx). Lines are marked by app-kit's
                 `theideaplace_appkit.difftext`, shared with The Chat Place.
+codeview.py   — A repository's files as text to read (no wx): a file one line out per line
+                in, Markdown headings, blame runs, one commit of a file's history.
 ```
 
 **Rule:** `ghviewer.py` never calls `gh` or the API directly. `gh_data.py` never imports wx.
@@ -54,6 +56,17 @@ UI thread via `wx.CallAfter`. Never touch wx widgets from a worker thread.
   Copy Diff and Open Diff; `file_diff(f)` one file's, with its header. The marking style
   (`settings.load_diff_style`) is app-kit's difftext style id. app-kit is pinned to a commit
   archive in `requirements.txt` and `pyproject.toml`; bump both together.
+- `RepoFile`, `fetch_repo_folder(repo, ref, path)` — the Files view (`VIEW_CODE`). A folder is
+  read with the git trees API (`git/trees/{ref}:{path}`, URL-quoted whole so a ref with a
+  slash works), not the contents API: trees say which entries are links (mode 120000) and
+  submodules (type commit), which contents lists as files, and have no 1,000-entry cap.
+  `fetch_blob_text(repo, sha)` reads a file by blob SHA with `Accept: application/vnd.github.raw`
+  (UTF-8 with replacement, via `_run_gh`); `MAX_FILE_BYTES` (1 MB) is the most shown.
+  `fetch_file_history(repo, path, ref, limit)` (`commits?path=&sha=`, doesn't follow renames),
+  `fetch_commit_file(repo, sha, path)` (one file of `fetch_commit_files`), `fetch_blame(repo,
+  ref, path)` (GraphQL `object(expression:).blame(path:)`, values quoted with json.dumps),
+  `fetch_ref_names(repo)` (branch and tag names only, for Ctrl+B in Files), and
+  `fetch_pr_head_sha(pr_url)` (W on a pull request's file).
 - `fetch_tags(repo, limit)` / `fetch_releases(repo, limit)` / `fetch_workflow_runs(repo, limit)`.
 - `fetch_release_assets(repo, release_id, release_tag, limit)` — a release's files with their
   download counts. The releases endpoint already returns assets inline, so the Releases list
@@ -140,7 +153,25 @@ UI thread via `wx.CallAfter`. Never touch wx widgets from a worker thread.
 - `_navigate_comment(direction)` — Alt+N/Alt+P comment jumping.
 - `_refresh_list_display` — re-populate list from `self.items` or `self.git_items` without re-fetching.
 - `on_item_activated` — context-dependent: in Branches view, Enter switches to Commits for that branch; otherwise opens in browser.
-- `on_select_branch` — Ctrl+B branch picker dialog for Commits view. Its first entry, "All branches", sets `commit_branch` to `ALL_BRANCHES` ("*"), which `fetch_commits` hands to `fetch_all_branch_commits` (GraphQL, newest 100 commits of up to 100 branches, merged).
+- **Files (`VIEW_CODE`) and File History (`VIEW_HISTORY`)** keep their own navigation, not
+  `PARENT_VIEW`: `_code_ref`/`_code_at` (the branch, tag or SHA and how it is said: "on main",
+  "at tag v1", "at commit abc12345"), `_code_path` (the folder; "" is the top), `_code_stack`
+  (folders Enter went in from, so Backspace lands on the one you left), `_code_land` (the path
+  to select when a folder arrives), `_code_back` (the Changed Files snapshot when W opened it),
+  `_code_folders` (folders read this visit), `_code_blame` (the file whose blame is showing).
+  `_reset_code` clears them all whenever `_switch_view` leaves Files; going on to History or
+  Changed Files saves a snapshot dict (`_code_snapshot`, `_history_back`, `_files_back` with
+  `history_of`/`history_back`) that the Backspace handlers (`_code_up`, `_back_from_history`,
+  `_back_from_files`, `_back_from_code`) restore after their own `_switch_view`. Chains nest:
+  Files → H → History → Enter → Changed Files → W → Files.
+- Details that arrive later (a file's text, a history commit's patch) are fetched 250 ms after
+  the row is selected, carry `_detail_gen` (bumped in every `_show_details`), and are drawn only
+  if `_shows(view, item, gen)`; what arrives is cached either way (`_blob_cache` by blob SHA,
+  `_patch_cache` by (sha, path)), since neither can change.
+- Alt+N/Alt+P's noun comes from `_nav_noun`: change (Changed Files, History), heading or run
+  (Files, run while blame shows), comment elsewhere.
+- `on_select_branch` — Ctrl+B branch picker dialog for Commits view; in Files,
+  `_choose_code_ref` (branches, then tags marked "(tag)"), which keeps the folder and entry. Its first entry, "All branches", sets `commit_branch` to `ALL_BRANCHES` ("*"), which `fetch_commits` hands to `fetch_all_branch_commits` (GraphQL, newest 100 commits of up to 100 branches, merged).
 - **The Labels view is a view of the Issues view, not a drill-down.** Enter on a label
   sets `label_filter` and loads Issues & PRs restricted to it, which keeps the state
   filter, columns, sorting, and every issue action working. It is deliberately *not* in
@@ -444,6 +475,7 @@ including the checks either side. The short version:
 - v0.9.5 — View ▸ Columns… dialog (order, show/hide, Speak column names) replaces the Columns submenu; columns per kind of list and list mode remembered (settings.py, settings.json); plain-word headings and Full mode names only text columns after the first (columns.py, gh_columns.py); Commits: All branches and a Branches column
 - v0.9.6 — File ▸ Archive or Unarchive Repository… and Delete Repository from GitHub… (typed-name confirmation, admin check, delete_repo scope via MissingScope); spoken results through UIA notifications from a served provider (announce.py, speech.py), View ▸ Speak Results; Search dialog examples in a read-only box, not dialog text; Mac labels through _name/speech.set_label, macOS CI runs the tests
 - v0.9.7 — Changed Files (VIEW_FILES): Enter on a commit or H on a PR lists its files; each file's lines marked by app-kit's difftext (diffview.py) in a style from View > Mark Changed Lines With; Alt+N/Alt+P between hunks; Copy Diff and Open Diff in Default App
+- v0.9.8 — Files (VIEW_CODE): browse a repository at a branch, tag or commit, read a file one line out per line in (codeview.py), Alt+N/Alt+P between Markdown headings, Ctrl+B Select Branch or Tag; B blame in runs; H File History (VIEW_HISTORY), each commit's change to the file in the chosen marking style, Enter to Changed Files; W in Changed Files opens the file whole
 
 ## Roadmap
 

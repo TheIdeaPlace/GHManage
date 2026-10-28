@@ -92,6 +92,8 @@ VIEW_SAMPLES = {
     ghviewer.VIEW_ARTIFACTS: Artifact(1, "build", 10, False, "", 9),
     ghviewer.VIEW_ASSETS: ReleaseAsset(1, "a.exe", 1, 1, "", url="u"),
     ghviewer.VIEW_FILES: ChangedFile("docs/a.md", url="u"),
+    ghviewer.VIEW_CODE: ghviewer.RepoFile("docs/a.md", url="u"),
+    ghviewer.VIEW_HISTORY: Commit("a" * 40, "aaaaaaa", "m", "me", "", url="u"),
     ghviewer.VIEW_LABELS: Label("bug", url="u"),
     ghviewer.VIEW_FAVORITES: FavoriteEntry("o/r", "issue", "u", "#4 — T"),
     ghviewer.VIEW_PAGES: PagesBuild(1, "built", "abc", "me", "", url="u"),

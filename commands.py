@@ -62,6 +62,8 @@ FEEDS = "Activity, Notifications, My Work and search results"
 PAGES = "GitHub Pages"
 CHANGES = "Issues & PRs list and Commits list"
 FILES = "Changed Files"
+CODE = "Files"
+HISTORY = "File History"
 COMMITS = "Commits list"
 WINDOW = "Anywhere in the window"
 
@@ -88,6 +90,14 @@ LIST_KEYS: list[Command] = [
     Command("The commit's changed files", "Enter", COMMITS),
     Command("Read the file's changes", "Enter", FILES),
     Command("Back to the pull request or commit", "Backspace", FILES),
+    Command("Open the file whole, in Files", "W", FILES),
+    Command("Open the folder, or read the file", "Enter", CODE),
+    Command("Up a folder", "Backspace", CODE),
+    Command("The file's history", "H", CODE),
+    Command("Blame: who last changed each line, or the file again", "B", CODE),
+    Command("Next or previous Markdown heading, or blame run", "Alt+N, Alt+P", CODE),
+    Command("The commit's changed files", "Enter or H", HISTORY),
+    Command("Back to the file", "Backspace", HISTORY),
     Command("New label", "Insert", LABELS),
     Command("Delete the label", "Delete", LABELS),
     Command("Show jobs", "J", RUNS),

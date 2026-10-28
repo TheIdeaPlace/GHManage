@@ -15,6 +15,7 @@ GHManage is a keyboard-driven desktop app for your GitHub repositories, built fo
 - [Labels](#labels)
 - [Branches and Commits](#branches-and-commits)
 - [Changed Files](#changed-files)
+- [Files](#files)
 - [Tags and Releases](#tags-and-releases)
 - [Workflows and Workflow Runs](#workflows-and-workflow-runs)
 - [GitHub Pages](#github-pages)
@@ -220,7 +221,7 @@ Each repository has several views. `Ctrl` and a number jumps straight to one fro
 | `Ctrl+Shift+M` | My Work |
 | `Ctrl+Shift+A` | Activity |
 
-**Starred Repositories** and **Watched Repositories** are on the same menu, after Activity.
+**Files**, a repository's code, is on the same menu after GitHub Pages, without a number; see [Files](#files). **Starred Repositories** and **Watched Repositories** are on the same menu, after Activity.
 
 Favorites, Notifications, My Work, Activity, Starred Repositories, Watched Repositories, Shared With Me, an organization's repositories and search results are not about one repository, so they work at any time. Every other view needs a repository: with none chosen, the status bar says "Select a repository first." and the view stays as it was.
 
@@ -547,6 +548,60 @@ The choice is remembered, and the details panel changes straight away. The Chat 
 - in Changed Files, the selected file's diff.
 
 **Actions → Open Diff in Default App** saves the same diff as a `.diff` file and opens it in whatever app your computer opens `.diff` files with, such as Visual Studio Code. If no app is set for `.diff` files, Windows asks which app to use, and Notepad is one of the choices. The files are kept in a GHManage folder in your temporary folder.
+
+---
+
+## Files
+
+**Files** shows a repository's code: its folders and files, at its default branch or any branch or tag you choose. Selecting a file shows its text in the details panel, a line of the file to a line of the panel, so your screen reader's line keys move through it as they would in an editor.
+
+Choose **View → View Mode → Files**, or **Go To → Files** on a repository's context menu in the repository list. The list starts at the top of the repository, folders first, then files, each in name order. Each row has the entry's name, its type (Folder, File, Link or Submodule) and a file's size; **View → Columns…** adds its full path.
+
+The list is named for where you are, for example "Files: src/ on main", and the status bar says the same with how many folders and files there are. When a folder loads, GHManage says its name and what is in it.
+
+### Moving around
+
+- `Enter` on a folder goes into it. `Backspace` comes back out, onto the folder you were in. At the top of the repository, `Backspace` only says so.
+- **Actions → Select Branch or Tag…** (`Ctrl+B`) chooses which branch or tag to look at: the branches come first, then the tags, each marked "(tag)". You stay in the same folder, on the same file, when the branch or tag has them; otherwise you are taken to the top, and GHManage says why.
+- `R` reads the folder again from GitHub. A folder you have already been in this visit opens straight away, without asking GitHub again.
+- The quick filter (`Ctrl+F`) finds an entry in the folder by part of its name.
+- `H` and `B` are taken by File History and Blame here, so typing them doesn't jump to an entry starting with that letter; the other letters do.
+
+### Reading a file
+
+The details panel shows the selected file. Its first line names the file and says how many lines it has, for example "README.md: 120 lines." Line 1 of the file is the panel's second line, line 2 its third, and so on.
+
+`Enter` on a file moves into its text, at the top. In a Markdown file (one ending `.md` or `.markdown`), `Alt+N` and `Alt+P` move to the next and previous heading, so a README reads by section; the status bar says "Heading 2 of 9". Lines starting `#` inside a fenced code block are not headings.
+
+A file larger than 1 MB, or one that isn't text, such as an image, is not shown: the details panel says so, and `Ctrl+O` opens it on GitHub. A link says where it points. A submodule is another repository; the panel says which commit of it this one uses, and `Ctrl+O` opens the folder it is in on GitHub, which links to it.
+
+`Ctrl+O` opens the selected file or folder on GitHub. **Copy → Copy Path** (`Ctrl+Shift+I`) copies the file's path from the top of the repository, and **Copy Details** (`Ctrl+Shift+D`) copies everything in the details panel, which for a file is its text with the line naming it first. `F` adds the file or folder to your favorites.
+
+### Blame: who last changed each line
+
+`B` on a file, or **Actions → Blame**, shows in the details panel who last changed each line and in which commit. The file is shown in runs of lines, each headed like this:
+
+```
+Lines 10 to 14: Kelly Ford, 2026-09-01, abc1234 Fix the parser
+```
+
+followed by those lines of the file. A run of one line starts "Line 7:". `Alt+N` and `Alt+P` move between the runs, and GHManage says how many there are. `B` again shows the file's text again, and so does moving to another row.
+
+Blame takes a few seconds on a big file; the status bar says it is getting it. Blame is for text files: a binary file, a link or a folder has none.
+
+### A file's history
+
+`H` on a file, or **Actions → File History**, lists the commits that changed it on the branch or tag you are looking at, newest first, with each commit's SHA, message, author and date. `Ctrl++` loads more. `Backspace` comes back to Files, on the file.
+
+Selecting a commit shows, in the details panel, what that commit did to the file: a line naming the commit, then the file's changed lines marked in the style chosen under **View → Mark Changed Lines With**, exactly as in [Changed Files](#changed-files). `Alt+N` and `Alt+P` move between the runs of changes.
+
+`Enter` (or `H`) on a commit opens it in Changed Files, with all the files it changed; `Backspace` from there comes back to the history. `Ctrl+O` opens the commit on GitHub, and Copy Diff and Open Diff in Default App work on the whole commit, as in Commits.
+
+GitHub lists a file's history by its path, so it stops where the file was renamed: commits from before it had its present name are not listed.
+
+### The whole file, from Changed Files
+
+In [Changed Files](#changed-files), `W` on a file, or **Actions → Open Whole File**, opens it in Files: the folder it is in, on the file, as it is at the commit, or at the pull request's latest commit. Use it to read the code around a change. `Backspace` from that folder goes back to Changed Files, on the file. A file the change deleted has no whole file to open, and GHManage says so.
 
 ---
 
@@ -930,6 +985,7 @@ With a filter on, every key acts on the row you are on: `Enter`, `F`, `C`, `O`, 
 | Copy Number, Copy SHA, … | `Ctrl+Shift+I` | The short thing that names the item; see below |
 | Copy Details | `Ctrl+Shift+D` | Everything in the details panel |
 | Copy Diff | | A pull request's or commit's whole diff, as `gh pr diff` prints it; in Changed Files, the selected file's. See [Changed Files](#changed-files) |
+| Copy Path | `Ctrl+Shift+I` | In Files, the file's or folder's path from the top of the repository; in Changed Files, the changed file's. Copy Details copies a file's text |
 | Copy HTTPS Clone URL | | The repository's address for `git clone`, such as `https://github.com/nvaccess/nvda.git` |
 | Copy SSH Clone URL | | The same over SSH, such as `git@github.com:nvaccess/nvda.git` |
 
@@ -1078,10 +1134,13 @@ Everything that acts on what the list is showing is on the **Actions** menu, whi
 | Run Workflow on Branch… | | Workflows |
 | Download Artifact… | | A run's artifacts |
 | Open Published Site | | GitHub Pages, once a site is found |
-| Select Branch… | `Ctrl+B` | Commits |
+| Select Branch… | `Ctrl+B` | Commits; in Files it reads **Select Branch or Tag…** |
 | Compare Branches… | `Ctrl+Shift+B` | Branches |
-| Changed Files | `Ctrl+Shift+H`, or `H` in the list | Issues & PRs, on a pull request; Commits |
-| Open Diff in Default App | | Issues & PRs, on a pull request; Commits; Changed Files |
+| Changed Files | `Ctrl+Shift+H`, or `H` in the list | Issues & PRs, on a pull request; Commits; File History |
+| Open Diff in Default App | | Issues & PRs, on a pull request; Commits; Changed Files; File History |
+| File History | `H` in the list | Files, on a file |
+| Blame | `B` in the list | Files, on a file |
+| Open Whole File | `W` in the list | Changed Files |
 | Go to Event's Repository | `Ctrl+Shift+G` | Activity, and Notifications where it reads **Go to Notification's Repository** |
 | Mark as Read, Unsubscribe from Thread | `M`, `U` in the list | Notifications |
 | Mark All as Read… | | Notifications |
@@ -1096,7 +1155,7 @@ The **Applications** key, `Shift+F10`, or a right-click opens a context menu (on
 
 In the item list it starts with what `Enter` does in that view, for example **Show Commits** on a branch or **Open Here** on a search result, and then offers everything the Actions menu offers in that view, with Copy and Pull Request as submenus. It is built from the Actions menu each time, so the two always agree. It ends with **View More** (`Ctrl++`) in every list that loads in pages. On a repository in Starred, Watched, Shared With Me, an organization's repositories or repository search results, it also has **Go To** (see below), and `Backspace` from where it takes you comes back to that row.
 
-In the repository list, a repository's menu has **Open**, **Open on GitHub**, **Go To**, **New Issue…**, **Search This Repository…** (a search starting `repo:owner/name`), **Watch Settings…**, **Add to Favorites** or **Remove from Favorites**, Copy, and **Remove from List**. **Go To** opens the repository straight on one of its views: Issues & PRs, Branches, Commits, Tags, Releases, Workflows, Workflow Runs, Labels or GitHub Pages. Copy includes **Copy HTTPS Clone URL** and **Copy SSH Clone URL**, the addresses `git clone` takes. These are the same commands as on the Actions menu, for the repository selected. A saved search's menu has **Run Search** and **Remove Saved Search**; Favorites and the other entries at the top have **Open**.
+In the repository list, a repository's menu has **Open**, **Open on GitHub**, **Go To**, **New Issue…**, **Search This Repository…** (a search starting `repo:owner/name`), **Watch Settings…**, **Add to Favorites** or **Remove from Favorites**, Copy, and **Remove from List**. **Go To** opens the repository straight on one of its views: Issues & PRs, Branches, Commits, Tags, Releases, Workflows, Workflow Runs, Labels, GitHub Pages or Files. Copy includes **Copy HTTPS Clone URL** and **Copy SSH Clone URL**, the addresses `git clone` takes. These are the same commands as on the Actions menu, for the repository selected. A saved search's menu has **Run Search** and **Remove Saved Search**; Favorites and the other entries at the top have **Open**.
 
 ---
 
@@ -1129,7 +1188,7 @@ On a Mac, use `Cmd` in place of `Ctrl` for every shortcut that has one, `Option`
 | `Ctrl+Shift+L` | Copy a Markdown link to it |
 | `Ctrl+Shift+T` / `Ctrl+Shift+I` / `Ctrl+Shift+D` | Copy its title / number, SHA or name / details |
 | `Ctrl+Shift+O` | Open a repository, or an issue, pull request, commit, release or run, by its address |
-| `Alt+N` / `Alt+P` | Next / previous comment in the details panel, or change in Changed Files |
+| `Alt+N` / `Alt+P` | Next / previous comment in the details panel; change in Changed Files and File History; Markdown heading, or blame run, in Files |
 | `Ctrl+Shift+H` | The changed files of the selected pull request or commit |
 | `Ctrl+Shift+U` | Watch settings for the repository |
 | `Ctrl+Shift+K` | Switch GitHub account |
@@ -1177,6 +1236,27 @@ On a Mac, use `Cmd` in place of `Ctrl` for every shortcut that has one, `Option`
 | `Enter` | Into the file's changed lines |
 | `Alt+N` / `Alt+P` | Next / previous change in the details panel |
 | `Backspace` | Back to the pull request or commit |
+| `W` | Open the file whole, in Files |
+
+### In Files
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Into a folder; into a file's text |
+| `Backspace` | Up a folder, onto the one you were in; back to Changed Files when `W` opened it |
+| `H` | The file's history |
+| `B` | Blame: who last changed each line; `B` again shows the file |
+| `Alt+N` / `Alt+P` | Next / previous Markdown heading, or blame run |
+| `Ctrl+B` | Choose the branch or tag |
+| `Ctrl+O` | Open the file or folder on GitHub |
+
+### In File History
+
+| Key | Action |
+|-----|--------|
+| `Enter` or `H` | The commit's changed files |
+| `Alt+N` / `Alt+P` | Next / previous change to the file in the details panel |
+| `Backspace` | Back to the file in Files |
 
 ### In Releases
 

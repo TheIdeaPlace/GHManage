@@ -88,11 +88,37 @@ def _label_strings(src: str) -> list[str]:
             if isinstance(n, ast.Constant) and isinstance(n.value, str) and id(n) not in docs]
 
 
+MENU_CALLS = {"Append", "AppendCheckItem", "AppendRadioItem", "AppendSubMenu", "SetItemLabel"}
+
+
+def _menu_labels(src: str) -> list[str]:
+    """The text of every label given to a menu: the string arguments of
+    Append…/SetItemLabel calls (f-strings' text parts included), the labels
+    of the context menu entries ("item", id, label), and FAVORITE_LABEL."""
+    tree = ast.parse(src)
+    out: list[str] = []
+
+    def texts(node) -> list[str]:
+        return [n.value for n in ast.walk(node)
+                if isinstance(n, ast.Constant) and isinstance(n.value, str)]
+
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr in MENU_CALLS):
+            for arg in node.args:
+                out += texts(arg)
+        if (isinstance(node, ast.Tuple) and node.elts and isinstance(node.elts[0], ast.Constant)
+                and node.elts[0].value == "item"):
+            out += texts(node)
+    out.append(ghviewer.FAVORITE_LABEL)
+    return out
+
+
 def test_every_key_the_handlers_act_on_is_on_a_menu():
     src = (ROOT / "ghviewer.py").read_text(encoding="utf-8")
     keys = set(re.findall(r'ord\("([A-Z])"\)', src))
     keys |= {KEY_NAMES[k] for k in re.findall(r"wx\.WXK_([A-Z0-9]+)", src) if k in KEY_NAMES}
-    strings = _label_strings(src)
+    strings = _menu_labels(src)
     missing = [k for k in sorted(keys)
                if not any(f"({k})" in s or f"\t{k}" in s or f"(Shift+{k})" in s
                           for s in strings)]
@@ -127,6 +153,8 @@ def _menu_frame(view, item=None, **attrs):
     for name in set(re.findall(r"self\.(_act_\w+) = ", src)):
         setattr(f, name, MenuItem())
     f._focused_item = lambda: item
+    f._current_focus = lambda: None
+    f._focus_panes = lambda: []
     f._COPY_IDENT_NOUNS = Frame._COPY_IDENT_NOUNS
     f._back_label = lambda lower=False: Frame._back_label(f, lower)
     f._view_label = lambda v, lower=False: Frame._view_label(f, v, lower)
@@ -155,6 +183,15 @@ def test_enter_is_greyed_on_an_expired_artifact_and_ctrl_o_on_any_artifact():
     assert f._act_open_web.label == "Open on GitHub\tCtrl+O" and not f._act_open_web.enabled
     f = _menu_frame(V.VIEW_ARTIFACTS, Artifact(1, "build", 10, False, "", 9))
     assert f._act_enter.enabled and f._act_enter.label == "Download… (Enter)"
+
+
+def test_ctrl_o_s_item_stays_on_in_artifacts_for_the_repository_list():
+    # From the repository list, Ctrl+O opens the repository in any view.
+    repo_list = SimpleNamespace(IsTopLevel=lambda: False, GetParent=lambda: None)
+    f = _menu_frame(V.VIEW_ARTIFACTS, Artifact(1, "build", 10, False, "", 9),
+                    _current_focus=lambda: repo_list, _focus_panes=lambda: [repo_list])
+    Frame._update_actions_menu(f)
+    assert f._act_open_web.enabled
 
 
 @pytest.mark.parametrize("view, label", [
@@ -657,3 +694,62 @@ def test_list_keys_name_the_new_places():
     assert ("Delete", commands.REPO_LIST) in keys
     assert ("Enter", commands.TAGS) in keys and ("Enter", commands.ASSETS) in keys
     assert ("J", commands.RUN_LIST) in keys
+
+
+def test_a_favorite_security_alert_lands_in_security_alerts():
+    fav = FavoriteEntry("o/r", "security alert",
+                        "https://github.com/o/r/security/dependabot/3", "Dependabot #3")
+    f = _fav_frame()
+    Frame._open_favorite(f, fav)
+    assert f.opened == [("repo", "o/r", V.VIEW_SECURITY),
+                        ("target", "alert", "https://github.com/o/r/security/dependabot/3")]
+    assert ghviewer.favorite_opens_here(fav)
+
+
+def test_a_landing_refused_aloud_stops_speaking_landings(monkeypatch):
+    monkeypatch.setattr(ghviewer.wx, "CallLater", lambda ms, fn, *a: fn(*a))
+    told = []
+    f = SimpleNamespace(_pending_target=(1, V.VIEW_TAGS, "tag", "v9"), view_mode=V.VIEW_TAGS,
+                        _shown=[Tag("v1", "a")], _speak_landing=True,
+                        _tell=lambda m, *a, **k: told.append(m))
+    f._row_of = lambda it: Frame._row_of(f, it)
+    assert Frame._take_pending_row(f, f._shown, 1) == 0
+    assert told == ["Tag v9 isn't among the 1 newest tags."] and f._speak_landing is False
+
+
+def _fork_frame():
+    f = SimpleNamespace(view_mode=V.VIEW_FAVORITES, _fetch_token=4, told=[], opened=[])
+    f._tell = lambda m, *a, **k: f.told.append(m)
+    f._open_item_checked = lambda item, parent, repo, number: f.opened.append((repo, number))
+    return f
+
+
+def test_a_second_enter_while_github_is_asked_asks_nothing_more(monkeypatch):
+    started = []
+
+    class Thread:
+        def __init__(self, target, daemon=True): started.append(target)
+        def start(self): pass
+    monkeypatch.setattr(ghviewer.threading, "Thread", Thread)
+    f = _fork_frame()
+    item = FavoriteEntry("o/r", "issue", "https://github.com/o/r/issues/1", "#1")
+    Frame._open_item_here(f, item, "o/r", 1)
+    Frame._open_item_here(f, item, "o/r", 1)
+    assert len(started) == 1 and f.told == ["Opening #1 in o/r…"]
+
+
+def test_the_fork_answer_opens_nothing_once_you_have_moved_on():
+    f = _fork_frame()
+    item = FavoriteEntry("o/r", "issue", "https://github.com/o/r/issues/1", "#1")
+    where = (4, V.VIEW_FAVORITES, "o/r", 1)
+    f._fork_asking = where
+    f._focused_item = lambda: item
+    f.view_mode = V.VIEW_ISSUES          # opened something else meanwhile
+    Frame._on_fork_checked(f, item, None, "o/r", 1, where)
+    assert f.opened == [] and f._fork_asking is None
+    f.view_mode = V.VIEW_FAVORITES       # still there, on it
+    Frame._on_fork_checked(f, item, None, "o/r", 1, where)
+    assert f.opened == [("o/r", 1)]
+    f._focused_item = lambda: None       # moved to another row
+    Frame._on_fork_checked(f, item, None, "o/r", 1, where)
+    assert f.opened == [("o/r", 1)]

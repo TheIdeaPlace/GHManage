@@ -1149,7 +1149,7 @@ Each row shows the kind of item, its repository, its title and a short descripti
 
 | Key | Action |
 |-----|--------|
-| `Enter` | Open it here in GHManage, in its own view, on it: a repository at its Issues & PRs, an issue or pull request, a commit, a branch's commits, a tag, a release, a label, a workflow, a run, a discussion or a milestone. A file, a published page, a job or a security alert has no view to land on, and GHManage says so |
+| `Enter` | Open it here in GHManage, in its own view, on it: a repository at its Issues & PRs, an issue or pull request, a commit, a branch's commits, a tag, a release, a label, a workflow, a run, a discussion, a milestone or a security alert. A file, a published page or a job has no view to land on, and GHManage says so |
 | `Backspace` | From what `Enter` opened, come back to Favorites, on the same row |
 | `Ctrl+O` | Open the favorite on GitHub |
 | `F` | Remove it from favorites |

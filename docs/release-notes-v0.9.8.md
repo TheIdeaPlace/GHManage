@@ -31,7 +31,8 @@ selected thing on GitHub. `Backspace` comes back out. If you are used to 0.9.7:
   GitHub.
 - In Favorites, Notifications and Activity, `Enter` opens the thing in its own
   view here, on it, with `Backspace` back: an issue, pull request, commit,
-  branch, tag, release, label, workflow, run, discussion or milestone. For
+  branch, release, run, discussion or milestone, and from Favorites a tag,
+  label, workflow or security alert too. For
   anything GHManage has no view for, it says so: "GHManage has no view for
   that; Ctrl+O opens it on GitHub." An issue in a fork says why it can't open
   here, instead of opening the browser.

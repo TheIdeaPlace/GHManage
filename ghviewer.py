@@ -1149,6 +1149,8 @@ def favorite_opens_here(fav) -> bool:
         return True
     if fav.item_type in FAVORITE_BY_NAME and fav.repo and fav.title:
         return True
+    if fav.item_type == "security alert" and fav.repo and fav.url:
+        return True
     return opens_here(fav.url)
 
 # The columns each view can show (gh_columns). Views listing the same kind
@@ -3488,7 +3490,9 @@ class GhViewerFrame(wx.Frame):
                                and not (isinstance(item, Artifact) and item.expired))
         web = ctrl_o_label(self.view_mode)
         self._act_open_web.SetItemLabel(f"{web or CTRL_O_LABEL}\tCtrl+O")
-        self._act_open_web.Enable(web is not None)
+        # From the repository list it opens the repository, in any view.
+        in_repo_list = GhViewerFrame._pane_index(self, self._current_focus()) == 0
+        self._act_open_web.Enable(web is not None or in_repo_list)
         back = self._back_label()
         self._act_back.SetItemLabel(
             f"{back.replace('&', '&&')} (Backspace)" if back else "Back (Backspace)")
@@ -4954,6 +4958,8 @@ class GhViewerFrame(wx.Frame):
                 return isinstance(it, Label) and it.name == ref
             if kind == "workflow":
                 return isinstance(it, Workflow) and it.name == ref
+            if kind == "alert":
+                return isinstance(it, SecurityAlert) and it.url == ref
             return False
 
         found = next((it for it in items if matches(it)), None)
@@ -4974,7 +4980,7 @@ class GhViewerFrame(wx.Frame):
         elif kind == "commit":
             wx.CallLater(150, self._if_still_current, token, self._goto_commit, ref)
         elif kind in ("release", "run", "discussion", "discussion_title", "milestone",
-                      "tag", "label", "workflow"):
+                      "tag", "label", "workflow", "alert"):
             # (what it is, the newest of its kind, its kind)
             what, newest, plural = {
                 "release": (f"Release {ref}", "newest releases", "releases"),
@@ -4987,6 +4993,7 @@ class GhViewerFrame(wx.Frame):
                 "tag": (f"Tag {ref}", "newest tags", "tags"),
                 "label": (f"The label {ref}", "labels listed", "labels"),
                 "workflow": (f"The workflow {ref}", "workflows listed", "workflows"),
+                "alert": ("That alert", "alerts listed", "alerts"),
             }[kind]
             if found is not None:
                 said = f"{what} is hidden by the quick filter. Escape clears it."
@@ -4994,8 +5001,9 @@ class GhViewerFrame(wx.Frame):
                 said = f"{what} isn't among the {len(items)} {newest}."
             else:
                 said = f"{what} wasn't found: there are no {plural} to show."
-            if kind in ("discussion_title", "milestone", "tag", "label", "workflow"):
+            if kind in ("discussion_title", "milestone", "tag", "label", "workflow", "alert"):
                 # Enter was pressed to land on it: say aloud that it didn't.
+                self._speak_landing = False
                 if (kind in ("discussion_title", "milestone")
                         and getattr(self, "state_filter", "all") != "all"):
                     said += " A closed one shows with View, State, All."
@@ -5042,6 +5050,8 @@ class GhViewerFrame(wx.Frame):
             return f"Label {item.name}"
         if isinstance(item, Workflow):
             return f"Workflow {item.name}"
+        if isinstance(item, SecurityAlert):
+            return f"{item.kind_display} alert {item.number}".strip()
         return "Opened"
 
     def _goto_discussion(self, number: int) -> None:
@@ -5622,9 +5632,14 @@ class GhViewerFrame(wx.Frame):
             # Enter brought you here, to read it.
             lines.append(commands.READ_KEYS)
         else:
-            # My Work and search results: Enter opens it in its repository.
-            lines.append(f"Press Enter to open it in {item.repo or 'its repository'} here; "
-                         "Ctrl+O opens it on GitHub.")
+            # My Work and search results: Enter opens it in its repository,
+            # unless that is a fork already known.
+            fork = getattr(self, "__dict__", {}).get("_fork_parent", {}).get(item.repo)
+            if fork:
+                lines.append(fork_said(item.number, item.repo, fork))
+            else:
+                lines.append(f"Press Enter to open it in {item.repo or 'its repository'} here; "
+                             "Ctrl+O opens it on GitHub.")
         lines.append("")
         lines.append("─" * 60)
         lines.append("")
@@ -6538,7 +6553,7 @@ class GhViewerFrame(wx.Frame):
         Nothing is triggered until the user confirms.
         """
         if not self.repo:
-            self._announce("No repository loaded.")
+            self._tell("No repository loaded.")
             return
         self._announce(f"Loading branches for {wf.name}…")
 
@@ -6642,7 +6657,7 @@ class GhViewerFrame(wx.Frame):
     def _download_artifact_flow(self, art: "Artifact") -> None:
         """Prompt for a destination folder, then download the artifact into it."""
         if not self.repo:
-            self._announce("No repository loaded.")
+            self._tell("No repository loaded.")
             return
         if art.expired:
             self._announce(f"'{art.name}' has expired and can't be downloaded.")
@@ -6732,7 +6747,10 @@ class GhViewerFrame(wx.Frame):
         everywhere in the window. Their Ctrl+I / Ctrl+D twins in the Actions menu
         are ordinary accelerators, which is why those need nothing here.
 
-        F6 and Shift+F6 move between panes, see ``_cycle_pane``.
+        F6 and Shift+F6 move between panes, see ``_cycle_pane``. Ctrl+O is
+        here so it works from every pane and speaks where its menu item is
+        greyed out. In the details panel, Backspace goes back to the row
+        (``_back_to_row``) and Enter does the list's Enter (``_enter_from_details``).
 
         Everything else is skipped, so the focused control keeps first claim on
         its own keys.
@@ -10081,19 +10099,32 @@ class GhViewerFrame(wx.Frame):
         if repo in cache:
             self._open_item_checked(item, cache[repo], repo, number)
             return
+        # Where Enter was pressed: the answer opens it only if you are still
+        # there, and a second Enter meanwhile asks nothing more.
+        where = (getattr(self, "_fetch_token", 0), self.view_mode, repo, number)
+        if getattr(self, "_fork_asking", None) == where:
+            return
+        self._fork_asking = where
         self._tell(f"Opening #{number} in {repo}…")
 
         def worker() -> None:
-            wx.CallAfter(self._on_fork_checked, item, parent_repo(repo), repo, number)
+            wx.CallAfter(self._on_fork_checked, item, parent_repo(repo), repo, number, where)
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _on_fork_checked(self, item, parent, repo: str = "", number: int = 0) -> None:
+    def _on_fork_checked(self, item, parent, repo: str = "", number: int = 0,
+                         where: tuple | None = None) -> None:
         repo = repo or item.repo
         # parent_repo says None for "not a fork" and for "couldn't ask"; only
         # a fork is certain enough to keep for the rest of the session.
         if parent:
             self.__dict__.setdefault("_fork_parent", {})[repo] = parent
+        if where is not None:
+            if getattr(self, "_fork_asking", None) == where:
+                self._fork_asking = None
+            here = (getattr(self, "_fetch_token", 0), self.view_mode)
+            if here != where[:2] or self._focused_item() is not item:
+                return  # you moved on while GitHub was asked
         self._open_item_checked(item, parent, repo, number)
 
     def _open_item_checked(self, item, parent, repo: str = "", number: int = 0) -> None:
@@ -10136,6 +10167,12 @@ class GhViewerFrame(wx.Frame):
             view, kind = named
             self._open_repo_from_list(fav.repo, fav, view)
             self._set_pending_target(view, kind, fav.title)
+            self._speak_landing = True
+            return
+        if fav.item_type == "security alert" and fav.repo and fav.url:
+            # Security Alerts, on it by its address.
+            self._open_repo_from_list(fav.repo, fav, VIEW_SECURITY)
+            self._set_pending_target(VIEW_SECURITY, "alert", fav.url)
             self._speak_landing = True
             return
         target = parse_github_url(fav.url) if fav.url else None
@@ -10464,14 +10501,14 @@ class GhViewerFrame(wx.Frame):
         if not run or not self.repo:
             return
         if job.conclusion == "skipped":
-            self._announce(f"{job.name} was skipped, so it has no log.")
+            self._tell(f"{job.name} was skipped, so it has no log.")
             return
         if job.status != "completed":
-            self._announce(f"{job.name} is still {job.status.replace('_', ' ')}; its log "
-                           "is ready when it finishes.")
+            self._tell(f"{job.name} is still {job.status.replace('_', ' ')}; its log "
+                       "is ready when it finishes.")
             return
         if getattr(self, "_report_busy", False):
-            self._announce("Still putting the last report together.")
+            self._tell("Still putting the last report together.")
             return
         repo = self.repo
         self._report_busy = True

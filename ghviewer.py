@@ -32,6 +32,7 @@ import codeview
 import commands
 import diffview
 import discussionview
+import milestoneview
 import settings
 import search_help
 import speech
@@ -47,7 +48,7 @@ from gh_columns import (
     FAVORITES_SET,
     ISSUE_SET, JOB_SET, LABEL_SET, MY_WORK_SET, NOTIFICATION_SET, ORG_SET,
     PAGEFILE_SET, PAGES_SET, RELEASE_SET, REPO_FILE_SET, REPO_SET, SEARCH_ITEM_SET, TAG_SET,
-    SECURITY_SET, WORKFLOW_RUN_SET, WORKFLOW_SET, DISCUSSION_SET,
+    SECURITY_SET, WORKFLOW_RUN_SET, WORKFLOW_SET, DISCUSSION_SET, MILESTONE_SET,
 )
 from gh_data import (
     ACTIVITY_MAX,
@@ -65,6 +66,8 @@ from gh_data import (
     fetch_discussion,
     fetch_discussion_comments,
     fetch_discussions,
+    Milestone,
+    fetch_milestones,
     ALL_BRANCHES,
     ALL_BRANCHES_PER_BRANCH_MAX,
     GhError,
@@ -234,6 +237,7 @@ class GitHubTarget:
                the wiki); it opens the repository
       item     an issue or pull request; ``ref`` is its number
       discussion  a discussion; ``ref`` is its number
+      milestone   a milestone; ``ref`` is its number
       commit   a commit; ``ref`` is its SHA (possibly abbreviated)
       release  a release; ``ref`` is its tag
       run      a workflow run; ``ref`` is its id
@@ -258,6 +262,7 @@ _URL_VIEWS = {
     "actions": "workflow",
     "labels": "labels",
     "discussions": "discussions",
+    "milestones": "milestones",
 }
 
 # github.com pages that are not OWNER/NAME, though they look like it.
@@ -355,6 +360,8 @@ def parse_github_url(value: str) -> GitHubTarget | None:
         return GitHubTarget(repo, "item", arg)
     if section == "discussions" and arg.isdigit():
         return GitHubTarget(repo, "discussion", arg)
+    if section == "milestone" and arg.isdigit():
+        return GitHubTarget(repo, "milestone", arg)
     if section == "commit" and arg:
         sha = arg
         for suffix in (".patch", ".diff"):
@@ -604,6 +611,8 @@ def copy_values(item) -> CopyValues | None:
             return CopyValues(item.url, item.title, number, "Number",
                               f"{number} {item.title}")
         return CopyValues(item.url, item.title, item.repo, "Repository Name", item.title)
+    if isinstance(item, Milestone):
+        return CopyValues(item.url, item.title, item.title, "Milestone Title", item.title)
     if isinstance(item, Discussion):
         number = f"#{item.number}"
         return CopyValues(item.url, item.title, number, "Number", f"{number} {item.title}")
@@ -777,6 +786,7 @@ ID_WHOLE_FILE = wx.NewIdRef()
 ID_COMMENT_LINE = wx.NewIdRef()
 ID_VIEW_SECURITY = wx.NewIdRef()
 ID_VIEW_DISCUSSIONS = wx.NewIdRef()
+ID_VIEW_MILESTONES = wx.NewIdRef()
 
 
 # View modes
@@ -809,6 +819,7 @@ VIEW_ORG = "org"               # one organization's repositories (drill-down; wh
 VIEW_SHARED = "shared"         # others' repositories you are a collaborator on
 VIEW_SECURITY = "security"     # Dependabot, code scanning and secret scanning alerts
 VIEW_DISCUSSIONS = "discussions"  # a repository's discussions (GraphQL)
+VIEW_MILESTONES = "milestones"   # a repository's milestones and their progress
 
 # Views that are not views *of a repo*, so they work with none selected.
 REPOLESS_VIEWS = (VIEW_FAVORITES, VIEW_NOTIFICATIONS, VIEW_MY_WORK, VIEW_ACTIVITY,
@@ -840,6 +851,7 @@ REPO_GO_TO = [
     (VIEW_CODE, "Files"),
     (VIEW_SECURITY, "Security Alerts"),
     (VIEW_DISCUSSIONS, "Discussions"),
+    (VIEW_MILESTONES, "Milestones"),
 ]
 ID_GO_TO_VIEW = {view: wx.NewIdRef() for view, _ in REPO_GO_TO}
 
@@ -858,8 +870,9 @@ ADDRESS_VIEWS = {
     "release": VIEW_RELEASES,
     "run": VIEW_WORKFLOW,
     "discussion": VIEW_DISCUSSIONS,
+    "milestone": VIEW_MILESTONES,
 }
-PENDING_KINDS = ("item", "commit", "release", "run", "discussion")
+PENDING_KINDS = ("item", "commit", "release", "run", "discussion", "milestone")
 # Views that load everything at once, where View More has nothing to add.
 NO_MORE_VIEWS = (VIEW_FAVORITES, VIEW_MY_WORK, VIEW_ORGS, VIEW_JOBS, VIEW_ARTIFACTS,
                  VIEW_PAGES, VIEW_PAGEFILES, VIEW_FILES, VIEW_CODE)
@@ -963,6 +976,7 @@ VIEW_COLUMNS = {
     VIEW_SHARED: REPO_SET,
     VIEW_SECURITY: SECURITY_SET,
     VIEW_DISCUSSIONS: DISCUSSION_SET,
+    VIEW_MILESTONES: MILESTONE_SET,
 }
 
 
@@ -2452,6 +2466,8 @@ class GhViewerFrame(wx.Frame):
         # pressing Enter on a label; unlike the quick filter this is applied by
         # `gh`, so it reaches issues past the current page.
         self.label_filter: str = ""
+        # Issues & PRs restricted to a milestone (Enter in Milestones).
+        self.milestone_filter: Milestone | None = None
         # Whether GitHub has older activity than the Activity view has loaded;
         # None while a load is under way and the answer isn't known yet.
         self._activity_more: bool | None = False
@@ -2811,6 +2827,7 @@ class GhViewerFrame(wx.Frame):
         show_menu.AppendRadioItem(ID_VIEW_CODE, "Files")
         show_menu.AppendRadioItem(ID_VIEW_SECURITY, "Security Alerts")
         show_menu.AppendRadioItem(ID_VIEW_DISCUSSIONS, "Discussions")
+        show_menu.AppendRadioItem(ID_VIEW_MILESTONES, "Milestones")
         show_menu.AppendRadioItem(ID_VIEW_NOTIFICATIONS, "Notifications\tCtrl+Shift+N")
         show_menu.AppendRadioItem(ID_VIEW_MY_WORK, "My Work\tCtrl+Shift+M")
         # Checked while search results are showing; choosing it asks for a
@@ -2926,6 +2943,7 @@ class GhViewerFrame(wx.Frame):
         self.Bind(wx.EVT_MENU, self.on_view_pages, id=ID_VIEW_PAGES)
         self.Bind(wx.EVT_MENU, self.on_view_security, id=ID_VIEW_SECURITY)
         self.Bind(wx.EVT_MENU, self.on_view_discussions, id=ID_VIEW_DISCUSSIONS)
+        self.Bind(wx.EVT_MENU, self.on_view_milestones, id=ID_VIEW_MILESTONES)
         self.Bind(wx.EVT_MENU, self.on_view_activity, id=ID_VIEW_ACTIVITY)
         self.Bind(wx.EVT_MENU, self.on_view_notifications, id=ID_VIEW_NOTIFICATIONS)
         self.Bind(wx.EVT_MENU, lambda e: self._toggle_include_read(), id=ID_SHOW_READ)
@@ -3157,6 +3175,7 @@ class GhViewerFrame(wx.Frame):
         menu_bar.Check(ID_VIEW_CODE, self.view_mode in (VIEW_CODE, VIEW_HISTORY))
         menu_bar.Check(ID_VIEW_SECURITY, self.view_mode == VIEW_SECURITY)
         menu_bar.Check(ID_VIEW_DISCUSSIONS, self.view_mode == VIEW_DISCUSSIONS)
+        menu_bar.Check(ID_VIEW_MILESTONES, self.view_mode == VIEW_MILESTONES)
         menu_bar.Check(ID_VIEW_NOTIFICATIONS, self.view_mode == VIEW_NOTIFICATIONS)
         menu_bar.Check(ID_VIEW_MY_WORK, self.view_mode == VIEW_MY_WORK)
         menu_bar.Check(ID_VIEW_SEARCH_RESULTS, self.view_mode in SEARCH_VIEWS)
@@ -3303,6 +3322,7 @@ class GhViewerFrame(wx.Frame):
             self._history_back = None
         if mode != VIEW_ISSUES:
             self.label_filter = ""
+            self.milestone_filter = None
         if mode not in (VIEW_PAGES, VIEW_PAGEFILES):
             self.pages_site = None
         if mode != getattr(self, "_return_view", VIEW_ISSUES):
@@ -3697,6 +3717,7 @@ class GhViewerFrame(wx.Frame):
         self.current_limit = self.page_size  # reset to first page
         self.filter_text = ""  # clear filter on repo switch
         self.label_filter = ""  # a label of the old repo means nothing here
+        self.milestone_filter = None  # nor a milestone
         GhViewerFrame._reset_code(self)  # nor a folder or branch of it
         self._update_actions_menu()  # repo-dependent items (New Label…)
         self._update_title()
@@ -3821,6 +3842,7 @@ class GhViewerFrame(wx.Frame):
         repo = self.repo
         state = self.state_filter
         include_read = self._include_read
+        milestone = getattr(self, "milestone_filter", None)
         org = self._org
         org_logins = [o.login for o in self._orgs]
         entry = self._view_entry(view) if view in REPO_LIST_VIEWS else None
@@ -3837,12 +3859,12 @@ class GhViewerFrame(wx.Frame):
                     if self.tab_filter in ("issues", "both"):
                         issues = fetch_issues(
                             self.repo, self.state_filter, self.current_limit,
-                            self.label_filter,
+                            self.label_filter, milestone,
                         )
                     if self.tab_filter in ("prs", "both"):
                         prs = fetch_prs(
                             self.repo, self.state_filter, self.current_limit,
-                            self.label_filter,
+                            self.label_filter, milestone,
                         )
                     combined = sort_items(issues + prs, self.sort_order)
                     wx.CallAfter(
@@ -3983,6 +4005,9 @@ class GhViewerFrame(wx.Frame):
                 elif view == VIEW_SECURITY:
                     report = fetch_security_alerts(repo, state, limit)
                     wx.CallAfter(self._on_security_loaded, token, report, state)
+                elif view == VIEW_MILESTONES:
+                    milestones = fetch_milestones(repo, state, limit)
+                    wx.CallAfter(self._on_milestones_loaded, token, milestones, state)
                 elif view == VIEW_DISCUSSIONS:
                     result = fetch_discussions(repo, state, limit)
                     wx.CallAfter(self._on_discussions_loaded, token, result, state)
@@ -4054,6 +4079,7 @@ class GhViewerFrame(wx.Frame):
         VIEW_SHARED: SHARED_LABEL,
         VIEW_SECURITY: "Security Alerts",
         VIEW_DISCUSSIONS: "Discussions",
+        VIEW_MILESTONES: "Milestones",
     }
 
     def _view_label(self, view: str, lower: bool = False) -> str:
@@ -4097,6 +4123,9 @@ class GhViewerFrame(wx.Frame):
         # Include the label the issues list is restricted to
         if self.view_mode == VIEW_ISSUES and self.label_filter:
             parts.append(f"label: {self.label_filter}")
+        milestone = getattr(self, "milestone_filter", None)
+        if self.view_mode == VIEW_ISSUES and milestone is not None:
+            parts.append(f"milestone: {milestone.title}")
         if self.repo and self.view_mode not in REPOLESS_VIEWS:
             parts.append(self.repo)
         parts.append("ghviewer")
@@ -4154,12 +4183,20 @@ class GhViewerFrame(wx.Frame):
         source = f"{self.repo} (issues from upstream {upstream})" if upstream else self.repo
         label_info = f" labelled '{self.label_filter}'" if self.label_filter else ""
         label_hint = "  Backspace=back to labels" if self.label_filter else ""
+        milestone = getattr(self, "milestone_filter", None)
+        if milestone is not None:
+            label_info = f" in milestone '{milestone.title}'"
+            label_hint = "  Backspace=back to milestones"
         if self._return_to:
             back = self._view_label(self._return_to[0], lower=True)
             label_hint = f"  Backspace=back to {back}"
+        unsized = ""
+        if any(it.is_pr and not getattr(it, "has_stats", True) for it in items):
+            unsized = (" GitHub took too long to measure these pull requests, so Changes "
+                       "and Files are blank.")
         self._set_view_status(
             f"{source} — {n_issues} issues, {n_prs} PRs ({self.state_filter}){label_info}. "
-            f"Showing up to {self.current_limit} newest.",
+            f"Showing up to {self.current_limit} newest.{unsized}",
             "Ctrl++=view more  R=refresh  M=comment  N=new issue  K=checks  V=review  "
             "H=changed files  "
             "F=favorite  Ctrl+F=filter"
@@ -4167,6 +4204,15 @@ class GhViewerFrame(wx.Frame):
         )
         self._update_title()
         row = self._take_pending_row(items, token)
+        if not items and label_info:
+            # Enter on a milestone or label that has nothing in this state:
+            # focus stays put, so say so rather than leave silence.
+            which = "" if self.state_filter == "all" else f"{self.state_filter} "
+            said = f"No {which}issues or PRs{label_info}."
+            if self.state_filter != "all":
+                said += " View, State, All shows every one."
+            self.details_text.SetValue(said)
+            announce.announce(said, announce.STATUS)
         if filtered:
             wx.CallLater(100, self._focus_list, row)
 
@@ -4627,6 +4673,8 @@ class GhViewerFrame(wx.Frame):
                 return isinstance(it, Discussion) and str(it.number) == ref
             if kind == "discussion_title":
                 return isinstance(it, Discussion) and it.title == ref
+            if kind == "milestone":
+                return isinstance(it, Milestone) and str(it.number) == ref
             return False
 
         found = next((it for it in items if matches(it)), None)
@@ -4646,7 +4694,7 @@ class GhViewerFrame(wx.Frame):
             wx.CallLater(150, self._if_still_current, token, self._goto_discussion, int(ref))
         elif kind == "commit":
             wx.CallLater(150, self._if_still_current, token, self._goto_commit, ref)
-        elif kind in ("release", "run", "discussion", "discussion_title"):
+        elif kind in ("release", "run", "discussion", "discussion_title", "milestone"):
             # (what it is, the newest of its kind, its kind)
             what, newest, plural = {
                 "release": (f"Release {ref}", "newest releases", "releases"),
@@ -4655,6 +4703,7 @@ class GhViewerFrame(wx.Frame):
                                "discussions"),
                 "discussion_title": (f"The discussion “{ref}”",
                                      "most recently active discussions", "discussions"),
+                "milestone": ("That milestone", "milestones listed", "milestones"),
             }[kind]
             if found is not None:
                 said = f"{what} is hidden by the quick filter. Escape clears it."
@@ -4662,7 +4711,7 @@ class GhViewerFrame(wx.Frame):
                 said = f"{what} isn't among the {len(items)} {newest}."
             else:
                 said = f"{what} wasn't found: there are no {plural} to show."
-            if kind == "discussion_title":
+            if kind in ("discussion_title", "milestone"):
                 # Enter was pressed to land on it: say aloud that it didn't.
                 if getattr(self, "state_filter", "all") != "all":
                     said += " A closed one shows with View, State, All."
@@ -4687,6 +4736,8 @@ class GhViewerFrame(wx.Frame):
             return f"Opened run #{item.run_number} {item.name}"
         if isinstance(item, Discussion):
             return f"Opened discussion #{item.number} — {item.title}"
+        if isinstance(item, Milestone):
+            return f"Milestone {item.title}"
         return "Opened"
 
     def _goto_discussion(self, number: int) -> None:
@@ -4802,6 +4853,8 @@ class GhViewerFrame(wx.Frame):
             self._show_security_details(idx)
         elif self.view_mode == VIEW_DISCUSSIONS:
             self._show_discussion_details(idx)
+        elif self.view_mode == VIEW_MILESTONES:
+            self._show_milestone_details(idx)
         else:
             self._show_git_details(idx)
 
@@ -4838,6 +4891,43 @@ class GhViewerFrame(wx.Frame):
         row = self._take_pending_row(items, token)
         if filtered:
             wx.CallLater(100, self._focus_list, row)
+
+    def _on_milestones_loaded(self, token: int, milestones: list, state: str) -> None:
+        """Milestones: GitHub's order, nearest due date first, then those
+        without one."""
+        if not self._fetch_is_current(token):
+            return  # the user has moved on; these belong to a view they left
+        self.git_items = milestones
+        self.items = []
+        filtered = self._populate_filtered_list(milestones, use_favorite_prefix=True)
+        source = self.repo
+        if milestones and milestones[0].repo and milestones[0].repo != self.repo:
+            source = f"{self.repo} (milestones from upstream {milestones[0].repo})"
+        message = milestoneview.status_message(source, milestones, state)
+        keys = "R=refresh  Ctrl+F=filter"
+        if milestones:
+            keys = ("Enter=issues and PRs  Ctrl+O=open on GitHub  F=favorite  "
+                    "Ctrl++=view more  " + keys)
+        self._set_view_status(message, keys)
+        self._update_title()
+        row = self._take_pending_row(milestones, token)
+        if not milestones:
+            which = {"open": "open ", "closed": "closed "}.get(state, "")
+            self.details_text.SetValue(f"{source} has no {which}milestones.")
+            announce.announce(message, announce.STATUS)
+            return
+        if filtered:
+            wx.CallLater(100, self._focus_list, row)
+
+    def _show_milestone_details(self, idx: int) -> None:
+        if idx < 0 or idx >= len(self.git_items):
+            self.details_text.Clear()
+            return
+        item = self.git_items[idx]
+        if not isinstance(item, Milestone):
+            self.details_text.Clear()
+            return
+        self.details_text.SetValue(milestoneview.milestone_details(item))
 
     def _show_discussion_details(self, idx: int) -> None:
         """A discussion: its fields and body now, its comments once read
@@ -5497,6 +5587,7 @@ class GhViewerFrame(wx.Frame):
         # CVE or GHSA ID, rule ID, or secret type, by the kind of alert.
         VIEW_SECURITY: "Advisory, Rule or Secret Type",
         VIEW_DISCUSSIONS: "Number",
+        VIEW_MILESTONES: "Milestone Title",
     }
 
     _COPY_WHAT = {
@@ -5630,6 +5721,9 @@ class GhViewerFrame(wx.Frame):
         if self.view_mode == VIEW_LABELS and isinstance(item, Label):
             self._browse_label(item)
             return
+        if self.view_mode == VIEW_MILESTONES and isinstance(item, Milestone):
+            self._browse_milestone(item)
+            return
         # In Workflows view, Enter offers to run the workflow on a branch
         if self.view_mode == VIEW_WORKFLOWS and isinstance(item, Workflow):
             self._run_workflow_flow(item)
@@ -5751,6 +5845,7 @@ class GhViewerFrame(wx.Frame):
         VIEW_ARTIFACTS: "Download…",
         VIEW_RELEASES: "List Files",
         VIEW_LABELS: "List Issues and PRs with This Label",
+        VIEW_MILESTONES: "List Its Issues and PRs",
         VIEW_PAGES: "Browse Published Pages",
         VIEW_NOTIFICATIONS: "Open",
         VIEW_ACTIVITY: "Open",
@@ -6353,6 +6448,9 @@ class GhViewerFrame(wx.Frame):
                 self._pending_focus_row = logins.index(self._org) if self._org in logins else 0
             self._switch_view(parent)
             self._announce(f"Back to {self._VIEW_LABELS.get(parent, parent).lower()}")
+        elif (key == wx.WXK_BACK and self.view_mode == VIEW_ISSUES
+              and getattr(self, "milestone_filter", None) is not None):
+            self._back_to_milestones()
         elif key == wx.WXK_BACK and self.view_mode == VIEW_ISSUES and self.label_filter:
             # Issues restricted to a label is a drill-down too, even though the
             # view mode is the same one you reach with Ctrl+1.
@@ -6597,6 +6695,10 @@ class GhViewerFrame(wx.Frame):
             item_type = item.kind_display.lower()
             title = item.path
             subtitle = self._code_where() if self.view_mode == VIEW_CODE else ""
+        elif isinstance(item, Milestone):
+            item_type = "milestone"
+            title = item.title
+            subtitle = milestoneview.progress(item)
         elif isinstance(item, Discussion):
             # As F on a discussion's Activity event makes it.
             item_type = "discussion"
@@ -7684,6 +7786,11 @@ class GhViewerFrame(wx.Frame):
             self._tell("Discussions are listed most recently active first, "
                        "so they aren't sorted.")
             return
+        if self.view_mode == VIEW_MILESTONES:
+            self._update_menu_checks()
+            self._tell("Milestones are listed in GitHub's order, nearest due date "
+                       "first, so they aren't sorted.")
+            return
         self.sort_order = self._sort_menu_items.get(event.GetId(), SORT_ORDERS[0])
         self._update_menu_checks()
         back = self._files_back if self.view_mode == VIEW_FILES else None
@@ -7790,13 +7897,15 @@ class GhViewerFrame(wx.Frame):
         # Asking for Issues & PRs by name means all of them: drop any label
         # drill-down, including when that leaves the view mode unchanged.
         if self.view_mode == VIEW_ISSUES:
-            if self.label_filter:
+            if self.label_filter or self.milestone_filter is not None:
                 self.label_filter = ""
+                self.milestone_filter = None
                 self.current_limit = self.page_size
                 self._load_items()
                 self._announce("Showing all issues and PRs")
             return
         self.label_filter = ""
+        self.milestone_filter = None
         self._switch_view(VIEW_ISSUES)
 
     def on_view_branches(self, event: wx.CommandEvent) -> None:
@@ -7831,6 +7940,9 @@ class GhViewerFrame(wx.Frame):
 
     def on_view_discussions(self, event: wx.CommandEvent) -> None:
         self._switch_view(VIEW_DISCUSSIONS)
+
+    def on_view_milestones(self, event: wx.CommandEvent) -> None:
+        self._switch_view(VIEW_MILESTONES)
 
     def on_view_activity(self, event: wx.CommandEvent) -> None:
         self._select_category(VIEW_ACTIVITY)
@@ -8360,6 +8472,7 @@ class GhViewerFrame(wx.Frame):
             "limit": self.current_limit,
             "filter_text": self.filter_text,
             "label_filter": self.label_filter,
+            "milestone_filter": getattr(self, "milestone_filter", None),
             "commit_branch": self.commit_branch,
             "branches_unread": self._branches_unread,
             "return_to": self._return_to,
@@ -8465,6 +8578,7 @@ class GhViewerFrame(wx.Frame):
         # The switch keeps these only in their own views; set them first.
         self.commit_branch = back["commit_branch"]
         self.label_filter = back["label_filter"]
+        self.milestone_filter = back.get("milestone_filter")
         self._switch_view(view, load=False)
         self.filter_text = back["filter_text"]
         self.current_limit = back["limit"]
@@ -9886,6 +10000,39 @@ class GhViewerFrame(wx.Frame):
 
     # ── Labels ──────────────────────────────────────────────────────────
 
+    def _browse_milestone(self, milestone: Milestone) -> None:
+        """Enter in Milestones: the issues and PRs in ``milestone``, in
+        Issues & PRs, as Enter on a label does; Backspace comes back."""
+        self.label_filter = ""
+        self.current_limit = self.page_size
+        # The way back from Milestones to a list it was opened from (Starred,
+        # Activity), which the switch to Issues & PRs would otherwise drop.
+        self._milestone_return = (getattr(self, "_return_to", None),
+                                  getattr(self, "_return_view", VIEW_ISSUES))
+        self._switch_view(VIEW_ISSUES, load=False)
+        # Set after the switch, which clears it everywhere but Issues & PRs.
+        self.milestone_filter = milestone
+        self._update_title()
+        self._load_items()
+        said = (f"Showing issues and PRs in milestone '{milestone.title}'. "
+                "Backspace returns to the milestones.")
+        self._announce(said)
+        # Queued behind the first row, which focus reads.
+        announce.announce(f"Milestone {milestone.title}", announce.STATUS)
+
+    def _back_to_milestones(self) -> None:
+        """Backspace from a milestone's issues: the milestones, on it."""
+        milestone = self.milestone_filter
+        self.milestone_filter = None
+        self._switch_view(VIEW_MILESTONES)
+        if milestone is not None:
+            self._set_pending_target(VIEW_MILESTONES, "milestone", str(milestone.number))
+        saved = getattr(self, "_milestone_return", None)
+        self._milestone_return = None
+        if saved and saved[0] and saved[1] == VIEW_MILESTONES:
+            self._return_to, self._return_view = saved
+        self._announce("Back to milestones")
+
     def _browse_label(self, label: "Label") -> None:
         """Show the issues and PRs carrying ``label``.
 
@@ -9895,6 +10042,7 @@ class GhViewerFrame(wx.Frame):
         finds items that were never on the current page.
         """
         self.label_filter = label.name
+        self.milestone_filter = None
         self.current_limit = self.page_size
         if self.view_mode == VIEW_ISSUES:
             self._load_items()

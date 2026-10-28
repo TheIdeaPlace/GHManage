@@ -15,6 +15,7 @@ from gh_data import (
     ASSET_COLUMNS, ASSET_DEFAULT_COLUMNS,
     BRANCH_COLUMNS, BRANCH_DEFAULT_COLUMNS,
     CHANGED_FILE_COLUMNS, CHANGED_FILE_DEFAULT_COLUMNS,
+    DISCUSSION_COLUMNS, DISCUSSION_DEFAULT_COLUMNS,
     COMMIT_COLUMNS, COMMIT_DEFAULT_COLUMNS,
     JOB_COLUMNS, JOB_DEFAULT_COLUMNS,
     LABEL_COLUMNS, LABEL_DEFAULT_COLUMNS,
@@ -118,6 +119,10 @@ CATALOG: dict[str, ColumnDef] = {c.id: c for c in [
     _c("package", "Package or rule", 200),
     _c("summary", "Summary", 340),
     _c("where", "Where", 240),
+    # Discussions
+    _c("category", "Category", 120),
+    _c("answered", "Answered", 90, STATE),
+    _c("upvotes", "Upvotes", 70),
 ]}
 
 
@@ -182,6 +187,8 @@ JOB_SET = _set("jobs", "Jobs", JOB_COLUMNS, JOB_DEFAULT_COLUMNS)
 SECURITY_SET = _set("security_alerts", "Security alerts", SECURITY_COLUMNS,
                     SECURITY_DEFAULT_COLUMNS, {
     "kind": {"width": 120, "kind": STATE}, "number": {"width": 60}})
+DISCUSSION_SET = _set("discussions", "Discussions", DISCUSSION_COLUMNS,
+                      DISCUSSION_DEFAULT_COLUMNS)
 FAVORITES_SET = _set("favorites", "Favorites", FAVORITES_COLUMNS,
                      FAVORITES_DEFAULT_COLUMNS)
 
@@ -190,4 +197,5 @@ COLUMN_SETS: list[ColumnSet] = [
     ASSET_SET, RELEASE_SET, WORKFLOW_RUN_SET, ARTIFACT_SET, WORKFLOW_SET,
     PAGES_SET, PAGEFILE_SET, ACTIVITY_SET, NOTIFICATION_SET, SEARCH_ITEM_SET,
     MY_WORK_SET, JOB_SET, FAVORITES_SET, CHANGED_FILE_SET, REPO_FILE_SET, SECURITY_SET,
+    DISCUSSION_SET,
 ]

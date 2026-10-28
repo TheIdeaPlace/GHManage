@@ -48,3 +48,39 @@ selected file's diff. **Actions → Open Diff in Default App** opens the diff in
 whatever app opens `.diff` files on your computer, such as Visual Studio Code.
 
 Thanks to George Kerscher for asking for this (#78).
+
+## Before you start
+
+GHManage drives the [GitHub CLI](https://cli.github.com/), so install it and sign
+in first:
+
+```
+gh auth login
+```
+
+GHManage never asks for or stores credentials of its own — every request goes
+through `gh`.
+
+## Updating
+
+If you already have GHManage installed you do not need to download anything; this
+version will arrive on its own.
+
+## Downloads
+
+| File | Use it if |
+|------|-----------|
+| `GHManage-win-Setup.exe` | Windows, installed and updating itself |
+| `GHManage-win-Portable.zip` | Windows, a folder to run from anywhere, no install, no updates |
+| `GHManage-osx.dmg` | macOS, drag to Applications |
+| `GHManage-osx-Portable.zip` | macOS, unzip it yourself |
+
+The remaining files (`*.nupkg`, `RELEASES`, `releases.win.json`,
+`assets.win.json`, `releases.osx.json`, `assets.osx.json`) are the update feed
+the installed app reads. Leave them alone.
+
+## Requirements
+
+- Windows 10 or 11, 64-bit — or an Apple Silicon Mac on macOS 11 or newer
+- The [GitHub CLI](https://cli.github.com/), installed and authenticated with
+  `gh auth login`

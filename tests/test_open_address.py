@@ -133,7 +133,7 @@ def test_lands_on_the_issue(later):
     # Said, queued after the row: a big repository loads for seconds, and
     # the status bar alone left you hearing just a list.
     fn, args = later.calls[-1]
-    assert fn == f._say_landing and args == ("Opened #4 — T4",)
+    assert fn == f._say_landing and args == ("Opened issue #4 — T4",)
 
 
 @pytest.mark.parametrize("kind, ref, said", [
@@ -351,3 +351,83 @@ def test_a_scheduled_fallback_runs_only_for_the_list_it_was_for():
     Frame._if_still_current(f, 1, ran.append, "stale")
     Frame._if_still_current(f, 2, ran.append, "current")
     assert ran == ["current"]
+
+
+def test_an_address_goes_into_what_it_lands_on(later):
+    # Opening an address is finding its row and pressing Enter: a pull
+    # request's text, not a list with it selected (cli/cli #14845). Where it
+    # landed is said by _go_in, after the focus has moved.
+    f = _frame(ghviewer.VIEW_ISSUES, (ghviewer.VIEW_ISSUES, "item", "4"), ISSUES)
+    f._speak_landing = True
+    f._go_in = "go_in"
+    assert Frame._take_pending_row(f, ISSUES, 1) == 1
+    assert later.calls == [("if_still_current", (1, "go_in", ISSUES[1], "Opened issue #4 — T4"))]
+
+
+def test_other_landings_stay_on_the_row(later):
+    f = _frame(ghviewer.VIEW_ISSUES, (ghviewer.VIEW_ISSUES, "item", "4"), ISSUES)
+    f._go_in = "go_in"
+    Frame._take_pending_row(f, ISSUES, 1)
+    assert all("go_in" not in args for fn, args in later.calls)
+
+
+def test_a_release_or_run_address_lands_on_its_row(later):
+    # Going in would list its files or artifacts, and lose the way back to
+    # Notifications or Activity: its row and details are what's wanted.
+    rels = [Release("v2", "", False, False, ""), Release("v1", "", False, False, "")]
+    f = _frame(ghviewer.VIEW_RELEASES, (ghviewer.VIEW_RELEASES, "release", "v1"), rels)
+    f._speak_landing = True
+    f._go_in = "go_in"
+    assert Frame._take_pending_row(f, rels, 1) == 1
+    assert all("go_in" not in args for fn, args in later.calls)
+
+
+def test_go_in_kinds_are_things_you_read():
+    # A favorite workflow must never start Run Workflow, nor a label or tag
+    # drill on from Favorites.
+    assert set(ghviewer.GO_IN_KINDS) == {"item", "commit", "discussion", "discussion_title"}
+
+
+def _go_frame(focused, pane):
+    went, said = [], []
+    f = SimpleNamespace(_speak_landing=True)
+    # Going in can start a new load, which forgets the landing (Changed Files).
+    f.on_item_activated = lambda e: (went.append(True), setattr(f, "_speak_landing", False))
+    f._focused_item = lambda: focused
+    f.FindFocus = lambda: "focus"
+    f._pane_index = lambda w: pane
+    f._tell = lambda m, cat=None: said.append(m)
+    f._announce = lambda m: said.append(("status bar", m))
+    return f, went, said
+
+
+def test_go_in_only_if_the_row_is_still_selected_with_focus_on_the_list():
+    f, went, said = _go_frame(ISSUES[0], 1)
+    Frame._go_in(f, ISSUES[1], "Opened issue #4 — T4")      # moved to another row
+    assert went == [] and said == ["Opened issue #4 — T4"]
+    f, went, said = _go_frame(ISSUES[0], 0)
+    Frame._go_in(f, ISSUES[0], "m")                        # Tabbed to the repository list
+    assert went == []
+    f, went, said = _go_frame(ISSUES[0], 1)
+    Frame._go_in(f, ISSUES[0], "m")
+    assert went == [True] and said == ["m"]
+
+
+def test_a_fetched_commit_from_an_address_goes_in(later):
+    f = _commit_frame()
+    f._speak_landing = True
+    f._if_still_current = "if_still_current"
+    f._go_in = "go_in"
+    far = Commit("c" * 40, "ccccccc", "Far", "me", "")
+    Frame._on_commit_fetched(f, far, "o/r", 3)
+    fn, args = later.calls[-1]
+    assert fn == "if_still_current" and args[:3] == (3, "go_in", far)
+
+
+def test_an_address_names_what_it_opened():
+    pr = Item(14845, "Skip token refresh", "OPEN", "u", True)
+    assert Frame._describe_landing(pr) == "Opened pull request #14845 — Skip token refresh"
+    f = SimpleNamespace(_speak_landing=True, _describe_landing=Frame._describe_landing)
+    assert Frame._landed_on(f, pr, 14845) == "Opened pull request #14845 — Skip token refresh"
+    f._speak_landing = False             # Go To keeps its own words
+    assert Frame._landed_on(f, pr, 14845) == "Jumped to #14845 — Skip token refresh"

@@ -590,6 +590,9 @@ def test_a_discussion_notification_opens_here_on_it():
                     "url": "https://api.github.com/repos/o/r/discussions/12"}})
     Frame._open_discussion_here(frame, numbered)
     assert calls == [("o/r", v), (v, "discussion", "12")]
+    # Found, it is gone into and said, like any Enter from a list of many.
+    assert frame._speak_landing is True
+    frame._speak_landing = False
     # GitHub often gives no address for a discussion: found by its title.
     calls.clear()
     bare = gh_data.parse_notification({
@@ -598,6 +601,7 @@ def test_a_discussion_notification_opens_here_on_it():
         "subject": {"title": "Why?", "type": "Discussion", "url": None}})
     Frame._open_discussion_here(frame, bare)
     assert calls == [("o/r", v), (v, "discussion_title", "Why?")]
+    assert frame._speak_landing is True
 
 
 @needs_wx

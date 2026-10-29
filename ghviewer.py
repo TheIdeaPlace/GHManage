@@ -917,6 +917,10 @@ PENDING_KINDS = ("item", "commit", "release", "run", "discussion", "milestone")
 # to 512 characters and says "N characters selected" beyond that, so a longer
 # stop selects just its first line.
 SELECTION_READ_MAX = 500
+# What opening an address goes into, as Enter on its row would: things you
+# read. A release, a run, a tag, a label or a workflow lands on its row, where
+# its details are; going in would list its files, start a run and so on.
+GO_IN_KINDS = ("item", "commit", "discussion", "discussion_title")
 NO_MORE_VIEWS = (VIEW_FAVORITES, VIEW_MY_WORK, VIEW_ORGS, VIEW_JOBS, VIEW_ARTIFACTS,
                  VIEW_PAGES, VIEW_PAGEFILES, VIEW_FILES, VIEW_CODE, VIEW_INSIGHTS)
 # Insights lists up to this many contributors, most commits first (GitHub gives 500).
@@ -4986,7 +4990,15 @@ class GhViewerFrame(wx.Frame):
         row = self._row_of(found) if found is not None else -1
         if row >= 0:
             if kind != "same":
-                wx.CallLater(150, self._say_landing, self._describe_landing(found))
+                msg = self._describe_landing(found)
+                if getattr(self, "_speak_landing", False) and kind in GO_IN_KINDS:
+                    # Opening an address of something you read goes into it,
+                    # as Enter on its row would: a pull request's text, a
+                    # commit's changed files. Only finding its row left you
+                    # in a list (Kelly, cli/cli #14845).
+                    wx.CallLater(150, self._if_still_current, token, self._go_in, found, msg)
+                else:
+                    wx.CallLater(150, self._say_landing, msg)
             return row
         if kind == "same":
             return 0
@@ -5032,6 +5044,30 @@ class GhViewerFrame(wx.Frame):
                 wx.CallLater(150, self._say_landing, said)
         return 0
 
+    def _landed_on(self, item, number: int) -> str:
+        """Where Go To, or opening an address, landed on an issue or PR:
+        an address names what it opened, as its other landings do."""
+        if getattr(self, "_speak_landing", False):
+            return self._describe_landing(item)
+        return f"Jumped to #{number} — {item.title}"
+
+    def _go_in(self, item, msg: str) -> None:
+        """After landing on an address's row: what Enter on that row does, if
+        the row is still the one selected and focus still on the list (the
+        user may have moved). Then where it landed, said after the focus has
+        moved, so the move doesn't cut it off."""
+        speak = getattr(self, "_speak_landing", False)
+        if (self._focused_item() is item
+                and self._pane_index(self.FindFocus()) == 1):
+            # A commit's changed files are a new load, which forgets the
+            # landing; so it was read above.
+            self.on_item_activated(None)
+        if speak:
+            self._speak_landing = False
+            self._tell(msg, announce.STATUS)
+        else:
+            self._announce(msg)
+
     def _say_landing(self, msg: str, final: bool = True) -> None:
         """Where opening an address, or an item from Activity, Notifications
         or search, ended up. Said when it came from one of those (which set
@@ -5053,7 +5089,8 @@ class GhViewerFrame(wx.Frame):
     @staticmethod
     def _describe_landing(item) -> str:
         if isinstance(item, Item):
-            return f"Opened #{item.number} — {item.title}"
+            what = "pull request" if item.is_pr else "issue"
+            return f"Opened {what} #{item.number} — {item.title}"
         if isinstance(item, Commit):
             return f"Opened commit {item.short_sha} — {_first_line(item.message)}"
         if isinstance(item, Release):
@@ -5108,6 +5145,10 @@ class GhViewerFrame(wx.Frame):
         where = "closed, so" if found.closed else "not among the most recently active, so"
         said = (f"Opened discussion #{found.number} — {found.title}. It is {where} "
                 "it is shown first.")
+        if getattr(self, "_speak_landing", False):
+            # Into it, as Enter on its row would: its text and comments.
+            wx.CallLater(150, self._if_still_current, token, self._go_in, found, said)
+            return
         self._announce(said)
         announce.announce(said, announce.STATUS)
 
@@ -5139,10 +5180,13 @@ class GhViewerFrame(wx.Frame):
         self.git_items = [commit] + [c for c in self.git_items if c.sha != commit.sha]
         self._populate_filtered_list(self.git_items, use_favorite_prefix=True)
         self._focus_list(0)
-        self._say_landing(
-            f"Opened commit {commit.short_sha} — {_first_line(commit.message)}. "
-            "It is not among the latest commits listed, so it is shown first."
-        )
+        msg = (f"Opened commit {commit.short_sha} — {_first_line(commit.message)}. "
+               "It is not among the latest commits listed, so it is shown first.")
+        if getattr(self, "_speak_landing", False):
+            # Into it, as Enter on its row would: its changed files.
+            wx.CallLater(150, self._if_still_current, token, self._go_in, commit, msg)
+        else:
+            self._say_landing(msg)
 
     def _on_items_error(self, msg: str) -> None:
         self._announce(f"Error: {msg}")
@@ -8072,7 +8116,7 @@ class GhViewerFrame(wx.Frame):
                 self._show_details(row)
                 # Move focus to the details box so user can read/navigate comments
                 wx.CallLater(100, self.details_text.SetFocus)
-                self._say_landing(f"Jumped to #{number} — {item.title}")
+                self._say_landing(self._landed_on(item, number))
                 return
         if self.view_mode != VIEW_ISSUES or not self.repo:
             return  # left the issues list before this ran (it may be scheduled)
@@ -8144,7 +8188,7 @@ class GhViewerFrame(wx.Frame):
         self.list_ctrl.Focus(row)
         self._show_details(row)
         wx.CallLater(100, self.details_text.SetFocus)
-        self._say_landing(f"Jumped to #{number} — {item.title}")
+        self._say_landing(self._landed_on(item, number))
 
     def on_select_branch(self, event: wx.CommandEvent) -> None:
         """Ctrl+B — select which branch to view commits for; in Files, which
@@ -8941,6 +8985,9 @@ class GhViewerFrame(wx.Frame):
             self._set_pending_target(VIEW_DISCUSSIONS, "discussion", target.ref)
         elif note.title:
             self._set_pending_target(VIEW_DISCUSSIONS, "discussion_title", note.title)
+        # Into it once found, and said, like any other Enter from a list of many.
+        # Set after _open_repo_from_list, whose load clears it.
+        self._speak_landing = True
 
     def _mark_notification_read(self) -> None:
         note = self._focused_notification()

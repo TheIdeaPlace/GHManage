@@ -195,6 +195,9 @@ and Copy Details work.
   what GHManage says after Blame, Mark All Read and Save Search, and when a
   gist's files arrive. In My Work and search results, an item's comment count
   says "(not read in this list)", since the comments are read in its own view.
+- Activity failed with "Not Found" since Security Alerts came in: a helper of
+  theirs took the name GHManage keeps your GitHub login under. Activity loads
+  again, and an Activity event with no one named no longer says "ghost".
 
 - `Alt+N` on a long comment made NVDA say only "592 characters selected". It now
   selects the comment's first line, which says whose it is, so it is read; `Down

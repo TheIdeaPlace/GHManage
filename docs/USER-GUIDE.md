@@ -1040,7 +1040,7 @@ The details panel gives the whole event as one sentence, then who, what, the rep
 
 `G`, or **Actions → Go to Event's Repository** (`Ctrl+Shift+G`), opens the repository the event happened in, here in GHManage, at its **Issues & PRs**. The repository is selected in the list on the left too, when it is there. `Backspace` from those issues brings you back to the feed, on the event you left, without loading it again. The status bar says "Back to activity".
 
-`G` works from the details panel as well as the list, since that is where "Press G to open owner/name here in GHManage" is read. The context menu on an event offers the same, as **Go to owner/name**.
+`G` works from the details panel as well as the list, so you can read an event and go to its repository without moving back. The context menu on an event offers the same, as **Go to owner/name**.
 
 ### Favoriting from the feed
 
@@ -1300,7 +1300,7 @@ The details panel shows everything about the item you are on in the list, and ch
 
 Web addresses always have a line of their own, under a line reading "URL:", so you can arrow to one and read or copy it on its own.
 
-Many items end with the keys that act on them, for example "Press Enter to list this run's artifacts." Those keys work from the details panel too, where they are read, as well as from the list: `Enter` in the details panel does what it does in the list, except where `Enter` is what brought you into the panel to read. `Backspace` in the details panel goes back to the item's row in the list.
+The panel describes the item and nothing else: it doesn't list keys. The keys for the item are on the **Actions** menu and the context menu, with each key in its label, and the status bar's key hints name the main ones for the view. The keys that act on the item work from the details panel as well as from the list: `Enter` in the details panel does what it does in the list, except where `Enter` is what brought you into the panel to read. `Backspace` in the details panel goes back to the item's row in the list.
 
 ### Moving between comments
 

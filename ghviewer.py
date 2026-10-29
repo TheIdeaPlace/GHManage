@@ -1056,7 +1056,7 @@ OPEN_LABELS = {
 # Where Enter reads: focus moves into the details panel, at the top, and
 # Backspace there comes back to the row. Enter in the panel itself does
 # nothing more in these; in the other views it does what it does in the list,
-# so "Press Enter to…" in their details is true where it is read.
+# so the item's keys work wherever it is read.
 READ_VIEWS = (VIEW_ISSUES, VIEW_DISCUSSIONS, VIEW_SECURITY, VIEW_INSIGHTS, VIEW_GISTS,
               VIEW_PAGEFILES, VIEW_FILES)
 # Ctrl+O opens the selected thing on GitHub (Actions ▸ Open on GitHub). These
@@ -6759,14 +6759,14 @@ class GhViewerFrame(wx.Frame):
             self._do_new_label()
             return
         # G here rather than in the list's handler so it also works from the
-        # details panel, where "Press G" is read.
+        # details panel, where the event is read.
         if (key == ord("G") and not event.HasAnyModifiers()
                 and self.view_mode in GO_TO_REPO_VIEWS):
             self._go_to_event_repo()
             return
         if (key == ord("H") and not event.HasAnyModifiers()
                 and self.view_mode in (VIEW_ISSUES, VIEW_COMMITS, VIEW_HISTORY)):
-            # Here so it works from the details panel, where "Press H" is read.
+            # Here so it works from the details panel, where the item is read.
             self._show_changed_files()
             return
         if self.view_mode == VIEW_CODE and not event.HasAnyModifiers():
@@ -6841,7 +6841,7 @@ class GhViewerFrame(wx.Frame):
 
     def _enter_from_details(self) -> bool:
         """Enter in the details panel does what it does in the list, so the
-        "Press Enter to…" read there is true where it is read. Not where Enter
+        item's keys work wherever it is read. Not where Enter
         reads (READ_VIEWS, a file in Files): you are reading already, and
         it would only move the caret. True when it acted."""
         item = self._focused_item()

@@ -194,6 +194,10 @@ and Copy Details work.
 - Branches, and the branch pickers (Select Branch, Compare Branches, Run
   Workflow), failed to load on a repository with more than 30 branches. They now
   list them, and the pickers open faster.
+- **For George (#78):** Copy Diff now has a key, `Ctrl+Shift+X`, and Open Diff in
+  Default App has `Ctrl+Shift+E`. A pull request's changes address
+  (`…/pull/12/files`, or `…/pull/12.diff`) opens straight into its changed
+  files.
 - Opening the address of an issue, pull request, commit or discussion now takes
   you into it, as `Enter` on its row would. A pull request's address opens its
   text and comments; a commit's opens its changed files. Before, it only selected

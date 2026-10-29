@@ -431,3 +431,81 @@ def test_an_address_names_what_it_opened():
     assert Frame._landed_on(f, pr, 14845) == "Opened pull request #14845 — Skip token refresh"
     f._speak_landing = False             # Go To keeps its own words
     assert Frame._landed_on(f, pr, 14845) == "Jumped to #14845 — Skip token refresh"
+
+
+# ── George (#78): a pull request's changes, by address and by key ──────
+
+
+@pytest.mark.parametrize("address, files", [
+    ("https://github.com/cli/cli/pull/14845", False),
+    ("https://github.com/cli/cli/pull/14845/files", True),
+    ("https://github.com/cli/cli/pull/14845/changes", True),
+    ("https://github.com/cli/cli/pull/14845.diff", True),
+    ("https://github.com/cli/cli/pull/14845.patch", True),
+    ("https://github.com/cli/cli/issues/14845", False),
+    ("https://github.com/cli/cli/pull/14845/filesystem", False),
+])
+def test_which_addresses_are_a_pull_requests_changes(address, files):
+    assert ghviewer.wants_changed_files(address) is files
+    target = ghviewer.parse_github_url(address)
+    assert (target.repo, target.kind, target.ref) == ("cli/cli", "item", "14845")
+
+
+PR = Item(5, "T5", "OPEN", "u5", True)
+
+
+def _files_frame(item):
+    went = []
+    f = SimpleNamespace(_speak_landing=True, _landing_files=True,
+                        on_item_activated=lambda e: went.append("enter"),
+                        _show_changed_files=lambda: went.append("files"))
+    f._focused_item = lambda: item
+    f.FindFocus = lambda: "focus"
+    f._pane_index = lambda w: 1
+    f._tell = lambda m, cat=None: None
+    f._announce = lambda m: None
+    return f, went
+
+
+def test_a_changes_address_goes_into_changed_files():
+    f, went = _files_frame(PR)
+    Frame._go_in(f, PR, "Opened pull request #5 — T5")
+    assert went == ["files"]
+    assert f._landing_files is False      # spent: a later Go To reads, as before
+
+
+def test_an_issue_at_a_changes_address_opens_as_an_issue():
+    # GitHub sends …/pull/N/files for an issue to the issue; so does this.
+    f, went = _files_frame(ISSUES[0])
+    Frame._go_in(f, ISSUES[0], "Opened issue #5 — T5")
+    assert went == ["enter"]
+
+
+def test_any_final_landing_forgets_the_changes_wish():
+    f = SimpleNamespace(_speak_landing=False, _landing_files=True, _announce=lambda m: None)
+    Frame._say_landing(f, "#99999 not found in o/r.")
+    assert f._landing_files is False
+
+
+def test_the_address_a_diff_link_redirects_to():
+    raw = "https://patch-diff.githubusercontent.com/raw/cli/cli/pull/14845.diff"
+    t = ghviewer.parse_github_url(raw)
+    assert (t.repo, t.kind, t.ref) == ("cli/cli", "item", "14845")
+    assert ghviewer.wants_changed_files(raw)
+    assert ghviewer.first_github_url("see " + raw + " please") == raw
+
+
+def test_opening_a_changes_address_remembers_it(later):
+    f = _address_frame()
+    Frame._open_address(f, "https://github.com/cli/cli/pull/14845/files")
+    assert f._landing_files is True
+    f = _address_frame()
+    Frame._open_address(f, "https://github.com/cli/cli/pull/14845")
+    assert f._landing_files is False
+
+
+def test_copy_diff_and_open_diff_have_keys():
+    import inspect
+    src = inspect.getsource(Frame._build_menu)
+    assert 'Copy Diff' + chr(92) + 'tCtrl+Shift+X' in src
+    assert 'Open Diff in Default App' + chr(92) + 'tCtrl+Shift+E' in src

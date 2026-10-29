@@ -306,7 +306,9 @@ def _clean_address(value: str) -> str:
     return v
 
 
-_URL_IN_TEXT = re.compile(r"https?://(?:www\.)?github\.com/[^\s<>\"'`]+", re.IGNORECASE)
+_URL_IN_TEXT = re.compile(
+    r"https?://(?:(?:www\.)?github\.com|patch-diff\.githubusercontent\.com)/[^\s<>\"'`]+",
+    re.IGNORECASE)
 
 
 def first_github_url(text: str) -> str:
@@ -330,6 +332,11 @@ def parse_github_url(value: str) -> GitHubTarget | None:
     if v.lower().startswith("git@github.com:"):
         repo = _parse_repo_spec(v)
         return GitHubTarget(repo) if repo else None
+    raw = re.match(r"(?:https?://)?patch-diff\.githubusercontent\.com/raw/"
+                   r"([^/]+)/([^/]+)/pull/(\d+)\.(?:diff|patch)$", v, re.I)
+    if raw:
+        # Where github.com's …/pull/12.diff redirects; the browser shows this.
+        return GitHubTarget(f"{raw.group(1)}/{raw.group(2)}", "item", raw.group(3))
     if "://" in v or v.lower().startswith(("github.com/", "www.github.com/")):
         if "://" not in v:
             v = "https://" + v
@@ -370,6 +377,8 @@ def parse_github_url(value: str) -> GitHubTarget | None:
     arg = rest[1] if len(rest) > 1 else ""
     if section in ("issues", "pull") and arg.isdigit():
         return GitHubTarget(repo, "item", arg)
+    if section == "pull" and re.fullmatch(r"\d+\.(diff|patch)", arg):
+        return GitHubTarget(repo, "item", arg.split(".")[0])
     if section == "discussions" and arg.isdigit():
         return GitHubTarget(repo, "discussion", arg)
     if section == "milestone" and arg.isdigit():
@@ -694,6 +703,16 @@ def open_in_default_app(path: str) -> bool:
     except OSError:
         return False
     return True
+
+
+_PR_FILES_RE = re.compile(r"/pull/\d+(?:/(?:files|changes)\b|\.(?:diff|patch)\b)", re.I)
+
+
+def wants_changed_files(value: str) -> bool:
+    """Whether an address is a pull request's changes rather than the pull
+    request: ``…/pull/12/files``, ``…/pull/12.diff``. Those open its
+    Changed Files, as H on it does."""
+    return bool(_PR_FILES_RE.search(value or ""))
 
 
 def opening_label(kind: str, ref: str) -> str:
@@ -2949,7 +2968,7 @@ class GhViewerFrame(wx.Frame):
         self._act_copy_ident = copy_menu.Append(ID_COPY_IDENT, "Copy Number\tCtrl+Shift+I")
         copy_menu.Append(ID_COPY_DETAILS, "Copy Details\tCtrl+Shift+D")
         # A pull request's or commit's whole diff; in Changed Files, the file's.
-        self._act_copy_diff = copy_menu.Append(ID_COPY_DIFF, "Copy Diff")
+        self._act_copy_diff = copy_menu.Append(ID_COPY_DIFF, "Copy Diff\tCtrl+Shift+X")
         # The repository in front of you, from any view: for a terminal or
         # another tool, where an address on its own won't clone.
         copy_menu.AppendSeparator()
@@ -3006,7 +3025,8 @@ class GhViewerFrame(wx.Frame):
         self._act_changed_files = actions_menu.Append(
             ID_CHANGED_FILES, "Changed Files (H)\tCtrl+Shift+H"
         )
-        self._act_open_diff = actions_menu.Append(ID_OPEN_DIFF, "Open Diff in Default App")
+        self._act_open_diff = actions_menu.Append(ID_OPEN_DIFF,
+                                                 "Open Diff in Default App\tCtrl+Shift+E")
         # A repository's files. H, B and W are the keys in the list.
         self._act_file_history = actions_menu.Append(ID_FILE_HISTORY, "File History (H)")
         self._act_blame = actions_menu.Append(ID_BLAME, "Blame (B)")
@@ -3530,8 +3550,10 @@ class GhViewerFrame(wx.Frame):
         self._act_compare.Enable(self.view_mode == VIEW_BRANCHES)
         changes = self.view_mode in (VIEW_ISSUES, VIEW_COMMITS, VIEW_HISTORY)
         self._act_changed_files.Enable(changes)
-        self._act_copy_diff.Enable(changes or self.view_mode == VIEW_FILES)
-        self._act_open_diff.Enable(changes or self.view_mode == VIEW_FILES)
+        # Always on, so Ctrl+Shift+X and Ctrl+Shift+E are never silent:
+        # _diff_action says what to select when there is nothing to diff.
+        self._act_copy_diff.Enable(True)
+        self._act_open_diff.Enable(True)
         self._act_file_history.Enable(self.view_mode == VIEW_CODE)
         self._act_blame.Enable(self.view_mode == VIEW_CODE)
         self._act_whole_file.Enable(self.view_mode == VIEW_FILES)
@@ -4041,6 +4063,7 @@ class GhViewerFrame(wx.Frame):
         self._fetch_token += 1
         # A landing to be said belongs to the load that was just replaced.
         self._speak_landing = False
+        self._landing_files = False
         return self._fetch_token
 
     def _fetch_is_current(self, token: int) -> bool:
@@ -5057,11 +5080,17 @@ class GhViewerFrame(wx.Frame):
         user may have moved). Then where it landed, said after the focus has
         moved, so the move doesn't cut it off."""
         speak = getattr(self, "_speak_landing", False)
+        files = getattr(self, "_landing_files", False)
+        self._landing_files = False
         if (self._focused_item() is item
                 and self._pane_index(self.FindFocus()) == 1):
             # A commit's changed files are a new load, which forgets the
-            # landing; so it was read above.
-            self.on_item_activated(None)
+            # landing; so it was read above. An issue at a /pull/N/files
+            # address opens as an issue, as GitHub sends it there too.
+            if files and getattr(item, "is_pr", False):
+                self._show_changed_files()
+            else:
+                self.on_item_activated(None)
         if speak:
             self._speak_landing = False
             self._tell(msg, announce.STATUS)
@@ -5075,6 +5104,9 @@ class GhViewerFrame(wx.Frame):
         without it all you hear is a list. Queued behind the row focus lands
         on. Anywhere else, the status bar, as before. ``final=False`` for a
         "fetching…" on the way there."""
+        if final:
+            # Whatever happened, the …/files wish belonged to this landing.
+            self._landing_files = False
         if not getattr(self, "_speak_landing", False):
             self._announce(msg)
             return
@@ -7719,6 +7751,7 @@ class GhViewerFrame(wx.Frame):
         if target.kind in PENDING_KINDS:
             self._set_pending_target(view, target.kind, target.ref)
             self._speak_landing = True
+            self._landing_files = target.kind == "item" and wants_changed_files(value)
         self._select_in_repo_list(repo)
         if target.kind in PENDING_KINDS:
             # A big repository's list takes seconds; say what is coming rather
@@ -8187,6 +8220,14 @@ class GhViewerFrame(wx.Frame):
         self.list_ctrl.Select(row, on=True)
         self.list_ctrl.Focus(row)
         self._show_details(row)
+        if getattr(self, "_landing_files", False) and item.is_pr:
+            # …/pull/N/files: its changed files. The landing is said after
+            # the switch, as _go_in does, so the move doesn't cut it off.
+            self._landing_files = False
+            msg = self._landed_on(item, number)
+            self._show_changed_files()
+            wx.CallLater(150, self._say_landing, msg)
+            return
         wx.CallLater(100, self.details_text.SetFocus)
         self._say_landing(self._landed_on(item, number))
 

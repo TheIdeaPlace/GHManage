@@ -348,7 +348,7 @@ Opening a repository shows its **Issues & PRs**. Use `Ctrl+2` through `Ctrl+0` t
 **File → Open Repository or Address…** (`Ctrl+Shift+O`) opens any repository on GitHub, yours or not, without cloning it, and goes straight to most things inside one. Type or paste:
 
 - `owner/name`, `https://github.com/owner/name` or `git@github.com:owner/name.git` to open the repository on its issues and pull requests. It is added to the repository list with a pin, where it stays between sessions until you remove it.
-- The address of an issue or pull request (`…/issues/12`, `…/pull/12`, `…/pull/12/files`) to open it: its text and comments, in the details panel, as `Enter` on its row would. `Backspace` takes you to its row in the repository's issues and pull requests. When it is not among those loaded, closed say, it is fetched and added, as Go To Issue does.
+- The address of an issue or pull request (`…/issues/12`, `…/pull/12`) to open it: its text and comments, in the details panel, as `Enter` on its row would. A pull request's changes (`…/pull/12/files`, `…/pull/12.diff`) open its [Changed Files](#changed-files) instead, as `H` on it would. `Backspace` takes you to its row in the repository's issues and pull requests. When it is not among those loaded, closed say, it is fetched and added, as Go To Issue does.
 - A commit (`…/commit/<sha>`) to open its changed files, as `Enter` on it in Commits would. A commit that isn't among the default branch's latest is fetched and shown first.
 - A release (`…/releases/tag/v1.2`) or a workflow run (`…/actions/runs/<id>`) to open Releases or Workflow Runs on it, with its details in the details panel. A branch (`…/tree/<branch>`) opens that branch's commits.
 - A list (`…/releases`, `…/pulls`, `…/actions`, `…/labels`, `…/branches`, `…/tags`, `…/commits`) to open that view.
@@ -578,7 +578,7 @@ Each commit shows its short SHA, message, author and date; **View → Columns…
 
 **Changed Files** lists the files a pull request or a commit changed, and lets you read each file's changed lines, a line at a time, with every line saying whether it was added, removed or left as it was.
 
-To open it, press `Enter` on a commit in Commits, or `H` on a pull request in Issues & PRs or on a commit. **Actions → Changed Files** (`Ctrl+Shift+H`) and the context menu do the same. When the files have loaded, GHManage says how many there are and how many lines were added and removed, for example "3 files changed, 40 lines added, 12 removed." `Backspace` takes you back to the pull request or commit, in the list as you left it.
+To open it, press `Enter` on a commit in Commits, or `H` on a pull request in Issues & PRs or on a commit. **Actions → Changed Files** (`Ctrl+Shift+H`) and the context menu do the same, and so does opening a pull request's changes address, such as `…/pull/12/files` or `…/pull/12.diff`, with **File → Open Repository or Address…**. When the files have loaded, GHManage says how many there are and how many lines were added and removed, for example "3 files changed, 40 lines added, 12 removed." `Backspace` takes you back to the pull request or commit, in the list as you left it.
 
 Each file has a row with its path, what happened to it (Added, Modified, Deleted or Renamed), how many lines were added and removed and, for a pull request, how many review comments it has. The quick filter (`Ctrl+F`) finds a file by part of its name.
 
@@ -654,12 +654,12 @@ The choice is remembered, and the details panel changes straight away. The Chat 
 
 ### Copying a diff or opening it in another app
 
-**Actions → Copy → Copy Diff** puts a diff on the clipboard, the way `gh pr diff 123 | clip` does:
+**Actions → Copy → Copy Diff** (`Ctrl+Shift+X`) puts a diff on the clipboard, the way `gh pr diff 123 | clip` does:
 
 - on a pull request in Issues & PRs, or a commit in Commits, the whole diff;
 - in Changed Files, the selected file's diff.
 
-**Actions → Open Diff in Default App** saves the same diff as a `.diff` file and opens it in whatever app your computer opens `.diff` files with, such as Visual Studio Code. If no app is set for `.diff` files, Windows asks which app to use, and Notepad is one of the choices. The files are kept in a GHManage folder in your temporary folder.
+**Actions → Open Diff in Default App** (`Ctrl+Shift+E`) saves the same diff as a `.diff` file and opens it in whatever app your computer opens `.diff` files with, such as Visual Studio Code. If no app is set for `.diff` files, Windows asks which app to use, and Notepad is one of the choices. The files are kept in a GHManage folder in your temporary folder.
 
 ---
 
@@ -1184,7 +1184,7 @@ With a filter on, every key acts on the row you are on: `Enter`, `F`, `C`, `O`, 
 | Copy Title | `Ctrl+Shift+T` | The title: an issue's title, a commit's first line, a release's name |
 | Copy Number, Copy SHA, … | `Ctrl+Shift+I` | The short thing that names the item; see below |
 | Copy Details | `Ctrl+Shift+D` | Everything in the details panel |
-| Copy Diff | | A pull request's or commit's whole diff, as `gh pr diff` prints it; in Changed Files, the selected file's. See [Changed Files](#changed-files) |
+| Copy Diff | `Ctrl+Shift+X` | A pull request's or commit's whole diff, as `gh pr diff` prints it; in Changed Files, the selected file's. See [Changed Files](#changed-files) |
 | Copy Path | `Ctrl+Shift+I` | In Files, the file's or folder's path from the top of the repository; in Changed Files, the changed file's. Copy Details copies a file's text |
 | Copy HTTPS Clone URL | | The repository's address for `git clone`, such as `https://github.com/nvaccess/nvda.git` |
 | Copy SSH Clone URL | | The same over SSH, such as `git@github.com:nvaccess/nvda.git` |
@@ -1341,7 +1341,7 @@ Everything that acts on what the list is showing is on the **Actions** menu, whi
 | Select Branch… | `Ctrl+B` | Commits; in Files it reads **Select Branch or Tag…** |
 | Compare Branches… | `Ctrl+Shift+B` | Branches |
 | Changed Files | `Ctrl+Shift+H`, or `H` in the list | Issues & PRs, on a pull request; Commits; File History |
-| Open Diff in Default App | | Issues & PRs, on a pull request; Commits; Changed Files; File History |
+| Open Diff in Default App | `Ctrl+Shift+E` | Issues & PRs, on a pull request; Commits; Changed Files; File History |
 | File History | `H` in the list | Files, on a file |
 | Blame | `B` in the list | Files, on a file |
 | Open Whole File | `W` in the list | Changed Files |
@@ -1398,6 +1398,8 @@ On a Mac, use `Cmd` in place of `Ctrl` for every shortcut that has one, `Option`
 | `Ctrl+Shift+O` | Open a repository, or an issue, pull request, commit, release or run, by its address |
 | `Alt+N` / `Alt+P` | Next / previous comment in the details panel; change in File History, and change or review comment in Changed Files; Markdown heading, or blame run, in Files; file in Gists |
 | `Ctrl+Shift+H` | The changed files of the selected pull request or commit |
+| `Ctrl+Shift+X` | Copy the pull request's or commit's diff (in Changed Files, the file's) |
+| `Ctrl+Shift+E` | Open that diff in your default app for `.diff` files |
 | `Ctrl+Shift+U` | Watch settings for the repository |
 | `Ctrl+Shift+K` | Switch GitHub account |
 | Applications key or `Shift+F10` | Context menu for the selected item or repository |

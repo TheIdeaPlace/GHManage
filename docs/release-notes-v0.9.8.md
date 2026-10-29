@@ -192,10 +192,16 @@ and Copy Details work.
 - Branches, and the branch pickers (Select Branch, Compare Branches, Run
   Workflow), failed to load on a repository with more than 30 branches. They now
   list them, and the pickers open faster.
-- Opening the address of an issue, pull request, commit, release or run now says
-  what it is opening ("Opening #14845 in cli/cli…"), and says it again when it
-  gets there. On a big repository the list takes several seconds to load, and
-  before, all you heard was a list.
+- Opening the address of an issue, pull request, commit or discussion now takes
+  you into it, as `Enter` on its row would. A pull request's address opens its
+  text and comments; a commit's opens its changed files. Before, it only selected
+  the row, and all you heard was a list of issues. It also says what it is
+  opening ("Opening #14845 in cli/cli…") and, when it gets there, "Opened pull
+  request #14845 — …", since a big repository takes several seconds to load.
+  `Backspace` takes you to its row in the list. The same goes for an issue, pull
+  request, commit or discussion opened from Notifications, Activity, My Work,
+  search results or Favorites. A release, run, tag, label or workflow still
+  lands on its row.
 
 ## Before you start
 

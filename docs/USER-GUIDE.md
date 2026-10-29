@@ -279,7 +279,7 @@ Every key that does something is on a menu with the key in its name, the single-
 
 Three keys work the same way in every view.
 
-**`Enter` goes in, inside GHManage.** Where the selected item has a deeper list, `Enter` shows it: a branch's commits, a tag's files, a release's files, a run's artifacts, a folder. Otherwise `Enter` goes into the item itself: focus moves into the details panel, at the top, where its text, comments or lines are, and `Alt+N` and `Alt+P` move through them. Where the thing to do is an action here, `Enter` does it: run a workflow, download an artifact or a release's file. In Favorites, Notifications, Activity, My Work and search results, `Enter` opens the thing in its own view here, on it. `Enter` never opens the web browser. Where GHManage has no view for something, `Enter` says so: "GHManage has no view for that; Ctrl+O opens it on GitHub."
+**`Enter` goes in, inside GHManage.** Where the selected item has a deeper list, `Enter` shows it: a branch's commits, a tag's files, a release's files, a run's artifacts, a folder. Otherwise `Enter` goes into the item itself: focus moves into the details panel, at the top, where its text, comments or lines are, and `Alt+N` and `Alt+P` move through them. Where the thing to do is an action here, `Enter` does it: run a workflow, download an artifact or a release's file. In Favorites, Notifications, Activity, My Work and search results, `Enter` opens the thing in its own view here. An issue, pull request, commit or discussion opens into it, as `Enter` on its row would: its text and comments, or a commit's changed files; `Backspace` goes to its row, and again back to where you were. Anything else lands on its row. `Enter` never opens the web browser. Where GHManage has no view for something, `Enter` says so: "GHManage has no view for that; Ctrl+O opens it on GitHub."
 
 **`Ctrl+O` opens the selected thing on GitHub**, in every view (**Actions → Open on GitHub**). It acts on the pane with focus, as Copy and `F` do: in the repository list, the repository. A few views open something else, and the menu item is named for it: a release's file opens its release (**Open Its Release on GitHub**), a publish in GitHub Pages opens its commit (**Open Its Commit on GitHub**), and a published page opens on the web (**Open on the Web**). An artifact has no page of its own, so there the item is greyed out and `Ctrl+O` says so.
 
@@ -348,14 +348,14 @@ Opening a repository shows its **Issues & PRs**. Use `Ctrl+2` through `Ctrl+0` t
 **File → Open Repository or Address…** (`Ctrl+Shift+O`) opens any repository on GitHub, yours or not, without cloning it, and goes straight to most things inside one. Type or paste:
 
 - `owner/name`, `https://github.com/owner/name` or `git@github.com:owner/name.git` to open the repository on its issues and pull requests. It is added to the repository list with a pin, where it stays between sessions until you remove it.
-- The address of an issue or pull request (`…/issues/12`, `…/pull/12`, `…/pull/12/files`) to open the repository's issues with that one selected. When it is not among those loaded, closed say, it is fetched and added, as Go To Issue does.
-- A commit (`…/commit/<sha>`) to open the commits with it selected. A commit that isn't among the default branch's latest is fetched and shown first.
-- A release (`…/releases/tag/v1.2`), a workflow run (`…/actions/runs/<id>`) or a branch (`…/tree/<branch>`) to open the releases, the workflow runs or that branch's commits.
+- The address of an issue or pull request (`…/issues/12`, `…/pull/12`, `…/pull/12/files`) to open it: its text and comments, in the details panel, as `Enter` on its row would. `Backspace` takes you to its row in the repository's issues and pull requests. When it is not among those loaded, closed say, it is fetched and added, as Go To Issue does.
+- A commit (`…/commit/<sha>`) to open its changed files, as `Enter` on it in Commits would. A commit that isn't among the default branch's latest is fetched and shown first.
+- A release (`…/releases/tag/v1.2`) or a workflow run (`…/actions/runs/<id>`) to open Releases or Workflow Runs on it, with its details in the details panel. A branch (`…/tree/<branch>`) opens that branch's commits.
 - A list (`…/releases`, `…/pulls`, `…/actions`, `…/labels`, `…/branches`, `…/tags`, `…/commits`) to open that view.
 
 - A branch's history (`…/commits/<branch>`) opens that branch's commits; a workflow file (`…/actions/workflows/ci.yml`) opens Workflows.
 
-A discussion's address opens the repository's Discussions with the discussion selected. Any other address inside a repository, a file or the wiki say, opens the repository on its issues, and the status bar says GHManage has no view for that page. A branch whose name has a `/` in it can't be told apart from a folder in a `…/tree/` address, so that opens the repository too. Only a repository's own address pins it: a link from an email to an issue, a file or anything else in a repository opens without adding to your list.
+A discussion's address opens it, in the repository's Discussions. Each address says what it is opening, for example "Opening #14845 in cli/cli…", and then where it got to, "Opened pull request #14845 — …": a big repository can take several seconds to load. Any other address inside a repository, a file or the wiki say, opens the repository on its issues, and the status bar says GHManage has no view for that page. A branch whose name has a `/` in it can't be told apart from a folder in a `…/tree/` address, so that opens the repository too. Only a repository's own address pins it: a link from an email to an issue, a file or anything else in a repository opens without adding to your list.
 
 Addresses can be pasted as they come: wrapped in `<…>` or brackets, followed by a full stop or comma, in any mix of upper and lower case. Only github.com is read; addresses on other GitHub hosts, gists, raw files and the API get the "Couldn't read that" message.
 
@@ -914,7 +914,7 @@ Why you were told is GitHub's reason in words: review requested, mention, team m
 
 | Key | Action |
 |-----|--------|
-| `Enter` | Open it here in GHManage, on it: an issue or pull request in its repository's Issues & PRs, a discussion in Discussions (found by its title when GitHub doesn't give its number), a release in Releases, a commit in Commits. A workflow run, which notifications don't identify, opens the repository's Workflow Runs; a security alert its Security Alerts. Anything else says GHManage has no view for it, and that `Ctrl+O` opens it on GitHub. Either way it is marked read |
+| `Enter` | Open it here in GHManage, on it: an issue or pull request in its repository's Issues & PRs, a discussion in Discussions (found by its title when GitHub doesn't give its number), a release in Releases, a commit in Commits. A workflow run, which notifications don't identify, opens the repository's Workflow Runs; a security alert its Security Alerts. Anything else says GHManage has no view for it, and that `Ctrl+O` opens it on GitHub. Either way it is marked read. An issue, pull request, commit or discussion opens into it, as `Enter` on its row would: its text and comments, or a commit's changed files; `Backspace` goes to its row, and again back to where you were. Anything else lands on its row. |
 | `Backspace` | From what `Enter` opened, come back to the same notification |
 | `M` | Mark it read |
 | `Delete` or `Ctrl+D` | Mark it done: it leaves your inbox, as the Done button on github.com does. GHManage can't bring it back; github.com's **Done** tab can |
@@ -1149,7 +1149,7 @@ Each row shows the kind of item, its repository, its title and a short descripti
 
 | Key | Action |
 |-----|--------|
-| `Enter` | Open it here in GHManage, in its own view, on it: a repository at its Issues & PRs, an issue or pull request, a commit, a branch's commits, a tag, a release, a label, a workflow, a run, a discussion, a milestone or a security alert. A file, a published page or a job has no view to land on, and GHManage says so |
+| `Enter` | Open it here in GHManage, in its own view, on it: a repository at its Issues & PRs, an issue or pull request, a commit, a branch's commits, a tag, a release, a label, a workflow, a run, a discussion, a milestone or a security alert. A file, a published page or a job has no view to land on, and GHManage says so. An issue, pull request, commit or discussion opens into it, as `Enter` on its row would: its text and comments, or a commit's changed files; `Backspace` goes to its row, and again back to where you were. Anything else lands on its row. |
 | `Backspace` | From what `Enter` opened, come back to Favorites, on the same row |
 | `Ctrl+O` | Open the favorite on GitHub |
 | `F` | Remove it from favorites |

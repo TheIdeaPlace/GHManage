@@ -22,9 +22,8 @@ else:
 import ghviewer  # noqa: E402
 from favorites import FavoriteEntry  # noqa: E402
 from gh_data import (  # noqa: E402
-    Artifact, Branch, Commit, Discussion, Gist, InsightRow, Item, Label, PagesBuild,
-    PagesFile, Release, ReleaseAsset, RepoEntry, SecurityAlert, Tag, Workflow,
-    WorkflowJob, WorkflowRun,
+    Artifact, Branch, Commit, Discussion, Gist, InsightRow, Item, PagesBuild,
+    PagesFile, Release, ReleaseAsset, SecurityAlert, Tag, WorkflowRun,
 )
 
 Frame = ghviewer.GhViewerFrame
@@ -580,7 +579,6 @@ def test_enter_on_a_favorite_opens_it_here(no_browser, fav, opened):
     f = _fav_frame()
     Frame._open_favorite(f, fav)
     assert f.opened == opened and f.told == []
-    assert ghviewer.favorite_opens_here(fav)
 
 
 @pytest.mark.parametrize("fav, said", [
@@ -593,7 +591,6 @@ def test_a_favorite_with_no_view_here_says_so(no_browser, fav, said):
     f = _fav_frame()
     Frame._open_favorite(f, fav)
     assert f.opened == [] and f.told == [said]
-    assert not ghviewer.favorite_opens_here(fav)
 
 
 def test_favorites_found_by_name_land_on_them(monkeypatch):
@@ -616,7 +613,6 @@ def test_an_event_s_repository_opens_here():
                                    action="starred o/r", url="https://github.com/o/r")
     Frame._open_event(f, event)
     assert f.opened == [("repo", "o/r", V.VIEW_ISSUES)]
-    assert ghviewer.event_opens_here(event)
 
 
 @pytest.mark.parametrize("url, view", [
@@ -637,39 +633,7 @@ def test_on_the_web():
     assert ghviewer.on_the_web("https://o.github.io/r/") == "on the web"
 
 
-# ── Details text: what Enter does, and true where it is read ────────────
-
-
-def _details(view, item, **attrs):
-    text = SimpleNamespace(value="")
-    text.SetValue = lambda v: setattr(text, "value", v)
-    text.GetValue = lambda: text.value
-    f = SimpleNamespace(view_mode=view, details_text=text, git_items=[item],
-                        commit_branch="", pages_site=None, _comment_positions=[], repo="o/r")
-    for k, v in attrs.items():
-        setattr(f, k, v)
-    Frame._show_git_details(f, 0)
-    return f.details_text.GetValue()
-
-
-@pytest.mark.parametrize("view, item, line", [
-    (V.VIEW_BRANCHES, Branch("main", "s", "m", "a", "d"),
-     "Press Enter to show this branch's commits; Ctrl+O opens it on GitHub."),
-    (V.VIEW_TAGS, Tag("v1", "abc"), "Press Enter to read the files at this tag"),
-    (V.VIEW_ASSETS, ReleaseAsset(1, "a.zip", 1, 1, ""),
-     "Press Enter to download it into a folder you choose."),
-    (V.VIEW_ASSETS, ReleaseAsset(1, "a.zip", 1, 1, ""), "Ctrl+O opens its release on GitHub."),
-    (V.VIEW_WORKFLOWS, Workflow(1, "CI", "ci.yml", "active"), "Ctrl+O opens it on GitHub."),
-    (V.VIEW_JOBS, WorkflowJob(1, "build", "completed", "success"),
-     "From the list, Backspace goes back to the workflow runs."),
-    (V.VIEW_PAGEFILES, PagesFile("index.md", "https://o.github.io/r/"),
-     "Ctrl+O opens this page on the web; S opens the site's home page."),
-    (V.VIEW_PAGES, PagesBuild(1, "built", "abc", "me", ""), "Ctrl+O opens this publish's commit"),
-    (V.VIEW_STARRED, RepoEntry("o/r", url="u"), "Press Enter to open o/r here in GHManage."),
-    (V.VIEW_LABELS, Label("bug"), "  Ctrl+O            open it on GitHub"),
-])
-def test_details_say_what_the_keys_do(view, item, line):
-    assert line in _details(view, item)
+# ── Details text: no browser behind Enter ───────────────────────────
 
 
 def test_no_details_text_sends_you_to_the_browser_with_enter():
@@ -703,7 +667,6 @@ def test_a_favorite_security_alert_lands_in_security_alerts():
     Frame._open_favorite(f, fav)
     assert f.opened == [("repo", "o/r", V.VIEW_SECURITY),
                         ("target", "alert", "https://github.com/o/r/security/dependabot/3")]
-    assert ghviewer.favorite_opens_here(fav)
 
 
 def test_a_landing_refused_aloud_stops_speaking_landings(monkeypatch):

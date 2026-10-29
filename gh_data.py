@@ -4265,7 +4265,7 @@ def sort_alerts(alerts: list[SecurityAlert]) -> list[SecurityAlert]:
     return sorted(newest, key=lambda a: a.severity_rank)
 
 
-def _login(user) -> str:
+def _user_login(user) -> str:
     return (user.get("login") or "") if isinstance(user, dict) else ""
 
 
@@ -4309,7 +4309,7 @@ def _dependabot_alert(raw: dict) -> SecurityAlert:
             "relationship": dep.get("relationship") or "",
             "advisory_url": f"https://github.com/advisories/{ghsa}" if ghsa else "",
             "dismissed_at": raw.get("dismissed_at") or "",
-            "dismissed_by": _login(raw.get("dismissed_by")),
+            "dismissed_by": _user_login(raw.get("dismissed_by")),
             "dismissed_reason": raw.get("dismissed_reason") or "",
             "dismissed_comment": raw.get("dismissed_comment") or "",
             "fixed_at": raw.get("fixed_at") or "",
@@ -4350,7 +4350,7 @@ def _code_alert(raw: dict) -> SecurityAlert:
             "classifications": [c for c in inst.get("classifications") or []
                                 if isinstance(c, str)],
             "dismissed_at": raw.get("dismissed_at") or "",
-            "dismissed_by": _login(raw.get("dismissed_by")),
+            "dismissed_by": _user_login(raw.get("dismissed_by")),
             "dismissed_reason": raw.get("dismissed_reason") or "",
             "dismissed_comment": raw.get("dismissed_comment") or "",
             "fixed_at": raw.get("fixed_at") or "",
@@ -4382,10 +4382,10 @@ def _secret_alert(raw: dict) -> SecurityAlert:
             "more_locations": bool(raw.get("has_more_locations")),
             "publicly_leaked": bool(raw.get("publicly_leaked")),
             "bypassed": bool(raw.get("push_protection_bypassed")),
-            "bypassed_by": _login(raw.get("push_protection_bypassed_by")),
+            "bypassed_by": _user_login(raw.get("push_protection_bypassed_by")),
             "bypassed_at": raw.get("push_protection_bypassed_at") or "",
             "resolution": raw.get("resolution") or "",
-            "resolved_by": _login(raw.get("resolved_by")),
+            "resolved_by": _user_login(raw.get("resolved_by")),
             "resolved_at": raw.get("resolved_at") or "",
             "resolution_comment": raw.get("resolution_comment") or "",
         },
@@ -4637,7 +4637,7 @@ class Discussions:
     total: int = 0
 
 
-def _login_of(node) -> str:
+def _author_login(node) -> str:
     # A deleted account's posts have no author; GitHub shows them as "ghost".
     return (node.get("login") or "ghost") if isinstance(node, dict) else "ghost"
 
@@ -4677,13 +4677,13 @@ def _parse_discussion(node: dict, repo: str) -> Discussion:
         node_id=node.get("id") or "",
         repo=repo,
         category=category.get("name") or "",
-        author=_login_of(node.get("author")),
+        author=_author_login(node.get("author")),
         created_at=node.get("createdAt") or "",
         updated_at=node.get("updatedAt") or "",
         body=node.get("body") or "",
         answerable=bool(category.get("isAnswerable")),
         answered=bool(node.get("isAnswered")) or answer is not None,
-        answer_author=_login_of(answer.get("author")) if answer else "",
+        answer_author=_author_login(answer.get("author")) if answer else "",
         answer_chosen_at=node.get("answerChosenAt") or "",
         closed=bool(node.get("closed")),
         locked=bool(node.get("locked")),
@@ -4765,7 +4765,7 @@ def _parse_discussion_comment(node: dict) -> DiscussionComment:
     parsed = [_parse_discussion_comment(r) for r in replies.get("nodes") or []
               if isinstance(r, dict)]
     return DiscussionComment(
-        author=_login_of(node.get("author")),
+        author=_author_login(node.get("author")),
         body=node.get("body") or "",
         created_at=node.get("createdAt") or "",
         url=node.get("url") or "",

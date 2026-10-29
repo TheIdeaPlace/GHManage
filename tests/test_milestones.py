@@ -260,7 +260,7 @@ def test_enter_lists_its_issues_and_backspace_comes_back_to_it():
     assert frame.view_mode == ghviewer.VIEW_ISSUES and frame.milestone_filter is m
     assert frame.label_filter == "" and frame.current_limit == 100
     assert log == [("switch", ghviewer.VIEW_ISSUES, False), ("load", m)]
-    assert "2027.1" in frame.announced[-1] and "Backspace" in frame.announced[-1]
+    assert frame.announced[-1] == "Showing issues and PRs in milestone '2027.1'."
     log.clear()
     Frame._back_to_milestones(frame)
     assert frame.milestone_filter is None

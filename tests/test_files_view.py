@@ -191,7 +191,7 @@ def test_only_markdown_has_headings_to_move_between():
 @pytest.mark.parametrize("text, said", [
     ("", "f.txt: empty."),
     ("one line", "f.txt: 1 line."),
-    ("\x00\x01", "f.txt: a binary file, 2 B. Ctrl+O opens it on GitHub."),
+    ("\x00\x01", "f.txt: a binary file, 2 B."),
 ])
 def test_what_a_file_says_first(text, said):
     assert codeview.file_text(RepoFile("f.txt", size=2), text)[0].split("\n")[0] == said
@@ -199,14 +199,13 @@ def test_what_a_file_says_first(text, said):
 
 def test_what_rows_that_are_not_text_say():
     assert codeview.entry_text(RepoFile("src", "dir")) == (
-        "src/: a folder. Press Enter to open it.")
+        "src/: a folder.")
     assert codeview.entry_text(RepoFile("lib", "submodule", sha="abcdef123")) == (
-        "lib: a submodule, another repository, at commit abcdef1. "
-        "Ctrl+O opens the folder it is in on GitHub, which links to it.")
+        "lib: a submodule, another repository, at commit abcdef1.")
     assert codeview.entry_text(RepoFile("l", "link"), "../target\n") == "l: a link to ../target."
     big = RepoFile("big.json", size=gh_data.MAX_FILE_BYTES + 1)
     assert codeview.too_big(big) and not codeview.too_big(RepoFile("s", size=10))
-    assert codeview.entry_text(big) == "big.json: 1.0 MB, too large to show here. Ctrl+O opens it on GitHub."
+    assert codeview.entry_text(big) == "big.json: 1.0 MB, too large to show here."
 
 
 def test_folder_names_and_counts():
@@ -504,7 +503,7 @@ def test_blame_shows_in_runs_and_b_again_shows_the_file():
     Frame._toggle_blame(f)
     assert f.details_text.value.split("\n")[1] == "Lines 1 to 2: Kelly, 2026-09-01, ccccccc Fix"
     assert f._code_blame is SRC[1] and Frame._nav_noun(f) == "run"
-    assert f.told[-1] == "Blame of x.py: 1 run of lines. Alt+N and Alt+P move between them."
+    assert f.told[-1] == "Blame of x.py: 1 run of lines."
     Frame._show_code_details(f, 1)         # the same row again keeps the blame
     assert f.details_text.value.startswith("src/x.py: who last changed")
     Frame._toggle_blame(f)

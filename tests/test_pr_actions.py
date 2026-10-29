@@ -145,7 +145,7 @@ def test_format_checks():
     lines = text.splitlines()
     assert lines[:2] == ["Checks for #5 Fix", "1 failed, 2 passed"]
     assert "failed: CI / test" in lines and "    3 failed" in lines and "passed: lint2" in lines
-    assert "L on its run" in lines[-1]
+    assert lines[-1] == "passed: lint2"
 
 
 def test_format_no_checks():

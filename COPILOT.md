@@ -483,6 +483,14 @@ UI thread via `wx.CallAfter`. Never touch wx widgets from a worker thread.
   `speech.set_label` to put the label on the native view VoiceOver reads.
   `tests/test_mac_labels.py` reads every dialog's labels back from AppKit on the macOS CI job.
 - **Keyboard first.** Every action has a keybinding. Never add a feature that requires mouse-only access.
+- **No key instructions in content.** The details panel, a file's, diff's or gist's text,
+  reports (what failed, checks) and result announcements describe the item only: never
+  "Press Enter to…", "Ctrl+O opens it on GitHub", "Backspace goes back…" or a key table.
+  Keys go on the menus (key in the label), the status bar's key hints (`_set_view_status`
+  keys), Keyboard Shortcuts (`commands.LIST_KEYS`) and the user guide. An empty or error state
+  may say what would help ("…press R in a moment"); a refusal for a key pressed may name the
+  key that works. `tests/test_no_instructions_in_content.py` runs every details formatter on
+  samples and scans the formatters' source; an allowed empty state goes in its `ALLOWED`.
 - **No patronizing hand-holding.** Don't add "Welcome!" dialogs or verbose tooltips. Power users want speed.
 - **Comment navigation** uses Alt+N/Alt+P with position tracking via `_comment_positions`.
 

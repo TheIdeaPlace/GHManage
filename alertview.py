@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import re
 
-from commands import READ_KEYS
 from gh_data import ALERT_CODE, ALERT_DEPENDABOT, ALERT_SECRET, SecurityAlert, SecurityAlerts
 
 # An advisory's description can run to pages; the rest is a keypress away.
@@ -44,7 +43,7 @@ def trim_text(text: str, max_lines: int = MAX_DESCRIPTION_LINES,
     if len(kept) < len(lines):
         if not kept:  # one enormous line
             kept = [lines[0][:max_chars].rstrip()]
-        kept.append("(More on GitHub: Ctrl+O opens the alert.)")
+        kept.append("(More on GitHub.)")
     return "\n".join(kept)
 
 
@@ -172,7 +171,6 @@ def alert_details(alert: SecurityAlert) -> str:
     if advisory:
         lines.append("Advisory URL:")
         lines.append(advisory)
-    lines.append(READ_KEYS)
     if description.strip():
         lines += ["", RULE, "", trim_text(description)]
     return "\n".join(lines)

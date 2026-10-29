@@ -102,16 +102,14 @@ def entry_text(f: RepoFile, target: str | None = None) -> str:
     a submodule, a link (with where it points, once known), or a file too
     large to show."""
     if f.kind == "dir":
-        return f"{f.path}/: a folder. Press Enter to open it."
+        return f"{f.path}/: a folder."
     if f.kind == "submodule":
-        return (f"{f.path}: a submodule, another repository, at commit {f.sha[:7]}. "
-                "Ctrl+O opens the folder it is in on GitHub, which links to it.")
+        return f"{f.path}: a submodule, another repository, at commit {f.sha[:7]}."
     if f.kind == "link":
         if target is None:
             return f"{f.path}: a link."
         return f"{f.path}: a link to {target.strip()}."
-    return (f"{f.path}: {f.size_human()}, too large to show here. "
-            "Ctrl+O opens it on GitHub.")
+    return f"{f.path}: {f.size_human()}, too large to show here."
 
 
 def file_text(f: RepoFile, text: str) -> tuple[str, list[int]]:
@@ -119,8 +117,7 @@ def file_text(f: RepoFile, text: str) -> tuple[str, list[int]]:
     for Alt+N and Alt+P. The first line names the file and its length;
     line N of the file is line N of the panel."""
     if is_binary(text):
-        return (f"{f.path}: a binary file, {f.size_human()}. "
-                "Ctrl+O opens it on GitHub."), []
+        return f"{f.path}: a binary file, {f.size_human()}.", []
     lines = file_lines(text)
     if not lines:
         return f"{f.path}: empty.", []

@@ -579,7 +579,6 @@ def test_enter_on_a_favorite_opens_it_here(no_browser, fav, opened):
     f = _fav_frame()
     Frame._open_favorite(f, fav)
     assert f.opened == opened and f.told == []
-    assert ghviewer.favorite_opens_here(fav)
 
 
 @pytest.mark.parametrize("fav, said", [
@@ -592,7 +591,6 @@ def test_a_favorite_with_no_view_here_says_so(no_browser, fav, said):
     f = _fav_frame()
     Frame._open_favorite(f, fav)
     assert f.opened == [] and f.told == [said]
-    assert not ghviewer.favorite_opens_here(fav)
 
 
 def test_favorites_found_by_name_land_on_them(monkeypatch):
@@ -615,7 +613,6 @@ def test_an_event_s_repository_opens_here():
                                    action="starred o/r", url="https://github.com/o/r")
     Frame._open_event(f, event)
     assert f.opened == [("repo", "o/r", V.VIEW_ISSUES)]
-    assert ghviewer.event_opens_here(event)
 
 
 @pytest.mark.parametrize("url, view", [
@@ -670,7 +667,6 @@ def test_a_favorite_security_alert_lands_in_security_alerts():
     Frame._open_favorite(f, fav)
     assert f.opened == [("repo", "o/r", V.VIEW_SECURITY),
                         ("target", "alert", "https://github.com/o/r/security/dependabot/3")]
-    assert ghviewer.favorite_opens_here(fav)
 
 
 def test_a_landing_refused_aloud_stops_speaking_landings(monkeypatch):

@@ -47,12 +47,17 @@ from favorites import FavoriteEntry  # noqa: E402
 Frame = ghviewer.GhViewerFrame
 ROOT = Path(__file__).resolve().parent.parent
 
-# A key named in text: "Press Enter", "Ctrl+O", "Backspace", "Alt+N", and
-# Enter said as what it does ("Enter opens", "Enter to list").
+# A key named in text: "Press Enter", "Ctrl+O", "Backspace", "Alt+N", "Keys";
+# Enter said as what it does ("Enter opens", "Enter on one", a key table's
+# "  Enter    list…"); a letter key said as what it does ("L shows what
+# failed", "J for the jobs"); and Delete, Insert, Escape or F6 the same way.
 FORBIDDEN = re.compile(
-    r"\bpress\b|Ctrl\+|Backspace|Alt\+[NP]\b|\bEnter (to|opens|goes|lists|reads|runs|"
-    r"downloads|shows)\b|\bKeys:",
-    re.IGNORECASE)
+    r"(?i:\bpress\b|Ctrl\+|Cmd\+|Backspace|Alt\+[NP]\b|\bKeys\b|right-click)"
+    r"|\bEnter (to|opens|goes|lists|list|reads|runs|downloads|shows|on|there|or|in)\b"
+    r"|^\s*Enter\s{2,}"
+    r"|\b[A-Z] (opens|shows|reruns|cancels|marks|unsubscribes|checks|copies|goes|for|lists|"
+    r"reads|refreshes|tries|moves|deletes|comments|favorites)\b"
+    r"|\b(Delete|Insert|Escape|F6) (or|opens|deletes|marks|clears|creates)\b")
 
 # Empty and error states, which may say what would help.
 ALLOWED = {
@@ -169,7 +174,10 @@ def test_issue_details_name_no_keys(item, view):
     text = f.details_text.value
     assert text.startswith(f"#{item.number} ")
     _assert_no_keys(text, f"#{item.number} in {view}")
-    assert f"Comments: {item.comments}" in text.split("\n")
+    said = f"Comments: {item.comments}"
+    if item.comments and not item.comment_list and item.repo:
+        said += " (not read in this list)"     # the fact, without the key
+    assert said in text.split("\n")
 
 
 @pytest.mark.parametrize("fav", [
@@ -334,3 +342,74 @@ def test_the_read_keys_line_is_gone():
     assert not hasattr(commands, "READ_KEYS")
     for name in FORMATTERS:
         assert "READ_KEYS" not in (ROOT / name).read_text(encoding="utf-8"), name
+
+
+@pytest.mark.parametrize("line", [
+    "Press Enter to list this run's artifacts, J for its jobs and steps.",
+    "The whole log of a job: J for the jobs, then Enter on one.",
+    "L shows what failed: GitHub's errors and the end of each failed step's log.",
+    "E reruns it, X cancels it while it is running.",
+    "M marks it read, Delete marks it done, U unsubscribes",
+    "from the thread, G opens o/r here.",
+    "Keys, from the list or from here:",
+    "  Enter             list the issues and PRs with this label",
+    "  Insert or Ctrl+I  create a new label",
+    "workflow_dispatch). Right-click for the same option.",
+    "Backspace goes back to the list; Ctrl+O opens it on GitHub.",
+    "Comments: 3 — Enter opens it here, with them",
+    "Files here: 2. Alt+N moves to the first.",
+    "Saved 'x'. It is in the repository list, after My Work; Enter there runs it again.",
+    "Marked all read. GitHub may take a moment to catch up; R refreshes the list.",
+])
+def test_the_lines_this_rule_removed_would_be_caught(line):
+    assert FORBIDDEN.search(line)
+
+
+@pytest.mark.parametrize("line", [
+    "A fork", "Comments: 3 (not read in this list)", "Archived (read-only)",
+    "Deleting a label strips it from every issue and PR that",
+    "An artifact has no page of its own on GitHub.", "(More on GitHub.)",
+])
+def test_plain_facts_are_not_caught(line):
+    assert not FORBIDDEN.search(line)
+
+
+# ── What GHManage says: results describe the result ───────────────────
+
+# Where what is said may name a key: a refusal for a key that was pressed,
+# naming the one that works, or an error or empty state saying what would
+# help. By the function it is said in.
+REFUSALS = {
+    "_toggle_favorite",      # "Gists can't be favorites. Ctrl+Shift+C copies its link."
+    "on_open_browser",       # "An artifact has no page on GitHub. Enter downloads it."
+    "on_char_hook",          # Comment on This Line outside the file's lines
+    "on_view_more",          # My Work's and All branches' limits
+    "_do_delete_label",      # "Switch to the Labels view… (Ctrl+8)."
+    "_save_search",          # "Run a search first (Ctrl+Shift+F)."
+    "_mark_all_read",        # "Switch to Notifications first (Ctrl+Shift+N)."
+}
+
+
+def _said_in(tree: ast.AST) -> list[tuple[str, str]]:
+    """(function, text) for the text of each _tell, _announce and
+    announce.announce call."""
+    out = []
+    for fn in ast.walk(tree):
+        if not isinstance(fn, ast.FunctionDef):
+            continue
+        for n in ast.walk(fn):
+            if (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                    and n.func.attr in ("_tell", "_announce", "announce") and n.args):
+                text = "".join(_strings(n.args[0]))
+                if text:
+                    out.append((fn.name, text))
+    return out
+
+
+def test_what_is_said_names_no_keys():
+    tree = ast.parse((ROOT / "ghviewer.py").read_text(encoding="utf-8"))
+    said = _said_in(tree)
+    assert len(said) > 100      # the scan finds what is said
+    hits = [(name, text) for name, text in said
+            if name not in REFUSALS and FORBIDDEN.search(_clean(text))]
+    assert not hits, hits

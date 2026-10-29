@@ -50,7 +50,8 @@ is named for where `Backspace` goes, such as **Back to Branches (Backspace)**;
 **File → Clear Quick Filter (Escape)**, **View → Next Pane (F6)** and
 **Previous Pane (Shift+F6)** are new, and **New Label… (Insert)** and the
 Delete items name their keys. The status bar's key hints use the same words,
-and `Enter` in the details panel does what it does in the list. **Run Workflow on Branch…** and **Download Artifact…** are now that
+and `Enter` in the details panel does what it does in the list. **Run Workflow
+on Branch…** and **Download Artifact…** are now that
 first item, **Run on a Branch… (Enter)** and **Download… (Enter)**.
 
 Also fixed: `Ctrl+Insert` in Labels no longer opens New Label, and
@@ -191,7 +192,9 @@ and Copy Details work.
   details no longer list keys. It describes the item only. The keys are on the
   menus, with each key in its name, and in the status bar. The same goes for a
   file's text, a gist, what failed in a run and a pull request's checks, and for
-  what GHManage says after Blame and when a gist's files arrive.
+  what GHManage says after Blame, Mark All Read and Save Search, and when a
+  gist's files arrive. In My Work and search results, an item's comment count
+  says "(not read in this list)", since the comments are read in its own view.
 
 - `Alt+N` on a long comment made NVDA say only "592 characters selected". It now
   selects the comment's first line, which says whose it is, so it is read; `Down

@@ -385,8 +385,8 @@ If the repository has no site, the app says so plainly rather than showing you a
 empty list.
 
 From there, `Enter` opens the site's **Published Pages** — every file the site
-serves, each with the address it is served at. `Enter` on one opens it in your
-default browser, `S` opens the site's home page, and `Backspace` returns to the
+serves, each with the address it is served at. `Enter` on one reads it in the
+details panel, `Ctrl+O` opens it on the web, `S` opens the site's home page, and `Backspace` returns to the
 publish history. The **Actions** menu carries Open Published Site too, enabled
 once a site is found. `F` favorites a page like anything else, so a page you
 check often is one keystroke away from any repository.

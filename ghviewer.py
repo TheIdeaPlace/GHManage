@@ -1110,11 +1110,6 @@ def address_view(target: "GitHubTarget | None") -> str | None:
     return ADDRESS_VIEWS.get(target.kind)
 
 
-def opens_here(url: str) -> bool:
-    """Whether Enter on something at ``url`` opens it in a view here."""
-    return bool(url) and address_view(parse_github_url(url)) is not None
-
-
 def on_the_web(url: str) -> str:
     """"on GitHub", or "on the web" for an address somewhere else (a
     published page)."""
@@ -1149,34 +1144,6 @@ NOTIFICATION_VIEWS = {
     "RepositoryDependabotAlertsThread": VIEW_SECURITY,
 }
 
-
-def notification_opens_here(note) -> bool:
-    """Whether Enter on the notification ``note`` opens what it is about in
-    a view here (as _open_notification does)."""
-    if note.is_item or (note.subject_type in ("Discussion", "Release") and note.repo):
-        return True
-    if note.subject_type in NOTIFICATION_VIEWS and note.repo:
-        return True
-    return opens_here(note.url)
-
-
-def event_opens_here(event) -> bool:
-    """Whether Enter on the Activity event ``event`` opens what it is about
-    in a view here (as _open_event does)."""
-    if event.subject_kind in ("issue", "PR") and event.number and event.repo:
-        return True
-    return opens_here(event.url)
-
-
-def favorite_opens_here(fav) -> bool:
-    """Whether Enter on the favorite ``fav`` opens it in a view here."""
-    if fav.item_type == "repository" and fav.repo:
-        return True
-    if fav.item_type in FAVORITE_BY_NAME and fav.repo and fav.title:
-        return True
-    if fav.item_type == "security alert" and fav.repo and fav.url:
-        return True
-    return opens_here(fav.url)
 
 # The columns each view can show (gh_columns). Views listing the same kind
 # of thing share a set: every list of repositories has the same columns.
@@ -5689,7 +5656,11 @@ class GhViewerFrame(wx.Frame):
             lines.append(f"Labels: {', '.join(item.labels)}")
         if item.assignees:
             lines.append(f"Assignees: {', '.join(item.assignees)}")
-        lines.append(f"Comments: {item.comments}")
+        if item.comments and not item.comment_list and item.repo:
+            # Search and My Work don't fetch comments; the item's own view does.
+            lines.append(f"Comments: {item.comments} (not read in this list)")
+        else:
+            lines.append(f"Comments: {item.comments}")
         if item.is_pr:
             lines.append(f"Draft: {'Yes' if item.is_draft else 'No'}")
             lines.append(f"Merged: {'Yes' if item.is_merged else 'No'}")
@@ -9067,8 +9038,7 @@ class GhViewerFrame(wx.Frame):
             for row, item in enumerate(self._shown):
                 self._redraw_row(row, item)
             self._set_notifications_status()
-        self._announce("Marked all read. GitHub may take a moment to catch up; "
-                       "R refreshes the list.")
+        self._announce("Marked all read. GitHub may take a moment to catch up.")
 
     def _toggle_include_read(self) -> None:
         """I, or View ▸ Include Read Notifications."""
@@ -10230,8 +10200,7 @@ class GhViewerFrame(wx.Frame):
             return
         self.saved_searches = add_saved_search(SavedSearch(name, query, kind))
         self._refresh_repo_list()
-        self._announce(f"Saved '{name}'. It is in the repository list, after My Work; "
-                       "Enter there runs it again.")
+        self._announce(f"Saved '{name}'. It is in the repository list, after My Work.")
 
     # ── Pull requests ───────────────────────────────────────────────────
 

@@ -42,10 +42,6 @@ def milestone_details(m: Milestone) -> str:
     lines.append(RULE)
     lines.append("")
     lines.extend(m.description.splitlines() or ["(no description)"])
-    lines.append("")
-    # Enter does here what it does in the list (ghviewer._enter_from_details).
-    lines.append("Press Enter to list its issues and pull requests; "
-                 "Ctrl+O opens it on GitHub.")
     return "\n".join(lines)
 
 

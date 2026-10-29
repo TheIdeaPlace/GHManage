@@ -43,8 +43,7 @@ def file_summary(f: ChangedFile) -> str:
 def _no_lines(f: ChangedFile) -> str:
     """Why there are no lines to show."""
     if f.additions or f.deletions:
-        return ("GitHub doesn't show the lines of a change this large. "
-                "Ctrl+O opens the file on GitHub.")
+        return "GitHub doesn't show the lines of a change this large."
     if f.previous_filename and f.previous_filename != f.filename:
         return "No lines changed, only the name."
     return "No lines to show: a binary file, or one with no text."

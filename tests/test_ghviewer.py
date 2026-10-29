@@ -745,7 +745,7 @@ def test_repo_details():
     for line in ("Language: Python", "Stars: 2,345", "Forks: 600",
                  "Open issues and pull requests: 2,500", "Last pushed: 2026-10-04"):
         assert line in lines
-    assert lines[-1] == "Press Ctrl+O to open it on GitHub."
+    assert lines[-1] == "Last pushed: 2026-10-04"
     assert not any(line.startswith("Archived") for line in lines)
 
 
@@ -974,7 +974,7 @@ def test_activity_details_read_as_a_sentence_then_fields():
     assert "About: Crash on start" in lines and "Repository: x/proj" in lines
     assert _address_after(lines, "URL:") == EVENT.url
     assert "Same here." in lines and "Second line." in lines
-    assert lines[-1] == "Press G to open x/proj here in GHManage."
+    assert lines[-1] == "Second line."
 
 
 def test_activity_details_without_title_or_body():

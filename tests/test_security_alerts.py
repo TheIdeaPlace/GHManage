@@ -383,7 +383,7 @@ def test_a_long_description_is_cut_at_a_line():
     text = "\n".join(f"line {i}" for i in range(100))
     cut = alertview.trim_text(text, max_lines=5)
     assert cut.split("\n") == ["line 0", "line 1", "line 2", "line 3", "line 4",
-                               "(More on GitHub: Ctrl+O opens the alert.)"]
+                               "(More on GitHub.)"]
     one_line = alertview.trim_text("x" * 50, max_chars=10)
     assert one_line.split("\n")[0] == "x" * 10
     assert alertview.trim_text("short\n\n\n\nend") == "short\n\nend"

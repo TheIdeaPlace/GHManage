@@ -88,11 +88,10 @@ def test_before_the_text_comes_it_says_so():
 
 @pytest.mark.parametrize("f, said", [
     (GistFile("x", 2, content=""), ["(empty)"]),
-    (GistFile("x", 2_000_000), ["Too large to show here. Ctrl+O opens the gist on GitHub."]),
-    (GistFile("x", 2, content="\x00\x01"), ["Not text. Ctrl+O opens the gist on GitHub."]),
+    (GistFile("x", 2_000_000), ["Too large to show here."]),
+    (GistFile("x", 2, content="\x00\x01"), ["Not text."]),
     (GistFile("x", 2_000_000, content="a\n", truncated=True),
-     ["a", "", "GitHub sent only the start of x. Ctrl+O opens the gist on GitHub, "
-               "with all of it."]),
+     ["a", "", "GitHub sent only the start of x; the rest is on GitHub."]),
 ])
 def test_files_that_cannot_be_shown_whole_say_so(f, said):
     assert gistview.file_body(f) == said
@@ -100,8 +99,8 @@ def test_files_that_cannot_be_shown_whole_say_so(f, said):
 
 def test_a_gist_with_more_files_than_github_lists_says_so():
     text, _ = gistview.gist_text(_loaded(GistFile("a", content="x"), cut=True))
-    assert text.endswith("GitHub listed only some of this gist's files. "
-                         "Ctrl+O opens it on GitHub, with all of them.")
+    assert text.endswith("GitHub listed only some of this gist's files; "
+                         "the rest are on GitHub.")
 
 
 def test_a_long_description_is_kept_whole():
@@ -257,7 +256,7 @@ def test_files_arriving_while_you_read_are_said(monkeypatch):
     f._focused = g
     f.FindFocus = lambda: f.details_text
     Frame._on_gist_fetched(f, 1, g, _fetched(), "")
-    assert spoken == ["Files here: 2. Alt+N moves to the first."]
+    assert spoken == ["Files here: 2."]
 
 
 def test_files_that_could_not_be_read_say_why(monkeypatch):

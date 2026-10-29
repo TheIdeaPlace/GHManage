@@ -478,8 +478,6 @@ def format_failure_report(run, jobs: list, annotations: dict, failed_log: list) 
             lines.append(f"Last {len(tail)} lines of {name}:" if len(tail) < len(kept)
                          else f"Log of {name}:")
             lines.extend(f"  {ln}" for ln in tail)
-    lines.append("")
-    lines.append("The whole log of a job: J for the jobs, then Enter on one.")
     return "\n".join(lines)
 
 
@@ -2537,9 +2535,6 @@ def format_checks(pr_label: str, checks: list) -> str:
             lines.append(f"    {c.description}")
         if c.link:
             lines.append(f"    {c.link}")
-    if counts.get("fail"):
-        lines += ["", "For a failed workflow, Workflow Runs (Ctrl+7) and L on its run "
-                      "shows what failed."]
     return "\n".join(lines)
 
 
@@ -5429,8 +5424,7 @@ class GhViewerFrame(wx.Frame):
             # A focused text box's new value isn't read: say it arrived.
             self.details_text.SetInsertionPoint(min(caret, self.details_text.GetLastPosition()))
             n = len(item.files)
-            announce.announce(f"Files here: {n}. Alt+N moves to "
-                              f"{'it' if n == 1 else 'the first'}.", announce.STATUS)
+            announce.announce(f"Files here: {n}.", announce.STATUS)
 
     def _on_insights_loaded(self, token: int, insights) -> None:
         """Insights: a row a figure, Section first; what is missing (no push
@@ -5671,17 +5665,6 @@ class GhViewerFrame(wx.Frame):
             lines.append(f"Favorited: {fav.added_at[:10]}")
         lines.append("URL:")
         lines.append(fav.url or "(none)")
-        lines.append("")
-        lines.append("─" * 60)
-        lines.append("")
-        web = on_the_web(fav.url) if fav.url else "on GitHub"
-        if favorite_opens_here(fav):
-            lines.append("Press Enter to open it here in GHManage; Backspace from there "
-                         "comes back.")
-            lines.append(f"Ctrl+O opens it {web}.")
-        else:
-            lines.append(f"GHManage has no view for this; Ctrl+O opens it {web}.")
-        lines.append("Press F to remove from favorites.")
         self.details_text.SetValue("\n".join(lines))
 
     def _show_issue_details(self, idx: int) -> None:
@@ -5706,11 +5689,7 @@ class GhViewerFrame(wx.Frame):
             lines.append(f"Labels: {', '.join(item.labels)}")
         if item.assignees:
             lines.append(f"Assignees: {', '.join(item.assignees)}")
-        if item.comments and not item.comment_list and item.repo:
-            # Search and My Work don't fetch comments; the item's own view does.
-            lines.append(f"Comments: {item.comments} — Enter opens it here, with them")
-        else:
-            lines.append(f"Comments: {item.comments}")
+        lines.append(f"Comments: {item.comments}")
         if item.is_pr:
             lines.append(f"Draft: {'Yes' if item.is_draft else 'No'}")
             lines.append(f"Merged: {'Yes' if item.is_merged else 'No'}")
@@ -5720,24 +5699,6 @@ class GhViewerFrame(wx.Frame):
                 lines.append(f"Branches: {item.head_branch} → {item.base_branch}")
             if item.changed_files or item.additions or item.deletions:
                 lines.append(f"Changes: +{item.additions} -{item.deletions} ({item.changed_files} files)")
-            if getattr(self, "view_mode", None) == VIEW_ISSUES:
-                lines.append("Press H to read the changed files.")
-            if getattr(self, "view_mode", None) == VIEW_ISSUES and item.state == "OPEN":
-                lines.append("Keys: K checks, V review, D "
-                             + ("ready for review" if item.is_draft else "back to draft")
-                             + "; Actions > Pull Request to merge.")
-        if getattr(self, "view_mode", None) == VIEW_ISSUES:
-            # Enter brought you here, to read it.
-            lines.append(commands.READ_KEYS)
-        else:
-            # My Work and search results: Enter opens it in its repository,
-            # unless that is a fork already known.
-            fork = getattr(self, "__dict__", {}).get("_fork_parent", {}).get(item.repo)
-            if fork:
-                lines.append(fork_said(item.number, item.repo, fork))
-            else:
-                lines.append(f"Press Enter to open it in {item.repo or 'its repository'} here; "
-                             "Ctrl+O opens it on GitHub.")
         lines.append("")
         lines.append("─" * 60)
         lines.append("")
@@ -5784,8 +5745,6 @@ class GhViewerFrame(wx.Frame):
                 lines.append(f"Behind: {item.behind}")
             lines.append("URL:")
             lines.append(item.url or "(none)")
-            lines.append("")
-            lines.append("Press Enter to show this branch's commits; Ctrl+O opens it on GitHub.")
         elif isinstance(item, Commit):
             lines.append(f"Commit: {item.sha}")
             lines.append(f"Short SHA: {item.short_sha}")
@@ -5819,20 +5778,11 @@ class GhViewerFrame(wx.Frame):
             if item.additions or item.deletions:
                 lines.append("")
                 lines.append(f"Total: +{item.additions} -{item.deletions} ({item.files_changed} files)")
-            if getattr(self, "view_mode", None) == VIEW_COMMITS:
-                lines.append("")
-                # Enter does in the details panel what it does in the list.
-                lines.append("Press Enter or H to read the changed files; "
-                             "Ctrl+O opens the commit on GitHub.")
         elif isinstance(item, Tag):
             lines.append(f"Tag: {item.name}")
             lines.append(f"Commit: {item.commit_sha}")
             lines.append("URL:")
             lines.append(item.url or "(none)")
-            lines.append("")
-            lines.append("Press Enter to read the files at this tag; Backspace there comes "
-                         "back.")
-            lines.append("Ctrl+O opens it on GitHub.")
         elif isinstance(item, Label):
             lines.append(f"Label: {item.name}")
             lines.append(f"Description: {item.description or '(none)'}")
@@ -5842,15 +5792,6 @@ class GhViewerFrame(wx.Frame):
             lines.append(item.url or "(none)")
             lines.append("")
             lines.append("─" * 60)
-            lines.append("")
-            lines.append("Keys, from the list or from here:")
-            lines.append("")
-            lines.append("  Enter             list the issues and PRs with this label")
-            lines.append("  Insert or Ctrl+I  create a new label")
-            lines.append(f"  Delete or Ctrl+D  delete '{item.name}' — GHManage asks first")
-            lines.append("  Ctrl+O            open it on GitHub")
-            lines.append("")
-            lines.append("The Actions menu has them all.")
             lines.append("")
             lines.append("Deleting a label strips it from every issue and PR that")
             lines.append("has it, and GitHub offers no way to undo that.")
@@ -5871,9 +5812,6 @@ class GhViewerFrame(wx.Frame):
                 # Most-downloaded first — the number is why you are looking here
                 for a in sorted(item.assets, key=lambda x: x.download_count, reverse=True):
                     lines.append(f"  {a.download_count:>7,}  {a.name}  ({a.size_human()})")
-                lines.append("")
-                lines.append("Press Enter to list these files; Enter on one downloads it.")
-            lines.append("Ctrl+O opens the release on GitHub.")
             lines.append("")
             lines.append("─" * 60)
             lines.append("")
@@ -5885,13 +5823,6 @@ class GhViewerFrame(wx.Frame):
             lines.append(f"ID: {item.id}")
             lines.append("URL:")
             lines.append(item.url or "(none)")
-            lines.append("")
-            lines.append("─" * 60)
-            lines.append("")
-            lines.append("Press Enter to run this workflow on a branch you choose")
-            lines.append("(only works if the workflow supports manual runs /")
-            lines.append("workflow_dispatch). Right-click for the same option.")
-            lines.append("Ctrl+O opens it on GitHub.")
         elif isinstance(item, WorkflowRun):
             lines.append(f"Workflow: {item.name}")
             lines.append(f"Run #: {item.run_number}")
@@ -5902,15 +5833,6 @@ class GhViewerFrame(wx.Frame):
             lines.append(f"Date: {item.created_at}")
             lines.append("URL:")
             lines.append(item.url or "(none)")
-            lines.append("")
-            lines.append("─" * 60)
-            lines.append("")
-            lines.append("Press Enter to list this run's artifacts, J for its jobs and steps.")
-            if item.conclusion in ("failure", "timed_out", "startup_failure"):
-                lines.append("L shows what failed: GitHub's errors and the end of each failed step's log.")
-            lines.append("E reruns it, X cancels it while it is running.")
-            lines.append("Delete or Ctrl+D deletes this run — GHManage asks first.")
-            lines.append("Ctrl+O opens it on GitHub.")
         elif isinstance(item, WorkflowJob):
             lines.append(f"Job: {item.name}")
             lines.append(f"Status: {item.status}")
@@ -5927,10 +5849,6 @@ class GhViewerFrame(wx.Frame):
             for step in item.steps:
                 lines.append(f"  Step {step.number}, {step.name}: "
                              f"{step.conclusion or step.status or 'not started'}")
-            lines.append("")
-            lines.append("Press Enter to read this job's log; it opens at the first error.")
-            lines.append("L shows only what failed, across the run. Ctrl+O opens it on GitHub.")
-            lines.append("From the list, Backspace goes back to the workflow runs.")
         elif isinstance(item, Artifact):
             lines.append(f"Artifact: {item.name}")
             lines.append(f"Size: {item.size_human()}")
@@ -5942,10 +5860,7 @@ class GhViewerFrame(wx.Frame):
             lines.append("")
             if item.expired:
                 lines.append("This artifact has expired and can no longer be downloaded.")
-            else:
-                lines.append("Press Enter to download this artifact into a folder you choose.")
             lines.append("An artifact has no page of its own on GitHub.")
-            lines.append("From the list, Backspace goes back to the workflow runs.")
         elif isinstance(item, ReleaseAsset):
             lines.append(f"Asset: {item.name}")
             lines.append(f"Downloads: {item.download_count:,}")
@@ -5963,10 +5878,6 @@ class GhViewerFrame(wx.Frame):
             lines.append("It is not broken down by date, and no API offers that — to see")
             lines.append("downloads over time you have to record these numbers yourself")
             lines.append("and compare them later.")
-            lines.append("")
-            lines.append("Press Enter to download it into a folder you choose.")
-            lines.append("Ctrl+O opens its release on GitHub.")
-            lines.append("From the list, Backspace goes back to the releases.")
         elif isinstance(item, PagesBuild):
             site = self.pages_site
             lines.append(f"Publish: {item.status}")
@@ -5998,10 +5909,6 @@ class GhViewerFrame(wx.Frame):
                 lines.append("This site is published by Actions, so its history comes from")
                 lines.append("the github-pages deployments rather than the Pages build log.")
                 lines.append("Deployments record a state but not a build duration.")
-                lines.append("")
-            lines.append("Press Enter to browse the pages this site serves.")
-            lines.append("S opens the site itself in your browser; Ctrl+O opens this "
-                         "publish's commit on GitHub.")
         elif isinstance(item, PagesFile):
             site = self.pages_site
             lines.append(f"Page: {item.path}")
@@ -6021,10 +5928,6 @@ class GhViewerFrame(wx.Frame):
             elif item.path.endswith((".md", ".markdown")) and item.url.endswith(".html"):
                 lines.append("Jekyll renders Markdown to HTML, so this file is stored as")
                 lines.append(f"{item.path} but served at the .html URL above.")
-            lines.append("")
-            lines.append("Backspace goes back to the list, and from there to the publish "
-                         "history.")
-            lines.append("Ctrl+O opens this page on the web; S opens the site's home page.")
         elif isinstance(item, RepoEntry):
             lines.append(item.name)
             if item.description:
@@ -6042,11 +5945,6 @@ class GhViewerFrame(wx.Frame):
                                      ("A fork", item.fork), ("Private", item.private)) if on]
             for note in notes:
                 lines.append(note)
-            lines.append("")
-            lines.append("─" * 60)
-            lines.append("")
-            lines.append(f"Press Enter to open {item.name} here in GHManage.")
-            lines.append("Press Ctrl+O to open it on GitHub.")
         elif isinstance(item, OrgEntry):
             lines.append(item.login)
             lines.append(f"Your role: {item.role}")
@@ -6054,11 +5952,6 @@ class GhViewerFrame(wx.Frame):
                 lines.append(f"Repositories you can see: {item.repo_count:,}")
             lines.append("URL:")
             lines.append(item.url)
-            lines.append("")
-            lines.append("─" * 60)
-            lines.append("")
-            lines.append(f"Press Enter to list {item.login}'s repositories.")
-            lines.append("Press Ctrl+O to open it on GitHub.")
         elif isinstance(item, Notification):
             lines.append(f"#{item.number} {item.title}" if item.number else item.title)
             lines.append(f"{item.kind} in {item.repo}" if item.kind else item.repo)
@@ -6067,21 +5960,6 @@ class GhViewerFrame(wx.Frame):
             lines.append(f"Updated: {item.to_row(['updated'])['updated']}")
             lines.append("URL:")
             lines.append(item.url or "(none)")
-            lines.append("")
-            lines.append("─" * 60)
-            lines.append("")
-            if item.is_item:
-                lines.append(f"Press Enter to open #{item.number} here in GHManage;")
-                lines.append("Backspace from there comes back.")
-            elif notification_opens_here(item):
-                lines.append("Press Enter to open it here in GHManage;")
-                lines.append("Backspace from there comes back.")
-            else:
-                lines.append("GHManage has no view for this; Ctrl+O opens it on GitHub.")
-            if item.is_item or notification_opens_here(item):
-                lines.append("Ctrl+O opens it on GitHub.")
-            lines.append("M marks it read, Delete marks it done, U unsubscribes")
-            lines.append(f"from the thread, G opens {item.repo} here.")
         elif isinstance(item, ActivityEvent):
             lines.append(item.summary)
             lines.append(f"Who: {item.actor}")
@@ -6092,21 +5970,15 @@ class GhViewerFrame(wx.Frame):
             lines.append(f"When: {item.to_row(['date'])['date']}")
             lines.append("URL:")
             lines.append(item.url or "(none)")
-            lines.append("")
-            lines.append("─" * 60)
-            lines.append("")
             if item.body:
-                lines.extend(item.body.splitlines())
                 lines.append("")
                 lines.append("─" * 60)
                 lines.append("")
-            if event_opens_here(item):
-                lines.append("Press Enter to open it here in GHManage; Backspace from there "
-                             "comes back.")
-                lines.append("Ctrl+O opens it on GitHub.")
-            else:
-                lines.append("GHManage has no view for this; Ctrl+O opens it on GitHub.")
-            lines.append(f"Press G to open {item.repo} here in GHManage.")
+                lines.extend(item.body.splitlines())
+        # A rule with nothing under it (a publish built by GitHub, a page
+        # with no note) would read as a gap at the end: leave it off.
+        while lines and lines[-1] in ("", "─" * 60):
+            lines.pop()
         self.details_text.SetValue("\n".join(lines))
 
     # ── Helpers ─────────────────────────────────────────────────────────
@@ -9890,8 +9762,7 @@ class GhViewerFrame(wx.Frame):
         self._render_code(item)
         self._update_actions_menu()
         runs = len(self._comment_positions)
-        self._tell(f"Blame of {item.name}: {runs} run{'s' if runs != 1 else ''} of lines. "
-                   "Alt+N and Alt+P move between them.")
+        self._tell(f"Blame of {item.name}: {runs} run{'s' if runs != 1 else ''} of lines.")
 
     def _choose_code_ref(self) -> None:
         """Ctrl+B in Files: which branch or tag to look at."""
@@ -10944,8 +10815,7 @@ class GhViewerFrame(wx.Frame):
         self.milestone_filter = milestone
         self._update_title()
         self._load_items()
-        said = (f"Showing issues and PRs in milestone '{milestone.title}'. "
-                "Backspace returns to the milestones.")
+        said = f"Showing issues and PRs in milestone '{milestone.title}'."
         self._announce(said)
         # Said when the list lands, behind its first row (_on_items_loaded).
         self._say_milestone = True
@@ -10980,8 +10850,7 @@ class GhViewerFrame(wx.Frame):
         else:
             self._switch_view(VIEW_ISSUES)
         self._announce(
-            f"Showing issues and PRs labelled '{label.name}'. "
-            "Backspace returns to the labels."
+            f"Showing issues and PRs labelled '{label.name}'."
         )
 
     def on_new_label(self, event: wx.CommandEvent) -> None:

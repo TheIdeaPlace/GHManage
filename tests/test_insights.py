@@ -139,7 +139,7 @@ def test_status_says_the_totals_and_what_is_missing():
 def test_details_say_the_row_in_full(row, first, second):
     lines = insightview.insight_details(row).split("\n")
     assert lines[:2] == [first, second]
-    assert lines[-1] == "Backspace goes back to the list; Ctrl+O opens it on GitHub."
+    assert lines[-2] == "URL:"
 
 
 def test_a_row_reads_whole():

@@ -22,9 +22,8 @@ else:
 import ghviewer  # noqa: E402
 from favorites import FavoriteEntry  # noqa: E402
 from gh_data import (  # noqa: E402
-    Artifact, Branch, Commit, Discussion, Gist, InsightRow, Item, Label, PagesBuild,
-    PagesFile, Release, ReleaseAsset, RepoEntry, SecurityAlert, Tag, Workflow,
-    WorkflowJob, WorkflowRun,
+    Artifact, Branch, Commit, Discussion, Gist, InsightRow, Item, PagesBuild,
+    PagesFile, Release, ReleaseAsset, SecurityAlert, Tag, WorkflowRun,
 )
 
 Frame = ghviewer.GhViewerFrame
@@ -637,39 +636,7 @@ def test_on_the_web():
     assert ghviewer.on_the_web("https://o.github.io/r/") == "on the web"
 
 
-# ── Details text: what Enter does, and true where it is read ────────────
-
-
-def _details(view, item, **attrs):
-    text = SimpleNamespace(value="")
-    text.SetValue = lambda v: setattr(text, "value", v)
-    text.GetValue = lambda: text.value
-    f = SimpleNamespace(view_mode=view, details_text=text, git_items=[item],
-                        commit_branch="", pages_site=None, _comment_positions=[], repo="o/r")
-    for k, v in attrs.items():
-        setattr(f, k, v)
-    Frame._show_git_details(f, 0)
-    return f.details_text.GetValue()
-
-
-@pytest.mark.parametrize("view, item, line", [
-    (V.VIEW_BRANCHES, Branch("main", "s", "m", "a", "d"),
-     "Press Enter to show this branch's commits; Ctrl+O opens it on GitHub."),
-    (V.VIEW_TAGS, Tag("v1", "abc"), "Press Enter to read the files at this tag"),
-    (V.VIEW_ASSETS, ReleaseAsset(1, "a.zip", 1, 1, ""),
-     "Press Enter to download it into a folder you choose."),
-    (V.VIEW_ASSETS, ReleaseAsset(1, "a.zip", 1, 1, ""), "Ctrl+O opens its release on GitHub."),
-    (V.VIEW_WORKFLOWS, Workflow(1, "CI", "ci.yml", "active"), "Ctrl+O opens it on GitHub."),
-    (V.VIEW_JOBS, WorkflowJob(1, "build", "completed", "success"),
-     "From the list, Backspace goes back to the workflow runs."),
-    (V.VIEW_PAGEFILES, PagesFile("index.md", "https://o.github.io/r/"),
-     "Ctrl+O opens this page on the web; S opens the site's home page."),
-    (V.VIEW_PAGES, PagesBuild(1, "built", "abc", "me", ""), "Ctrl+O opens this publish's commit"),
-    (V.VIEW_STARRED, RepoEntry("o/r", url="u"), "Press Enter to open o/r here in GHManage."),
-    (V.VIEW_LABELS, Label("bug"), "  Ctrl+O            open it on GitHub"),
-])
-def test_details_say_what_the_keys_do(view, item, line):
-    assert line in _details(view, item)
+# ── Details text: no browser behind Enter ───────────────────────────
 
 
 def test_no_details_text_sends_you_to_the_browser_with_enter():

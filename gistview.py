@@ -8,7 +8,6 @@ the panel. Alt+N and Alt+P move between the file headings.
 from __future__ import annotations
 
 import codeview
-from commands import READ_KEYS
 from gh_data import Gist, GistFile, _local_time
 
 RULE = "─" * 60
@@ -34,16 +33,15 @@ def file_heading(f: GistFile, number: int, total: int) -> str:
 def file_body(f: GistFile) -> list[str]:
     """A file's lines, or why there are none to show."""
     if f.content is None:
-        return ["Too large to show here. Ctrl+O opens the gist on GitHub."]
+        return ["Too large to show here."]
     if codeview.is_binary(f.content):
-        return ["Not text. Ctrl+O opens the gist on GitHub."]
+        return ["Not text."]
     lines = codeview.file_lines(f.content)
     if not lines:
         return ["(empty)"]
     if f.truncated:
         lines.append("")
-        lines.append(f"GitHub sent only the start of {f.name}. "
-                     "Ctrl+O opens the gist on GitHub, with all of it.")
+        lines.append(f"GitHub sent only the start of {f.name}; the rest is on GitHub.")
     return lines
 
 
@@ -59,7 +57,6 @@ def gist_text(g: Gist) -> tuple[str, list[int]]:
     lines.append(f"Comments: {g.comments}")
     lines.append("URL:")
     lines.append(g.url or "(none)")
-    lines.append(READ_KEYS)
     lines.append("")
     lines.append(RULE)
     positions: list[int] = []
@@ -74,15 +71,14 @@ def gist_text(g: Gist) -> tuple[str, list[int]]:
         lines.append(file_heading(f, i, n))
         size = len(f.content or "")
         if shown and shown + size > MAX_GIST_CHARS:
-            lines.append("Not shown: this gist is too long to show in full here. "
-                         "Ctrl+O opens it on GitHub.")
+            lines.append("Not shown: this gist is too long to show in full here.")
             continue
         shown += size
         lines.extend(file_body(f))
     if g.files_truncated:
         lines.append("")
-        lines.append("GitHub listed only some of this gist's files. "
-                     "Ctrl+O opens it on GitHub, with all of them.")
+        lines.append("GitHub listed only some of this gist's files; "
+                     "the rest are on GitHub.")
     return "\n".join(lines), positions
 
 

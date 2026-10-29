@@ -170,7 +170,7 @@ def test_no_newline_note_is_kept():
     (dict(patch=None, additions=0, deletions=0, status="added"),
      "No lines to show: a binary file, or one with no text."),
     (dict(patch=None, additions=4000, deletions=0),
-     "GitHub doesn't show the lines of a change this large. Ctrl+O opens the file on GitHub."),
+     "GitHub doesn't show the lines of a change this large."),
     (dict(patch="", additions=0, deletions=0, status="renamed", previous_filename="a/old.py"),
      "No lines changed, only the name."),
 ])

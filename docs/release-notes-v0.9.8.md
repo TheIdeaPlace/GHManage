@@ -8,7 +8,9 @@ everywhere, and puts every key on a menu. It lets you read a repository's code: 
 file a line at a time, see who last changed each line, and read every change a
 file has had. In a pull request's changed files you can read reviewers'
 comments on its lines, and add your own. And you can read a repository's
-security alerts, its discussions, and its milestones.
+security alerts, its discussions, its milestones, its README, its traffic and
+contributors, and your gists. Opening a GitHub address now takes you straight
+into what it points to.
 
 On a Mac, use `Cmd` where these notes say `Ctrl`, and `Option` where they say `Alt`.
 

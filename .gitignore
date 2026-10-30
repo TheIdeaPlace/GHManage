@@ -11,3 +11,5 @@ build.log
 installer/Releases/
 # Finder drops these all over a repo once it is worked on from a Mac.
 .DS_Store
+# The bug-report relay's address and key, written for release builds only.
+/_relay_config.py

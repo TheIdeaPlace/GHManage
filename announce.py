@@ -55,12 +55,15 @@ class Announcer:
             return False
         return force or (self.enabled and self.categories[category])
 
-    def announce(self, text: str, category: str = RESULT, force: bool = False) -> bool:
+    def announce(self, text: str, category: str = RESULT, force: bool = False,
+                 queued: bool = False) -> bool:
         """Say ``text`` if the user wants this category spoken. ``force``
         is for the few things that must be heard whatever the settings, such
         as "Spoken feedback off" itself. True when a screen reader was given
         it; False when filtered out, or when there is nothing to speak with,
         in which case the status bar, written by the caller, is all there is.
+        ``queued`` lets a result follow what is being read instead of cutting
+        it off: for an action that moved focus, said after the focus change.
         """
         text = (text or "").strip()
         if not text or not self.would_speak(category, force):
@@ -70,7 +73,8 @@ class Announcer:
         if self.speaker is None:
             return False
         try:
-            return bool(self.speaker(text, force or category == RESULT, category))
+            interrupt = not queued and (force or category == RESULT)
+            return bool(self.speaker(text, interrupt, category))
         except Exception:  # speech must never take the app down with it
             return False
 
@@ -79,5 +83,6 @@ class Announcer:
 announcer = Announcer()
 
 
-def announce(text: str, category: str = RESULT, force: bool = False) -> bool:
-    return announcer.announce(text, category, force)
+def announce(text: str, category: str = RESULT, force: bool = False,
+             queued: bool = False) -> bool:
+    return announcer.announce(text, category, force, queued)

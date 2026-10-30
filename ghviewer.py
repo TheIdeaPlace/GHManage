@@ -27,6 +27,8 @@ from pinned_repos import (
     add_pinned, hide_repo, load_hidden, load_pinned, remove_pinned, unhide_repos,
 )
 import announce
+import bugreport
+import gh_data
 import alertview
 import codeview
 import commands
@@ -790,6 +792,8 @@ ID_HIDDEN_REPOS = wx.NewIdRef()
 ID_ARCHIVE_REPO = wx.NewIdRef()
 ID_DELETE_REPO = wx.NewIdRef()
 ID_CHECK_UPDATES = wx.NewIdRef()
+ID_REPORT_BUG = wx.NewIdRef()
+ID_OPEN_LOG_FOLDER = wx.NewIdRef()
 ID_NEW_ISSUE = wx.NewIdRef()
 ID_SWITCH_ACCOUNT = wx.NewIdRef()
 ID_SEARCH = wx.NewIdRef()
@@ -2587,6 +2591,296 @@ class NewIssueDialog(wx.Dialog):
         return self.title_ctrl.GetValue().strip(), self.body_ctrl.GetValue().rstrip()
 
 
+# ── Report a Bug ────────────────────────────────────────────────────────
+
+
+class BugReportDialog(wx.Dialog):
+    """Help ▸ Report a Bug…: a bug or a suggestion, with a preview of exactly
+    what is sent (bugreport.Report.preview).
+
+    Send files it through the relay in the background. Filed, focus moves to
+    Open Issue and the number is said after it. Not filed (no relay key in
+    this build, or no answer), the report goes on the clipboard, the form says
+    so, and focus moves to a button for GitHub's new issue page; the browser
+    opens only when that is pressed, so the message isn't lost behind it.
+
+    Send stays enabled while sending and presses are ignored: disabling the
+    focused button would leave focus nowhere. Cancel says "Still sending…"
+    then. Escape or Cancel asks before throwing away anything typed.
+    """
+
+    def __init__(self, parent: wx.Window, system_text: str,
+                 attachments: list | None = None, title: str = "",
+                 relay: tuple[str, str] | None = None,
+                 send: Callable = bugreport.send) -> None:
+        super().__init__(parent, title="Report a Bug",
+                         style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER,
+                         size=(660, 760))
+        self._system_text = system_text
+        self._attachments = list(attachments or [])
+        self._relay = relay if relay is not None else bugreport.relay_config()
+        self._send = send
+        self.sending = False
+        self.sent = False
+        self.issue_url = ""
+        self._initial_title = title
+
+        outer = wx.BoxSizer(wx.VERTICAL)
+
+        def labelled(label: str, ctrl_factory) -> tuple[wx.StaticText, wx.Window]:
+            text = wx.StaticText(self, label=label)
+            outer.Add(text, 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
+            ctrl = ctrl_factory()
+            _name(ctrl, label.replace("&", ""))
+            return text, ctrl
+
+        _, self.kind_ctrl = labelled(
+            "&Kind", lambda: wx.Choice(self, choices=[bugreport.KIND_NAMES[k] for k in bugreport.KINDS]))
+        self.kind_ctrl.SetSelection(0)
+        outer.Add(self.kind_ctrl, 0, wx.LEFT | wx.RIGHT, 10)
+
+        _, self.title_ctrl = labelled(
+            "&Title (required)", lambda: wx.TextCtrl(self, value=title, style=wx.TE_PROCESS_ENTER))
+        self.title_ctrl.SetMaxLength(bugreport.LONGEST_TITLE)
+        outer.Add(self.title_ctrl, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
+
+        self.field_labels: list[wx.StaticText] = []
+        self.field_ctrls: list[wx.TextCtrl] = []
+        for label, _ in bugreport.FIELDS[bugreport.BUG]:
+            text, ctrl = labelled(label, lambda: wx.TextCtrl(self, style=wx.TE_MULTILINE, size=(-1, 70)))
+            ctrl.SetMaxLength(bugreport.LONGEST_ANSWER)
+            outer.Add(ctrl, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
+            self.field_labels.append(text)
+            self.field_ctrls.append(ctrl)
+        # Enter in the title goes on to the next box, as in New Issue.
+        self.title_ctrl.Bind(wx.EVT_TEXT_ENTER, lambda e: self.field_ctrls[0].SetFocus())
+
+        _, self.contact_ctrl = labelled(
+            "Co&ntact, optional and public: an email address or GitHub name",
+            lambda: wx.TextCtrl(self))
+        self.contact_ctrl.SetMaxLength(bugreport.LONGEST_CONTACT)
+        outer.Add(self.contact_ctrl, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
+
+        self.system_check = wx.CheckBox(self, label="Include s&ystem information")
+        self.system_check.SetValue(True)
+        outer.Add(self.system_check, 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
+
+        self.attach_check = None
+        if self._attachments:
+            label = bugreport.Report(attachments=self._attachments).attachments_label
+            self.attach_check = wx.CheckBox(self, label="&" + label)
+            self.attach_check.SetValue(True)
+            outer.Add(self.attach_check, 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
+
+        # A focusable read-only box, never a live region: nothing is said
+        # while typing, and all of it can be read before sending.
+        _, self.preview_ctrl = labelled(
+            "Pre&view: exactly what will be sent, publicly",
+            lambda: wx.TextCtrl(self, style=wx.TE_MULTILINE | wx.TE_READONLY, size=(-1, 140)))
+        outer.Add(self.preview_ctrl, 2, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
+
+        self.message = wx.StaticText(self, label="")
+        outer.Add(self.message, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP, 10)
+
+        buttons = wx.BoxSizer(wx.HORIZONTAL)
+        self.send_button = wx.Button(self, label="&Send")
+        self.open_issue_button = wx.Button(self, label="&Open Issue")
+        self.page_button = wx.Button(self, label="Open &GitHub's New Issue Page")
+        self.cancel_button = wx.Button(self, wx.ID_CANCEL, label="Cancel")
+        for b in (self.send_button, self.open_issue_button, self.page_button, self.cancel_button):
+            buttons.Add(b, 0, wx.LEFT, 8)
+        self.open_issue_button.Hide()
+        self.page_button.Hide()
+        outer.Add(buttons, 0, wx.ALIGN_RIGHT | wx.ALL, 10)
+        self.SetSizer(outer)
+        self.SetMinSize((480, 600))
+
+        for ctrl in (self.title_ctrl, self.contact_ctrl, *self.field_ctrls):
+            ctrl.Bind(wx.EVT_TEXT, lambda e: self._refresh_preview())
+        self.kind_ctrl.Bind(wx.EVT_CHOICE, lambda e: self._on_kind())
+        for check in (self.system_check, self.attach_check):
+            if check:
+                check.Bind(wx.EVT_CHECKBOX, lambda e: self._refresh_preview())
+        self.send_button.Bind(wx.EVT_BUTTON, lambda e: self.on_send())
+        self.open_issue_button.Bind(wx.EVT_BUTTON, lambda e: self._open(self.issue_url))
+        self.page_button.Bind(wx.EVT_BUTTON, lambda e: self.on_open_page())
+        self.Bind(wx.EVT_BUTTON, lambda e: self.on_cancel(), id=wx.ID_CANCEL)
+        self.Bind(wx.EVT_CLOSE, self._on_close)
+
+        send_id = wx.NewIdRef()
+        self.Bind(wx.EVT_MENU, lambda e: self.on_send(), id=send_id)
+        self.SetAcceleratorTable(wx.AcceleratorTable([
+            (wx.ACCEL_CTRL, wx.WXK_RETURN, send_id),
+            (wx.ACCEL_CTRL, wx.WXK_NUMPAD_ENTER, send_id),
+        ]))
+
+        self._refresh_preview()
+        # A title given (a crash report) starts in What happened.
+        first = self.field_ctrls[0] if title else self.kind_ctrl
+        wx.CallAfter(first.SetFocus)
+
+    # ── The report ───────────────────────────────────────────────────────
+
+    @property
+    def kind(self) -> str:
+        return bugreport.KINDS[max(self.kind_ctrl.GetSelection(), 0)]
+
+    def report(self) -> "bugreport.Report":
+        count = len(bugreport.FIELDS[self.kind])
+        answers = [c.GetValue() for c in self.field_ctrls[:count]]
+        return bugreport.Report(
+            kind=self.kind,
+            title=self.title_ctrl.GetValue(),
+            answers=answers + [""] * (3 - count),
+            contact=self.contact_ctrl.GetValue(),
+            include_system=self.system_check.GetValue(),
+            system_text=self._system_text,
+            attachments=self._attachments,
+            include_attachments=bool(self.attach_check and self.attach_check.GetValue()),
+        )
+
+    def _refresh_preview(self) -> None:
+        # ChangeValue, not SetValue: no text event, and nothing said.
+        self.preview_ctrl.ChangeValue(self.report().preview)
+
+    def _on_kind(self) -> None:
+        fields = bugreport.FIELDS[self.kind]
+        for i, (text, ctrl) in enumerate(zip(self.field_labels, self.field_ctrls)):
+            shown = i < len(fields)
+            text.Show(shown)
+            ctrl.Show(shown)
+            if shown:
+                text.SetLabel(fields[i][0])
+                _name(ctrl, fields[i][0].replace("&", ""))
+        self.Layout()
+        self._refresh_preview()
+
+    def typed(self) -> bool:
+        """Whether anything has been typed that closing would throw away."""
+        return (self.title_ctrl.GetValue().strip() != self._initial_title.strip()
+                or any(c.GetValue().strip() for c in self.field_ctrls)
+                or bool(self.contact_ctrl.GetValue().strip()))
+
+    def _say(self, text: str, focus: wx.Window | None = None, shown: str = "") -> None:
+        """Show ``text`` in the form, with ``shown`` after it, and say
+        ``text``; after ``focus`` has moved there and its name been read,
+        when it moves."""
+        self.message.SetLabel(f"{text} {shown}" if shown else text)
+        self.message.Wrap(max(self.GetClientSize().width - 20, 200))
+        self.Layout()
+        if focus is None:
+            announce.announce(text, announce.RESULT)
+            return
+        focus.SetFocus()
+        wx.CallLater(150, announce.announce, text, announce.RESULT, queued=True)
+
+    # ── Sending ──────────────────────────────────────────────────────────
+
+    def on_send(self) -> None:
+        if self.sending or self.sent:
+            return
+        report = self.report()
+        missing = report.missing()
+        if missing == "title":
+            self._say("Title is required.", self.title_ctrl)
+            return
+        if missing == "first":
+            name = bugreport.FIELDS[self.kind][0][1]
+            self._say(f"{name} is required.", self.field_ctrls[0])
+            return
+        self.sending = True
+        self.cancel_button.SetLabel("Still sending…")
+        self.message.SetLabel("Sending…")
+        announce.announce("Sending the report…", announce.STATUS)
+        url, key = self._relay
+
+        def worker() -> None:
+            # Whatever happens, the form hears back, or it would be stuck
+            # saying "Still sending…" with no way to close it.
+            try:
+                result = self._send(report, url, key)
+            except Exception:
+                result = bugreport.Result()
+            wx.CallAfter(self._sent, report, result)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _sent(self, report: "bugreport.Report", result: "bugreport.Result") -> None:
+        if not self:  # the window has gone
+            return
+        self.sending = False
+        if result.filed:
+            self.sent = True
+            self.issue_url = result.issue_url
+            self.cancel_button.SetLabel("Close")
+            self.open_issue_button.Show()
+            self.Layout()
+            self._say(f"Report sent as issue #{result.number}.", self.open_issue_button,
+                      shown=result.issue_url)
+            # After focus has left them: either would file it twice.
+            self.send_button.Hide()
+            self.page_button.Hide()
+            self.Layout()
+            return
+        self.cancel_button.SetLabel("Cancel")
+        copied = self._copy(report.clipboard_text)
+        if result.no_key:
+            text = "This copy of GHManage can't send reports itself."
+        else:
+            text = "Couldn't send."
+        text += (" The report is on the clipboard." if copied
+                 else " The report couldn't be put on the clipboard either.")
+        self.page_button.Show()
+        self.Layout()
+        self._say(text, self.page_button)
+
+    def on_open_page(self) -> None:
+        report = self.report()
+        self._copy(report.clipboard_text)
+        self._open(report.issue_page_url())
+
+    @staticmethod
+    def _copy(text: str) -> bool:
+        if not wx.TheClipboard.Open():
+            return False
+        try:
+            if not wx.TheClipboard.SetData(wx.TextDataObject(text)):
+                return False
+            # Left on the clipboard after GHManage quits, as _set_clipboard.
+            wx.TheClipboard.Flush()
+            return True
+        finally:
+            wx.TheClipboard.Close()
+
+    def _open(self, url: str) -> None:
+        if url and not webbrowser.open(url):
+            self._say(f"Couldn't open a browser. The address is {url}")
+
+    # ── Closing ──────────────────────────────────────────────────────────
+
+    def on_cancel(self) -> bool:
+        """Close, unless sending, or the person keeps what they typed. True
+        when it closed."""
+        if self.sending:
+            announce.announce("Still sending.", announce.RESULT)
+            return False
+        if not self.sent and self.typed():
+            ask = wx.MessageDialog(self, "Discard this report?", "Report a Bug",
+                                   wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION)
+            ask.SetYesNoLabels("&Discard", "&Keep Editing")
+            try:
+                if ask.ShowModal() != wx.ID_YES:
+                    return False
+            finally:
+                ask.Destroy()
+        self.EndModal(wx.ID_CLOSE if self.sent else wx.ID_CANCEL)
+        return True
+
+    def _on_close(self, event: wx.CloseEvent) -> None:
+        if not self.on_cancel() and event.CanVeto():
+            event.Veto()
+
+
 # ── Main frame ──────────────────────────────────────────────────────────
 
 
@@ -3124,6 +3418,9 @@ class GhViewerFrame(wx.Frame):
         help_menu.Append(ID_SHORTCUTS, "Keyboard Shortcuts\tCtrl+F1")
         help_menu.Append(ID_COMMAND_PALETTE, "Command Palette…\tCtrl+Shift+P")
         help_menu.AppendSeparator()
+        help_menu.Append(ID_REPORT_BUG, "Report a Bug…")
+        help_menu.Append(ID_OPEN_LOG_FOLDER, "Open Log Folder")
+        help_menu.AppendSeparator()
         help_menu.Append(ID_CHECK_UPDATES, "Check for Updates…")
         help_menu.Append(wx.ID_ABOUT, "About GHManage")
         menu_bar.Append(help_menu, "Help")
@@ -3134,6 +3431,8 @@ class GhViewerFrame(wx.Frame):
         self.Bind(wx.EVT_MENU, self.on_shortcuts, id=ID_SHORTCUTS)
         self.Bind(wx.EVT_MENU, self.on_command_palette, id=ID_COMMAND_PALETTE)
         self.Bind(wx.EVT_MENU, self.on_check_updates, id=ID_CHECK_UPDATES)
+        self.Bind(wx.EVT_MENU, lambda e: self.on_report_bug(), id=ID_REPORT_BUG)
+        self.Bind(wx.EVT_MENU, lambda e: self.on_open_log_folder(), id=ID_OPEN_LOG_FOLDER)
         self.Bind(wx.EVT_MENU, self.on_about, id=wx.ID_ABOUT)
 
         # Bind mode/state/tab menu items
@@ -3279,7 +3578,9 @@ class GhViewerFrame(wx.Frame):
         if not restart_now:
             return  # already downloaded; bootstrap() applies it on next launch
 
+        bugreport.end_run()  # the update ends this run; it didn't crash
         if not self.updater.apply_update_and_restart(sys.argv[1:]):
+            bugreport.begin_run()
             wx.MessageBox(
                 "The update could not be applied. It will be retried the next "
                 f"time GHManage starts.\n\nRelease notes:\n{url}",
@@ -3361,6 +3662,67 @@ class GhViewerFrame(wx.Frame):
             # the list names itself ("Files: src/ on main").
             self._update_list_label()
             announce.announce(self.list_label.GetLabel(), announce.RESULT)
+
+    def on_report_bug(self, title: str = "", attachments: list | None = None) -> None:
+        """Help ▸ Report a Bug…: the form, with this session's last error
+        offered when there was one. The system information is gathered off
+        the UI thread first: gh --version can take a moment."""
+        if getattr(self, "_bug_report_opening", False):
+            return
+        self._bug_report_opening = True
+        self._announce("Opening Report a Bug…")
+        if attachments is None:
+            attachments = bugreport.error_attachment()
+
+        def gather() -> None:
+            try:
+                system_text = bugreport.collect_system_text(gh_data._find_gh())
+            except Exception:
+                system_text = ""
+            wx.CallAfter(self._show_bug_report, system_text, attachments, title)
+
+        threading.Thread(target=gather, daemon=True).start()
+
+    def _show_bug_report(self, system_text: str, attachments: list, title: str) -> None:
+        try:
+            dlg = BugReportDialog(self, system_text, attachments, title)
+            try:
+                dlg.ShowModal()
+            finally:
+                dlg.Destroy()
+        finally:
+            self._bug_report_opening = False
+
+    def offer_crash_report(self, attachments: list) -> None:
+        """At start, after a run that didn't quit cleanly: offer, once, to
+        report it, with the end of that run's log."""
+        ask = wx.MessageDialog(self, "GHManage quit unexpectedly last time. Report it?",
+                               "Report a Bug", wx.YES_NO | wx.ICON_QUESTION)
+        ask.SetYesNoLabels("&Report", "&Not Now")
+        try:
+            if ask.ShowModal() != wx.ID_YES:
+                return
+        finally:
+            ask.Destroy()
+        self.on_report_bug("Quit unexpectedly", attachments)
+
+    def on_open_log_folder(self) -> None:
+        """Help ▸ Open Log Folder: where errors and crashes are logged. (The
+        update log is beside it on a Mac, and one folder up on Windows.)"""
+        folder = bugreport.log_folder()
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            if sys.platform == "win32":
+                os.startfile(str(folder))  # type: ignore[attr-defined]
+                opened = True
+            else:
+                opened = subprocess.call(["open" if IS_MAC else "xdg-open", str(folder)]) == 0
+        except OSError:
+            opened = False
+        if opened:
+            self._announce("Opened the log folder.")
+        else:
+            self._announce(f"Couldn't open the log folder. It is {folder}")
 
     def on_user_guide(self, event) -> None:
         """Help ▸ User Guide (F1): the guide on the web, in your browser."""
@@ -8329,6 +8691,7 @@ class GhViewerFrame(wx.Frame):
         # the next launch, before any window appears. Applying here instead
         # would mean racing our own shutdown for a lock on the install dir.
         settings.flush()  # a choice a busy file kept from being written
+        bugreport.end_run()  # a clean quit: nothing to offer next time
         self.Destroy()
 
     # ── View menu actions ───────────────────────────────────────────────
@@ -10996,8 +11359,19 @@ def main() -> None:
     updater.configure_logging(debug=args.debug)
     service = updater.UpdateService(APP_VERSION, feed=args.update_feed)
 
+    # The last run's log is read before this run writes to it, so a crash
+    # report carries the lines that led up to the crash.
+    crashed = bugreport.begin_run()
+    crash_attachments = (bugreport.crash_attachment() + bugreport.log_attachment()
+                         if crashed else [])
+    bugreport.configure_log()
+    bugreport.install_handlers()
+    bugreport.log.info("GHManage %s started", APP_VERSION)
+
     app = wx.App(False)
-    GhViewerFrame(repo=args.repo, update_service=service)
+    frame = GhViewerFrame(repo=args.repo, update_service=service)
+    if crashed:
+        wx.CallAfter(frame.offer_crash_report, crash_attachments)
     app.MainLoop()
 
 

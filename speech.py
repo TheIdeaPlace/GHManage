@@ -280,6 +280,7 @@ _objc = None  # libobjc, or False once loading failed
 
 # NSAccessibilityPriorityLevel.
 MAC_PRIORITY_LOW = 10     # after what VoiceOver is saying
+MAC_PRIORITY_MEDIUM = 50  # a result said after a focus move: queued, not dropped
 MAC_PRIORITY_HIGH = 90    # interrupts it
 
 
@@ -324,6 +325,17 @@ def _nsstring(text: str):
                  argtypes=(ctypes.c_char_p,))
 
 
+def voiceover_running() -> bool:
+    """Whether VoiceOver is on, for a bug report's system information."""
+    if not IS_MACOS or _runtime() is None:
+        return False
+    try:
+        workspace = _send(_class("NSWorkspace"), "sharedWorkspace")
+        return bool(_send(workspace, "isVoiceOverEnabled", restype=ctypes.c_bool))
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def voiceover_announce(text: str, interrupt: bool, category: str = "result") -> bool:
     """Ask VoiceOver to say ``text``. True if it was asked; False when
     VoiceOver is off or the request couldn't be made."""
@@ -340,7 +352,7 @@ def voiceover_announce(text: str, interrupt: bool, category: str = "result") -> 
 
         info = _send(_class("NSMutableDictionary"), "dictionary")
         priority = _send(_class("NSNumber"), "numberWithInteger:",
-                         MAC_PRIORITY_HIGH if interrupt else MAC_PRIORITY_LOW,
+                         MAC_PRIORITY_HIGH if interrupt else MAC_PRIORITY_MEDIUM if category == "result" else MAC_PRIORITY_LOW,
                          argtypes=(ctypes.c_long,))
         for key, value in (("NSAccessibilityAnnouncementKey", _nsstring(text)),
                            ("NSAccessibilityPriorityKey", priority)):

@@ -8,3 +8,5 @@ PyYAML>=6.0
 # A commit of TheIdeaPlace/app-kit's main, so builds don't move under us; an archive,
 # so no builder needs git.
 theideaplace-appkit @ https://github.com/TheIdeaPlace/app-kit/archive/ac6f9598cec32a8a89fa8af03a8192cd586dd5bc.zip#subdirectory=python
+# Certificates for Report a Bug's HTTPS request: a packaged Mac app has no bundle of its own.
+certifi

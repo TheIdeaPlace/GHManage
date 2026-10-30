@@ -261,7 +261,7 @@ Lists load 100 items to begin with. `Ctrl++` (**File → View More**) loads the 
 | **File** | Open Repository or Address, Remove from List, Hidden Repositories, Archive or Unarchive Repository, Delete Repository from GitHub, Switch GitHub Account, Refresh, Back, View More, Search GitHub, Go To Issue, Quick Filter, Clear Quick Filter, Next and Previous Comment, Quit |
 | **Actions** | Everything that acts on the item you are on, starting with what `Enter` does. See [The Actions Menu](#the-actions-menu). |
 | **View** | View Mode, List Mode, Sort Order, Columns, State, Filter, Mark Changed Lines With, Next Pane, Previous Pane, Include Read Notifications, Speak Results |
-| **Help** | User Guide, Keyboard Shortcuts, Command Palette, Check for Updates, About GHManage |
+| **Help** | User Guide, Keyboard Shortcuts, Command Palette, Report a Bug, Open Log Folder, Check for Updates, About GHManage |
 
 **Help → User Guide** (`F1`, or `fn+F1` on a Mac) opens this guide in your web browser.
 
@@ -1638,11 +1638,42 @@ The same notes are on each version's own page on GitHub, alongside its downloads
 
 ## Reporting Issues
 
-Found a bug, or have an idea? Open an issue at [github.com/TheIdeaPlace/GHManage/issues](https://github.com/TheIdeaPlace/GHManage/issues). You can do it from GHManage itself: open the repository with `Ctrl+Shift+O` and `TheIdeaPlace/GHManage`, then **Open on GitHub** (`Ctrl+O`) on any issue to reach the site.
+Found a bug, or have an idea? **Help → Report a Bug…** sends it from inside GHManage, and you don't need a GitHub account. It is filed as an issue at [github.com/TheIdeaPlace/GHManage/issues](https://github.com/TheIdeaPlace/GHManage/issues) by The Idea Place's bug-report bot. Everything in it is public.
 
-A good report says:
+### The form
 
-- What you did, key by key if you can.
-- What you expected, and what happened instead, including what your screen reader said and what the status bar said.
-- Your version (**Help → About GHManage**), whether you are on Windows or a Mac, and which screen reader you use, if any.
-- For a problem with updating, the update log described in [Where your settings live](#where-your-settings-live).
+- **Kind**: Bug or Suggestion. The boxes below change to match.
+- **Title**, required.
+- For a bug, **What happened** (required), **What you expected** and **Steps to reproduce**. For a suggestion, **Your suggestion** (required) and **How it would help**. Say what you did key by key if you can, and what your screen reader and the status bar said.
+- **Contact**, optional: an email address or GitHub name, if you would like a reply. It is public like the rest.
+- **Include system information**, checked to start with. See below for exactly what it adds.
+- **Preview**: exactly what will be sent, kept up to date as you type. It is a read-only box you can Tab to and read; nothing is spoken while you type.
+
+`Send` (or `Ctrl+Enter` from anywhere in the form, `Cmd+Enter` on a Mac) files it. If the title or the first box is empty, the form says which, and puts you in it.
+
+When the report is filed, the form says "Report sent as issue #" and the number, shows its address, and you are on **Open Issue**, which opens it on GitHub. If it can't be sent (no internet, or the service didn't answer), the whole report is put on the clipboard, the form says so, and you are on **Open GitHub's New Issue Page**. That opens the page with the report filled in, to file under your own GitHub account; a very long report is cut short there, and the rest is on the clipboard to paste. A copy of GHManage built from source sends nothing and always offers the page.
+
+Closing the form with `Escape` or **Cancel** asks first if you have typed anything. While a report is sending, **Cancel** says "Still sending…" and waits.
+
+### What a report says about your computer
+
+With **Include system information** checked, and nothing more:
+
+- GHManage's version, and whether it is installed, portable or run from source.
+- Windows or macOS, and its version.
+- The processor type.
+- The screen reader running, if GHManage can tell: NVDA, JAWS, Narrator, ZoomText, Fusion or Dolphin on Windows, VoiceOver on a Mac.
+- Your language setting.
+- The version of `gh`.
+
+Never your GitHub account, your repositories, your files, or anything from your settings.
+
+### After something goes wrong
+
+GHManage keeps a log of anything that goes wrong: `%APPDATA%\ghmanage\logs\ghmanage.log` on Windows and `~/Library/Logs/GHManage/ghmanage.log` on the Mac. **Help → Open Log Folder** opens its folder. It never grows past half a megabyte, and the three before it are kept. Nothing reads it but you and a report you choose to send.
+
+If GHManage quit unexpectedly last time, it asks once when it next starts, "GHManage quit unexpectedly last time. Report it?" **Report** opens the form with the title "Quit unexpectedly" and the end of that run checked to include: the last 40 lines of the log, and, if GHManage crashed rather than being closed, what it was doing when it crashed (`crash.txt`, beside the log). Your home folder is written as `~`, and all of it is shown in the preview. Uncheck it to leave them out. If something went wrong in this session without GHManage closing, the form offers **Include the error** the same way.
+
+### Other ways
+
+You can also open an issue yourself at [github.com/TheIdeaPlace/GHManage/issues](https://github.com/TheIdeaPlace/GHManage/issues), or from GHManage: open the repository with `Ctrl+Shift+O` and `TheIdeaPlace/GHManage`, and create one from Issues. For a problem with updating, attach the update log described in [Where your settings live](#where-your-settings-live).

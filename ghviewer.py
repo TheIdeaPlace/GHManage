@@ -945,6 +945,19 @@ SELECTION_READ_MAX = 500
 _UTF16_POSITIONS = sys.platform in ("win32", "darwin")
 
 
+def _empty_list_message(view: str, kind: str, commit_branch: str = "") -> str:
+    """What is said when a list of ``kind`` comes back empty."""
+    if view == VIEW_COMMITS:
+        if commit_branch == ALL_BRANCHES:
+            return "No commits on any branch."
+        if commit_branch:
+            return f"No commits on {_commit_branch_label(commit_branch)}."
+        return "No commits on the default branch."
+    if view == VIEW_PAGES:
+        return "Nothing published yet."
+    return f"No {kind}."
+
+
 def _ctrl_pos(text: str, index: int) -> int:
     """The text box's position for Python index ``index`` into ``text``."""
     if not _UTF16_POSITIONS:
@@ -5042,10 +5055,15 @@ class GhViewerFrame(wx.Frame):
                       "R=refresh", branch_hint, "Ctrl+F=filter"),
         )
         self._update_title()
-        if not items:
+        target = self._pending_target
+        if not items and not (target and target[0] == token and target[1] == self.view_mode):
             # Focus stays on an empty list, which gives a screen reader
             # nothing to say: Enter on a run with no artifacts was silent.
-            announce.announce(f"No {kind}{branch_info}.", announce.RESULT)
+            # Not when an address or favorite is waiting for this load:
+            # _take_pending_row says what became of it, and a commit not
+            # among these is fetched, so "No commits" would be wrong.
+            announce.announce(_empty_list_message(self.view_mode, kind, self.commit_branch),
+                              announce.RESULT)
         row = self._take_pending_row(items, token)
         if filtered:
             wx.CallLater(100, self._focus_list, row)

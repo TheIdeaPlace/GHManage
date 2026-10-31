@@ -16,3 +16,26 @@ updates:
       actions:
         patterns:
           - "*"
+
+  # requirements.txt and pyproject.toml, which list the same packages.
+  #
+  # Split into two groups. The other packages are ordinary upgrades. wxPython
+  # is the UI toolkit, and a wx bump changes what a screen reader hears, so it
+  # gets a PR of its own that someone drives the app with before merging,
+  # instead of riding along with routine patches. theideaplace-appkit is
+  # pinned to an app-kit commit by URL, so Dependabot leaves it alone.
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: deps
+    groups:
+      wxpython:
+        patterns:
+          - "wxPython*"
+      python:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "wxPython*"

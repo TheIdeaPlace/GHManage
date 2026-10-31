@@ -1,5 +1,9 @@
 # GHManage 0.9.8
 
+Consistency and completeness are the two cornerstones of this release. It
+gives you a consistent experience across the different areas of GitHub, and
+expands the number of areas you can use in GHManage.
+
 GHManage is a desktop app for reading and managing your GitHub repositories from
 a fast, keyboard-driven list.
 
@@ -220,8 +224,8 @@ and Copy Details work.
 - Branches, and the branch pickers (Select Branch, Compare Branches, Run
   Workflow), failed to load on a repository with more than 30 branches. They now
   list them, and the pickers open faster.
-- **For George (#78):** Copy Diff now has a key, `Ctrl+Shift+X`, and Open Diff in
-  Default App has `Ctrl+Shift+E`. A pull request's changes address
+- Copy Diff now has a key, `Ctrl+Shift+X`, and Open Diff in Default App has
+  `Ctrl+Shift+E` (#78). A pull request's changes address
   (`…/pull/12/files`, or `…/pull/12.diff`) opens straight into its changed
   files.
 - Opening the address of an issue, pull request, commit or discussion now takes

@@ -199,6 +199,11 @@ and Copy Details work.
   theirs took the name GHManage keeps your GitHub login under. Activity loads
   again, and an Activity event with no one named no longer says "ghost".
 
+- With JAWS, `Alt+N` and `Alt+P` moved from comment to comment, change to
+  change or heading to heading in silence: JAWS doesn't read a selection made
+  by a key it doesn't know. GHManage now says what it moved to when JAWS is
+  running, as NVDA and Narrator already read it.
+
 - `Alt+N` on a long comment made NVDA say only "592 characters selected". It now
   selects the comment's first line, which says whose it is, so it is read; `Down
   Arrow` reads on. To copy a long comment, select it with `Shift+Down Arrow`.

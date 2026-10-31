@@ -938,6 +938,30 @@ PENDING_KINDS = ("item", "commit", "release", "run", "discussion", "milestone")
 # to 512 characters and says "N characters selected" beyond that, so a longer
 # stop selects just its first line.
 SELECTION_READ_MAX = 500
+
+
+# A text box on Windows and macOS counts in UTF-16 units, so an emoji is two
+# there and one in Python: every one before a place moved it one along.
+_UTF16_POSITIONS = sys.platform in ("win32", "darwin")
+
+
+def _ctrl_pos(text: str, index: int) -> int:
+    """The text box's position for Python index ``index`` into ``text``."""
+    if not _UTF16_POSITIONS:
+        return index
+    return len(text[:index].encode("utf-16-le")) // 2
+
+
+def _text_index(text: str, pos: int) -> int:
+    """The Python index into ``text`` for the text box's position ``pos``."""
+    if not _UTF16_POSITIONS:
+        return pos
+    units = 0
+    for i, ch in enumerate(text):
+        if units >= pos:
+            return i
+        units += 2 if ord(ch) > 0xFFFF else 1
+    return len(text)
 # What opening an address goes into, as Enter on its row would: things you
 # read. A release, a run, a tag, a label or a workflow lands on its row, where
 # its details are; going in would list its files, start a run and so on.
@@ -5827,8 +5851,8 @@ class GhViewerFrame(wx.Frame):
         is being read doesn't move it."""
         line = col = 0
         if keep_place:
-            caret = self.details_text.GetInsertionPoint()
             old = self.details_text.GetValue()
+            caret = _text_index(old, self.details_text.GetInsertionPoint())
             line = old.count("\n", 0, caret)
             col = caret - (old.rfind("\n", 0, caret) + 1)
         text, positions = discussionview.discussion_details(item)
@@ -5838,7 +5862,8 @@ class GhViewerFrame(wx.Frame):
         if keep_place and (line or col):
             start = self._line_to_position(line)
             end = self._line_to_position(line + 1)
-            self.details_text.SetInsertionPoint(min(start + col, max(start, end - 1)))
+            self.details_text.SetInsertionPoint(
+                _ctrl_pos(text, min(start + col, max(start, end - 1))))
             # Alt+N from here goes on to the next comment after the caret.
             self._current_comment = sum(1 for p in positions if p[0] <= line) - 1
 
@@ -7695,9 +7720,23 @@ class GhViewerFrame(wx.Frame):
                 end_pos = min(first_nl, start_pos + SELECTION_READ_MAX)
             else:
                 end_pos = start_pos + SELECTION_READ_MAX
+        text = self.details_text.GetValue()
+        jaws = speech.jaws_running()
+        moved_focus = jaws and wx.Window.FindFocus() is not self.details_text
         self.details_text.SetFocus()
-        self.details_text.SetSelection(start_pos, end_pos)
-        self.details_text.ShowPosition(start_pos)
+        self.details_text.SetSelection(_ctrl_pos(text, start_pos), _ctrl_pos(text, end_pos))
+        self.details_text.ShowPosition(_ctrl_pos(text, start_pos))
+        if jaws:
+            # JAWS doesn't follow a selection made by a key it doesn't know,
+            # so it hears what NVDA and Narrator read from the selection.
+            # Forced: this is the text moved to, not feedback to switch off.
+            selected = text[start_pos:end_pos]
+            if moved_focus:
+                # After JAWS has said where focus went, not cut off by it.
+                wx.CallLater(150, announce.announce, selected, announce.RESULT,
+                             force=True, queued=True)
+            else:
+                announce.announce(selected, announce.RESULT, force=True)
         if kind:
             kinds = [p[2] if len(p) > 2 else kind for p in positions]
             number = kinds[:new_idx + 1].count(kind)
@@ -7707,7 +7746,8 @@ class GhViewerFrame(wx.Frame):
         self._announce(f"{noun.capitalize()} {new_idx + 1} of {total}")
 
     def _line_to_position(self, line: int) -> int:
-        """Convert a 0-based line index to a character position in the TextCtrl."""
+        """Convert a 0-based line index to a character position in the
+        TextCtrl's text (a Python index; _ctrl_pos makes it the control's)."""
         text = self.details_text.GetValue()
         pos = 0
         for _ in range(max(0, line)):
@@ -9615,7 +9655,7 @@ class GhViewerFrame(wx.Frame):
                 line = self.details_text.GetValue().count("\n", 0, caret)
                 current = self._current_comment
                 self._show_details(row)
-                self.details_text.SetInsertionPoint(self._line_to_position(line))
+                self.details_text.SetInsertionPoint(_ctrl_pos(self.details_text.GetValue(), self._line_to_position(line)))
                 self._current_comment = current
         msg = f"Changed lines marked with {diffview.LABELS[style]}."
         # Once, on the way from words to symbols, not between the two
@@ -10380,7 +10420,7 @@ class GhViewerFrame(wx.Frame):
             shown = self._focused_item()
             if isinstance(shown, ChangedFile) and shown.filename == item.filename:
                 self._show_details(self.list_ctrl.GetFirstSelected())
-                self.details_text.SetInsertionPoint(self._line_to_position(line))
+                self.details_text.SetInsertionPoint(_ctrl_pos(self.details_text.GetValue(), self._line_to_position(line)))
                 # Alt+N from here goes on to the comments on the line.
                 self._current_comment = sum(
                     1 for p in self._comment_positions if p[0] <= line) - 1

@@ -3139,18 +3139,18 @@ class GhViewerFrame(wx.Frame):
         # Details panel
         details_panel = wx.Panel(self.splitter, name="details_panel")
         details_sizer = wx.BoxSizer(wx.VERTICAL)
+        # The label first: on Windows a text box is named by the label just
+        # before it, and with it made after, JAWS called the box by its
+        # panel's name, "details_panel", and Insert+Tab gave no name at all.
+        self.details_label = wx.StaticText(details_panel, label="Details")
+        details_sizer.Add(self.details_label, flag=wx.LEFT | wx.TOP, border=3)
         self.details_text = wx.TextCtrl(
             details_panel,
-            name="details_text",
             style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_RICH | wx.TE_WORDWRAP | wx.WANTS_CHARS,
         )
-        speech.set_label(self.details_text, "Details")  # as the repo list's
+        _name(self.details_text, "Details")  # as the repo list's
         self._comment_positions: list[tuple[int, int]] = []  # (line, length) per comment
         self._current_comment: int = -1
-        details_sizer.Add(
-            wx.StaticText(details_panel, label="Details"),
-            flag=wx.LEFT | wx.TOP, border=3,
-        )
         details_sizer.Add(self.details_text, proportion=1, flag=wx.EXPAND | wx.ALL, border=3)
         details_panel.SetSizer(details_sizer)
 

@@ -209,6 +209,9 @@ and Copy Details work.
 - A list that comes back empty now says so, such as "No artifacts." on a
   workflow run that made none. Before, only the status bar changed, so a
   screen reader said nothing at all.
+- `Alt+N` past the last comment, change or heading, and `Alt+P` before the
+  first, now say "Already at last comment." and so on. Before, it was only
+  shown in the status bar, so the key met silence.
 
 - `Alt+N` on a long comment made NVDA say only "592 characters selected". It now
   selects the comment's first line, which says whose it is, so it is read; `Down

@@ -7691,15 +7691,17 @@ class GhViewerFrame(wx.Frame):
         noun = GhViewerFrame._nav_noun(self)
         nouns = "changes or comments" if noun == "change or comment" else f"{noun}s"
         positions = self._comment_positions
+        # Spoken, not only shown: nothing moves, so otherwise the key is met
+        # with silence.
         if not positions:
-            self._announce(f"No {nouns} to navigate.")
+            self._tell(f"No {nouns} to navigate.")
             return
         new_idx = self._current_comment + direction
         if new_idx < 0:
-            self._announce(f"Already at first {noun}.")
+            self._tell(f"Already at first {noun}.")
             return
         if new_idx >= len(positions):
-            self._announce(f"Already at last {noun}.")
+            self._tell(f"Already at last {noun}.")
             return
         self._current_comment = new_idx
         line, length = positions[new_idx][:2]

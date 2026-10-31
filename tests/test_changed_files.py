@@ -270,14 +270,14 @@ def test_details_show_the_file_and_alt_n_moves_between_changes():
     assert f.announced[-1] == "Change 1 of 2"
     Frame._navigate_comment(f, 1)
     Frame._navigate_comment(f, 1)
-    assert f.announced[-1] == "Already at last change."
+    assert f.told[-1] == "Already at last change."  # spoken, not just shown
 
 
 def test_a_file_without_lines_has_no_changes_to_move_between():
     f = _frame(git_items=[_file(patch=None)])
     Frame._show_file_details(f, 0)
     Frame._navigate_comment(f, 1)
-    assert f.announced[-1] == "No changes to navigate."
+    assert f.told[-1] == "No changes to navigate."
 
 
 def test_enter_goes_into_the_lines_from_the_top():

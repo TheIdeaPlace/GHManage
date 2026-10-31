@@ -311,7 +311,7 @@ def _caret_on(f, text):
 def test_alt_n_names_changes_and_comments_and_counts_each():
     f = _shown([_c(1, line=2, body="One"), _c(2, line=12, body="Two")])
     said = []
-    for _ in range(5):
+    for _ in range(4):
         Frame._navigate_comment(f, 1)
         a, b = f.details_text.selection
         said.append((f.announced[-1], f.details_text.value[a:b]))
@@ -320,8 +320,12 @@ def test_alt_n_names_changes_and_comments_and_counts_each():
         ("Comment 1 of 2", "Comment by alice: One"),
         ("Change 2 of 2", "Lines 10 to 12:"),
         ("Comment 2 of 2", "Comment by alice: Two"),
-        ("Already at last change or comment.", "Comment by alice: Two"),
     ]
+    # Past the last one nothing moves, and that is spoken.
+    Frame._navigate_comment(f, 1)
+    a, b = f.details_text.selection
+    assert (f.told[-1], f.details_text.value[a:b]) == (
+        "Already at last change or comment.", "Comment by alice: Two")
     Frame._navigate_comment(f, -1)
     assert f.announced[-1] == "Change 2 of 2"
 
@@ -338,13 +342,13 @@ def test_a_commits_files_still_say_change():
     f = _frame(_files_of=COMMIT, git_items=[_file()])
     Frame._show_file_details(f, 0)
     Frame._navigate_comment(f, -1)
-    assert f.announced[-1] == "Already at first change."
+    assert f.told[-1] == "Already at first change."
     assert Frame._nav_noun(f) == "change"
     assert Frame._nav_noun(_frame()) == "change or comment"
     f = _frame(git_items=[_file(patch=None)])
     Frame._show_file_details(f, 0)
     Frame._navigate_comment(f, 1)
-    assert f.announced[-1] == "No changes or comments to navigate."
+    assert f.told[-1] == "No changes or comments to navigate."
 
 
 def test_comments_are_given_to_their_files():

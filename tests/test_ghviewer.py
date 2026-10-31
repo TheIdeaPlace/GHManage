@@ -1863,6 +1863,33 @@ def test_all_branches_status_says_when_branches_are_missing(unread, words):
     assert words in f.announced[-1]
 
 
+@pytest.mark.parametrize("view, kind, said", [
+    (ghviewer.VIEW_ARTIFACTS, "artifacts", "No artifacts."),
+    (ghviewer.VIEW_JOBS, "jobs", "No jobs."),
+    (ghviewer.VIEW_COMMITS, "commits", "No commits on dev."),
+])
+def test_an_empty_list_is_spoken_not_left_silent(monkeypatch, view, kind, said):
+    # JAWS said nothing at all on Enter on a run with no artifacts: focus
+    # stays on an empty list and only the status bar changed.
+    spoken = []
+    monkeypatch.setattr(ghviewer.announce, "announce",
+                        lambda text, category=None, **k: spoken.append((text, category)))
+    f = _loaded_frame("dev")
+    f.view_mode = view
+    Frame._on_git_items_loaded(f, 1, [], kind)
+    assert spoken == [(said, ghviewer.announce.RESULT)]
+
+
+def test_a_list_with_items_adds_nothing_spoken(monkeypatch):
+    spoken = []
+    monkeypatch.setattr(ghviewer.announce, "announce",
+                        lambda text, category=None, **k: spoken.append(text))
+    f = _loaded_frame("dev")
+    f.view_mode = ghviewer.VIEW_ARTIFACTS
+    Frame._on_git_items_loaded(f, 1, [object()], "artifacts")
+    assert spoken == []
+
+
 def test_stale_all_branches_results_are_dropped():
     f = _loaded_frame(ghviewer.ALL_BRANCHES, unread=0)
     Frame._on_all_branch_commits_loaded(f, 0, [_commit(["main"])], 5)

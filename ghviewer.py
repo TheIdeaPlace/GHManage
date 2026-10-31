@@ -5038,6 +5038,10 @@ class GhViewerFrame(wx.Frame):
                       "R=refresh", branch_hint, "Ctrl+F=filter"),
         )
         self._update_title()
+        if not items:
+            # Focus stays on an empty list, which gives a screen reader
+            # nothing to say: Enter on a run with no artifacts was silent.
+            announce.announce(f"No {kind}{branch_info}.", announce.RESULT)
         row = self._take_pending_row(items, token)
         if filtered:
             wx.CallLater(100, self._focus_list, row)

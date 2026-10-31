@@ -89,6 +89,9 @@ def _isolated(monkeypatch, tmp_path_factory):
     monkeypatch.setattr(gh_data, "_default_branches", {})  # looked up afresh per test
     monkeypatch.setattr(settings, "_session", {})  # each test starts with no choices made
     monkeypatch.delenv("GHMANAGE_GH_PATH", raising=False)
+    # Not whichever screen reader the developer happens to be running.
+    import speech
+    monkeypatch.setattr(speech, "jaws_running", lambda: False)
     home = tmp_path_factory.mktemp("appdata")
     monkeypatch.setenv("APPDATA", str(home))
     monkeypatch.setenv("HOME", str(home))

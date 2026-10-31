@@ -274,6 +274,21 @@ class UiaNotifier:
             ole.SysFreeString(activity)
 
 
+def jaws_running() -> bool:
+    """Whether JAWS is running: its main window, class ``JFWUI2``, is there.
+
+    NVDA and Narrator read a selection the app makes in an edit box; JAWS
+    reads one only when a key it knows made it, so the few moves JAWS can't
+    follow are spoken for it, and only for it, or the others would hear them
+    twice."""
+    if not IS_WINDOWS:
+        return False
+    try:
+        return bool(ctypes.windll.user32.FindWindowW("JFWUI2", None))
+    except (OSError, AttributeError):
+        return False
+
+
 # ── macOS ───────────────────────────────────────────────────────────────
 
 _objc = None  # libobjc, or False once loading failed

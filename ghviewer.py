@@ -7698,6 +7698,12 @@ class GhViewerFrame(wx.Frame):
         self.details_text.SetFocus()
         self.details_text.SetSelection(start_pos, end_pos)
         self.details_text.ShowPosition(start_pos)
+        if speech.jaws_running():
+            # JAWS doesn't follow a selection made by a key it doesn't know,
+            # so it hears what NVDA and Narrator read from the selection.
+            # Forced: this is the text moved to, not feedback to switch off.
+            announce.announce(self.details_text.GetStringSelection(),
+                              announce.RESULT, force=True)
         if kind:
             kinds = [p[2] if len(p) > 2 else kind for p in positions]
             number = kinds[:new_idx + 1].count(kind)

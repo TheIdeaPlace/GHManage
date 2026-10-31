@@ -204,6 +204,15 @@ and Copy Details work.
   by a key it doesn't know. GHManage now says what it moved to when JAWS is
   running, as NVDA and Narrator already read it.
 
+- With JAWS, the details panel was called "details_panel", and `Insert+Tab`
+  gave it no name at all. It is called "Details" now.
+- A list that comes back empty now says so, such as "No artifacts." on a
+  workflow run that made none. Before, only the status bar changed, so a
+  screen reader said nothing at all.
+- `Alt+N` past the last comment, change or heading, and `Alt+P` before the
+  first, now say "Already at last comment." and so on. Before, it was only
+  shown in the status bar, so the key met silence.
+
 - `Alt+N` on a long comment made NVDA say only "592 characters selected". It now
   selects the comment's first line, which says whose it is, so it is read; `Down
   Arrow` reads on. To copy a long comment, select it with `Shift+Down Arrow`.

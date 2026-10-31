@@ -1842,6 +1842,7 @@ def _loaded_frame(branch, unread=0):
     f._set_view_status = lambda msg, keys="": statuses.append(msg)
     f._update_title = lambda: None
     f._take_pending_row = lambda items, token: 0
+    f._pending_target = None
     f._on_git_items_loaded = lambda t, items, kind: Frame._on_git_items_loaded(f, t, items, kind)
     f.statuses = statuses
     return f
@@ -1861,6 +1862,63 @@ def test_all_branches_status_says_when_branches_are_missing(unread, words):
     Frame._on_all_branch_commits_loaded(f, 1, [_commit(["main"])], unread)
     assert words in f.statuses[-1]
     assert words in f.announced[-1]
+
+
+@pytest.mark.parametrize("view, kind, said", [
+    (ghviewer.VIEW_ARTIFACTS, "artifacts", "No artifacts."),
+    (ghviewer.VIEW_JOBS, "jobs", "No jobs."),
+    (ghviewer.VIEW_COMMITS, "commits", "No commits on dev."),
+])
+def test_an_empty_list_is_spoken_not_left_silent(monkeypatch, view, kind, said):
+    # JAWS said nothing at all on Enter on a run with no artifacts: focus
+    # stays on an empty list and only the status bar changed.
+    spoken = []
+    monkeypatch.setattr(ghviewer.announce, "announce",
+                        lambda text, category=None, **k: spoken.append((text, category)))
+    f = _loaded_frame("dev")
+    f.view_mode = view
+    Frame._on_git_items_loaded(f, 1, [], kind)
+    assert spoken == [(said, ghviewer.announce.RESULT)]
+
+
+@pytest.mark.parametrize("view, branch, said", [
+    (ghviewer.VIEW_COMMITS, "", "No commits on the default branch."),
+    (ghviewer.VIEW_COMMITS, ghviewer.ALL_BRANCHES, "No commits on any branch."),
+    (ghviewer.VIEW_PAGES, "", "Nothing published yet."),
+    (ghviewer.VIEW_WORKFLOW, "", "No workflow runs."),
+])
+def test_an_empty_list_reads_as_a_sentence(view, branch, said):
+    kind = "publishes" if view == ghviewer.VIEW_PAGES else (
+        "workflow runs" if view == ghviewer.VIEW_WORKFLOW else "commits")
+    assert ghviewer._empty_list_message(view, kind, branch) == said
+
+
+def test_an_empty_list_with_an_address_waiting_leaves_it_to_the_address(monkeypatch):
+    # A favorite tag or a run's address in a repo that has none: what
+    # became of it is said by _take_pending_row. A commit not among these is
+    # fetched, so "No commits" would be wrong.
+    spoken = []
+    monkeypatch.setattr(ghviewer.announce, "announce",
+                        lambda text, category=None, **k: spoken.append(text))
+    f = _loaded_frame("main")
+    f.view_mode = ghviewer.VIEW_COMMITS
+    f._pending_target = (1, ghviewer.VIEW_COMMITS, "commit", "abc1234")
+    Frame._on_git_items_loaded(f, 1, [], "commits")
+    assert spoken == []
+    # One left for another load doesn't count.
+    f._pending_target = (0, ghviewer.VIEW_COMMITS, "commit", "abc1234")
+    Frame._on_git_items_loaded(f, 1, [], "commits")
+    assert spoken == ["No commits on main."]
+
+
+def test_a_list_with_items_adds_nothing_spoken(monkeypatch):
+    spoken = []
+    monkeypatch.setattr(ghviewer.announce, "announce",
+                        lambda text, category=None, **k: spoken.append(text))
+    f = _loaded_frame("dev")
+    f.view_mode = ghviewer.VIEW_ARTIFACTS
+    Frame._on_git_items_loaded(f, 1, [object()], "artifacts")
+    assert spoken == []
 
 
 def test_stale_all_branches_results_are_dropped():

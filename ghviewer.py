@@ -945,6 +945,19 @@ SELECTION_READ_MAX = 500
 _UTF16_POSITIONS = sys.platform in ("win32", "darwin")
 
 
+def _empty_list_message(view: str, kind: str, commit_branch: str = "") -> str:
+    """What is said when a list of ``kind`` comes back empty."""
+    if view == VIEW_COMMITS:
+        if commit_branch == ALL_BRANCHES:
+            return "No commits on any branch."
+        if commit_branch:
+            return f"No commits on {_commit_branch_label(commit_branch)}."
+        return "No commits on the default branch."
+    if view == VIEW_PAGES:
+        return "Nothing published yet."
+    return f"No {kind}."
+
+
 def _ctrl_pos(text: str, index: int) -> int:
     """The text box's position for Python index ``index`` into ``text``."""
     if not _UTF16_POSITIONS:
@@ -3080,11 +3093,15 @@ class GhViewerFrame(wx.Frame):
 
     def _build_ui(self) -> None:
         # Main splitter: repo list (left) | issues+details (right)
-        self.main_splitter = wx.SplitterWindow(self, style=wx.SP_LIVE_UPDATE, name="main_splitter")
+        # The splitters and panels that only lay things out have no name:
+        # JAWS read their names on the way into the details text, and on
+        # coming back to the window ("main_splitter, right_panel,
+        # splitterWindow, details_panel").
+        self.main_splitter = wx.SplitterWindow(self, style=wx.SP_LIVE_UPDATE, name="")
         self.main_splitter.SetMinimumPaneSize(200)
 
         # Left panel: repo list
-        repo_panel = wx.Panel(self.main_splitter, name="repo_panel")
+        repo_panel = wx.Panel(self.main_splitter, name="")
         repo_sizer = wx.BoxSizer(wx.VERTICAL)
         repo_sizer.Add(
             wx.StaticText(repo_panel, label="Repositories"),
@@ -3102,10 +3119,10 @@ class GhViewerFrame(wx.Frame):
         repo_panel.SetSizer(repo_sizer)
 
         # Right panel: issue list (top) + details (bottom)
-        right_panel = wx.Panel(self.main_splitter, name="right_panel")
+        right_panel = wx.Panel(self.main_splitter, name="")
         right_sizer = wx.BoxSizer(wx.VERTICAL)
 
-        self.splitter = wx.SplitterWindow(right_panel, style=wx.SP_LIVE_UPDATE)
+        self.splitter = wx.SplitterWindow(right_panel, style=wx.SP_LIVE_UPDATE, name="")
         self.splitter.SetMinimumPaneSize(120)
 
         # List panel
@@ -3128,7 +3145,7 @@ class GhViewerFrame(wx.Frame):
         # Both are refreshed by _update_list_label() when the view changes, so
         # the list is announced as "Issues", "Branches", "Releases" and so on
         # rather than something generic.
-        list_panel = wx.Panel(self.splitter, name="list_panel")
+        list_panel = wx.Panel(self.splitter, name="")
         list_sizer = wx.BoxSizer(wx.VERTICAL)
         self.list_label = wx.StaticText(list_panel, label="Issues")
         list_sizer.Add(self.list_label, flag=wx.LEFT | wx.TOP, border=3)
@@ -3137,20 +3154,20 @@ class GhViewerFrame(wx.Frame):
         list_panel.SetSizer(list_sizer)
 
         # Details panel
-        details_panel = wx.Panel(self.splitter, name="details_panel")
+        details_panel = wx.Panel(self.splitter, name="")
         details_sizer = wx.BoxSizer(wx.VERTICAL)
+        # The label first: on Windows a text box is named by the label just
+        # before it, and with it made after, JAWS called the box by its
+        # panel's name, "details_panel", and Insert+Tab gave no name at all.
+        self.details_label = wx.StaticText(details_panel, label="Details")
+        details_sizer.Add(self.details_label, flag=wx.LEFT | wx.TOP, border=3)
         self.details_text = wx.TextCtrl(
             details_panel,
-            name="details_text",
             style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_RICH | wx.TE_WORDWRAP | wx.WANTS_CHARS,
         )
-        speech.set_label(self.details_text, "Details")  # as the repo list's
+        _name(self.details_text, "Details")  # as the repo list's
         self._comment_positions: list[tuple[int, int]] = []  # (line, length) per comment
         self._current_comment: int = -1
-        details_sizer.Add(
-            wx.StaticText(details_panel, label="Details"),
-            flag=wx.LEFT | wx.TOP, border=3,
-        )
         details_sizer.Add(self.details_text, proportion=1, flag=wx.EXPAND | wx.ALL, border=3)
         details_panel.SetSizer(details_sizer)
 
@@ -5038,6 +5055,15 @@ class GhViewerFrame(wx.Frame):
                       "R=refresh", branch_hint, "Ctrl+F=filter"),
         )
         self._update_title()
+        target = self._pending_target
+        if not items and not (target and target[0] == token and target[1] == self.view_mode):
+            # Focus stays on an empty list, which gives a screen reader
+            # nothing to say: Enter on a run with no artifacts was silent.
+            # Not when an address or favorite is waiting for this load:
+            # _take_pending_row says what became of it, and a commit not
+            # among these is fetched, so "No commits" would be wrong.
+            announce.announce(_empty_list_message(self.view_mode, kind, self.commit_branch),
+                              announce.RESULT)
         row = self._take_pending_row(items, token)
         if filtered:
             wx.CallLater(100, self._focus_list, row)
@@ -7687,15 +7713,17 @@ class GhViewerFrame(wx.Frame):
         noun = GhViewerFrame._nav_noun(self)
         nouns = "changes or comments" if noun == "change or comment" else f"{noun}s"
         positions = self._comment_positions
+        # Spoken, not only shown: nothing moves, so otherwise the key is met
+        # with silence.
         if not positions:
-            self._announce(f"No {nouns} to navigate.")
+            self._tell(f"No {nouns} to navigate.")
             return
         new_idx = self._current_comment + direction
         if new_idx < 0:
-            self._announce(f"Already at first {noun}.")
+            self._tell(f"Already at first {noun}.")
             return
         if new_idx >= len(positions):
-            self._announce(f"Already at last {noun}.")
+            self._tell(f"Already at last {noun}.")
             return
         self._current_comment = new_idx
         line, length = positions[new_idx][:2]

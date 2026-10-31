@@ -47,6 +47,8 @@ def _frame():
     f = SimpleNamespace(details_text=FakeText(TEXT), _comment_positions=[(1, 2), (3, 2)],
                         _current_comment=-1, announced=[], view_mode=ghviewer.VIEW_ISSUES)
     f._announce = f.announced.append
+    f.told = []
+    f._tell = lambda msg, *a, **k: f.told.append(msg)
     f._line_to_position = lambda line: Frame._line_to_position(f, line)
     return f
 
@@ -147,13 +149,15 @@ def test_without_jaws_nothing_extra_is_spoken(monkeypatch, said):
     assert f.details_text.selection is not None
 
 
-def test_at_the_end_nothing_is_spoken_for_jaws_either(monkeypatch, said):
+def test_at_the_end_it_says_so_and_nothing_else(monkeypatch, said):
+    # Nothing moves, so the selection isn't spoken again for JAWS; what is
+    # spoken, for every screen reader, is that this was the last.
     monkeypatch.setattr(speech, "jaws_running", lambda: True)
     f = _frame()
     f._current_comment = 1
     Frame._navigate_comment(f, 1)
     assert said == []
-    assert f.announced == ["Already at last comment."]
+    assert f.told == ["Already at last comment."]
 
 
 def test_jaws_running_is_false_off_windows(monkeypatch):

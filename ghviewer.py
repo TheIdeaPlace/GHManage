@@ -3080,11 +3080,15 @@ class GhViewerFrame(wx.Frame):
 
     def _build_ui(self) -> None:
         # Main splitter: repo list (left) | issues+details (right)
-        self.main_splitter = wx.SplitterWindow(self, style=wx.SP_LIVE_UPDATE, name="main_splitter")
+        # The splitters and panels that only lay things out have no name:
+        # JAWS read their names on the way into the details text, and on
+        # coming back to the window ("main_splitter, right_panel,
+        # splitterWindow, details_panel").
+        self.main_splitter = wx.SplitterWindow(self, style=wx.SP_LIVE_UPDATE, name="")
         self.main_splitter.SetMinimumPaneSize(200)
 
         # Left panel: repo list
-        repo_panel = wx.Panel(self.main_splitter, name="repo_panel")
+        repo_panel = wx.Panel(self.main_splitter, name="")
         repo_sizer = wx.BoxSizer(wx.VERTICAL)
         repo_sizer.Add(
             wx.StaticText(repo_panel, label="Repositories"),
@@ -3102,10 +3106,10 @@ class GhViewerFrame(wx.Frame):
         repo_panel.SetSizer(repo_sizer)
 
         # Right panel: issue list (top) + details (bottom)
-        right_panel = wx.Panel(self.main_splitter, name="right_panel")
+        right_panel = wx.Panel(self.main_splitter, name="")
         right_sizer = wx.BoxSizer(wx.VERTICAL)
 
-        self.splitter = wx.SplitterWindow(right_panel, style=wx.SP_LIVE_UPDATE)
+        self.splitter = wx.SplitterWindow(right_panel, style=wx.SP_LIVE_UPDATE, name="")
         self.splitter.SetMinimumPaneSize(120)
 
         # List panel
@@ -3128,7 +3132,7 @@ class GhViewerFrame(wx.Frame):
         # Both are refreshed by _update_list_label() when the view changes, so
         # the list is announced as "Issues", "Branches", "Releases" and so on
         # rather than something generic.
-        list_panel = wx.Panel(self.splitter, name="list_panel")
+        list_panel = wx.Panel(self.splitter, name="")
         list_sizer = wx.BoxSizer(wx.VERTICAL)
         self.list_label = wx.StaticText(list_panel, label="Issues")
         list_sizer.Add(self.list_label, flag=wx.LEFT | wx.TOP, border=3)
@@ -3137,7 +3141,7 @@ class GhViewerFrame(wx.Frame):
         list_panel.SetSizer(list_sizer)
 
         # Details panel
-        details_panel = wx.Panel(self.splitter, name="details_panel")
+        details_panel = wx.Panel(self.splitter, name="")
         details_sizer = wx.BoxSizer(wx.VERTICAL)
         # The label first: on Windows a text box is named by the label just
         # before it, and with it made after, JAWS called the box by its

@@ -3146,6 +3146,7 @@ class GhViewerFrame(wx.Frame):
         self._user_repos: tuple[str, str] = ("repos", "")
         # Activity of one person rather than your feed; "" for your feed.
         self._activity_of: str = ""
+        self._activity_org: bool = False  # and it is an organization's
         # Where Backspace goes from People and what was reached from it:
         # snapshots of the views you came through (_people_snapshot).
         self._people_trail: list[dict] = []
@@ -4555,6 +4556,7 @@ class GhViewerFrame(wx.Frame):
         """
         if view == VIEW_ACTIVITY:
             self._activity_of = ""  # your feed, not someone's from People
+            self._activity_org = False
         if self.view_mode != view:
             self._switch_view(view)
         else:
@@ -4613,6 +4615,7 @@ class GhViewerFrame(wx.Frame):
             "row": max(self.list_ctrl.GetFirstSelected(), 0),
             "people": self._people, "user_repos": self._user_repos,
             "activity_of": self._activity_of,
+            "activity_org": getattr(self, "_activity_org", False),
             # Still loading: what the list holds is the last view's, so
             # coming back reloads rather than drawing those.
             "items": (list(self._view_source())
@@ -4690,7 +4693,7 @@ class GhViewerFrame(wx.Frame):
         if person is None:
             return
         self._push_people()
-        self._activity_of = person.login
+        self._activity_of, self._activity_org = person.login, person.is_org
         self._show_people_view(VIEW_ACTIVITY)
 
     def _people_back(self) -> None:
@@ -4701,6 +4704,7 @@ class GhViewerFrame(wx.Frame):
         label = self._snapshot_label(snap, lower=True)
         self._people, self._user_repos = snap["people"], snap["user_repos"]
         self._activity_of = snap["activity_of"]
+        self._activity_org = snap.get("activity_org", False)
         self._read_profile = False
         item = snap["item"]
         focus = item if item is not None else snap["row"]
@@ -5105,6 +5109,7 @@ class GhViewerFrame(wx.Frame):
         people = getattr(self, "_people", ("following", ""))
         user_repos = getattr(self, "_user_repos", ("repos", ""))
         activity_of = getattr(self, "_activity_of", "")
+        activity_org = getattr(self, "_activity_org", False)
         entry = self._view_entry(view) if view in REPO_LIST_VIEWS else None
         search = self._search
         # View More in a search: what is already listed, to add the next page to
@@ -5250,7 +5255,7 @@ class GhViewerFrame(wx.Frame):
                     notes, more = fetch_notifications(limit, include_read)
                     wx.CallAfter(self._on_notifications_loaded, token, notes, more, focus_row)
                 elif view == VIEW_ACTIVITY:
-                    events, more = (fetch_activity(limit, of=activity_of) if activity_of
+                    events, more = (fetch_activity(limit, of=activity_of, org=activity_org) if activity_of
                                     else fetch_activity(limit))
                     wx.CallAfter(self._on_activity_loaded, token, events, more, focus_row)
                 elif view == VIEW_ORGS:
@@ -11898,7 +11903,7 @@ class GhViewerFrame(wx.Frame):
         # The old account's people are not the new one's.
         self._people_trail = []
         self._people, self._user_repos = ("following", ""), ("repos", "")
-        self._activity_of = ""
+        self._activity_of, self._activity_org = "", False
         self._load_repos()
         if self.view_mode == VIEW_NOTIFICATIONS:
             self.current_limit = self.page_size

@@ -162,6 +162,23 @@ def test_someones_activity_is_their_public_events(fake_gh):
     assert events == [] and not more
 
 
+def test_an_organizations_activity_is_its_own_events(fake_gh):
+    event = {"id": "1", "type": "WatchEvent", "actor": {"login": "bob"},
+             "repo": {"name": "nvaccess/nvda"}, "payload": {"action": "started"},
+             "created_at": "2026-10-01T00:00:00Z"}
+    fake_gh.route("orgs/nvaccess/events?per_page=100&page=1", [event])
+    fake_gh.route("orgs/nvaccess/events?per_page=100&page=2", [])
+    events, more = gh_data.fetch_activity(200, of="nvaccess", org=True)
+    assert [e.actor for e in events] == ["bob"] and not more
+    assert all("users/" not in c[1] for c in fake_gh.calls)   # never the account's few
+
+
+def test_a_failed_read_of_an_organizations_events_is_not_nothing(fake_gh):
+    fake_gh.route("orgs/nvaccess/events", GhError("HTTP 502"))
+    with pytest.raises(GhError, match="502"):
+        gh_data.fetch_activity(100, of="nvaccess", org=True)
+
+
 # ── Following ──────────────────────────────────────────────────────────
 
 
@@ -511,6 +528,7 @@ def test_enter_lists_their_repositories_and_a_their_activity():
     f.view_mode = V.VIEW_PEOPLE
     Frame._person_activity(f)
     assert f._activity_of == "bob" and f.switched[-1] == V.VIEW_ACTIVITY
+    assert f._activity_org is False
     assert len(f._people_trail) == 2
     assert Frame._back_label(f) == "Back to People I Follow"
 
@@ -816,3 +834,19 @@ def test_account_switch_forgets_the_old_accounts_people(monkeypatch):
     f._load_repos = f._load_items = lambda: None
     Frame._on_account_switched(f, "other")
     assert f._people_trail == [] and f._people == ("following", "") and f._activity_of == ""
+
+
+def test_a_on_an_organization_remembers_it_is_one_and_back_restores_it():
+    org = Person("nvaccess", is_org=True)
+    f = _trail_frame(git_items=[org], _activity_org=False)
+    f._focused = org
+    Frame._person_activity(f)
+    assert f._activity_of == "nvaccess" and f._activity_org is True
+    # Deeper, and back: the step keeps it, for View More and Refresh there.
+    assert Frame._people_snapshot(f)["activity_org"] is True
+    f._restore_view = lambda snap: None
+    f._snapshot_label = lambda snap, lower=False: "x"
+    f._people_trail = [dict(Frame._people_snapshot(f), items=None)]
+    f._activity_org = False
+    Frame._people_back(f)
+    assert f._activity_org is True

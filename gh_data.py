@@ -3204,16 +3204,22 @@ def _fill_pr_titles(events: list[ActivityEvent]) -> None:
                 ev.body = pr.get("body") or ""
 
 
-def fetch_activity(limit: int = 100, of: str = "") -> tuple[list[ActivityEvent], bool]:
+def fetch_activity(limit: int = 100, of: str = "",
+                   org: bool = False) -> tuple[list[ActivityEvent], bool]:
     """The signed-in user's activity feed, newest first; or with ``of``,
-    what that person has done in public lately (``users/{of}/events/public``).
+    what that person has done in public lately (``users/{of}/events/public``);
+    with ``org`` too, what has happened in that organization
+    (``orgs/{of}/events``: under users/ it has few events or none, those of
+    its own account).
 
     Returns the events and whether GitHub has more to give. Event pages are
     not reliably full (filtered events leave gaps, so a page of 100 can hold
     96), which is why a short page is not taken to be the last one here.
     """
-    endpoint = (f"users/{of}/events/public" if of
-                else f"users/{current_login()}/received_events")
+    if of:
+        endpoint = f"orgs/{of}/events" if org else f"users/{of}/events/public"
+    else:
+        endpoint = f"users/{current_login()}/received_events"
     pages = max(1, min(-(-limit // 100), _ACTIVITY_PAGES))
     raw_events: list[dict] = []
     seen: set = set()

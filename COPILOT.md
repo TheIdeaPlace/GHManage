@@ -580,7 +580,7 @@ UI thread via `wx.CallAfter`. Never touch wx widgets from a worker thread.
 | Discussions | GraphQL `repository.discussions`, `discussion(number:).comments{replies}`, mutation `addDiscussionComment` |
 | Security alerts | `repos/{owner}/{repo}/dependabot/alerts` (cursor paging), `…/code-scanning/alerts`, `…/secret-scanning/alerts?hide_secret=true` |
 | Activity feed | `users/{login}/received_events?per_page=100&page=` (max 3 pages; page 4 is HTTP 422; pages are not reliably full) |
-| A person's activity | `users/{login}/events/public?per_page=100&page=` |
+| A person's activity | `users/{login}/events/public?per_page=100&page=`; an organization's `orgs/{login}/events` (`_activity_org`; under users/ it has few or none) |
 | People, stargazers, watchers | GraphQL `viewer`/`user(login:)` `followers`/`following`, `repository` `stargazers`/`watchers`; `repositoryOwner(login:)` for one profile |
 | A person's repositories, stars | `users/{u}/repos?type=owner&sort=pushed` (yours: `user/repos?affiliation=owner`), `users/{u}/starred` |
 | Forks | `repos/{r}/forks?sort=newest` |

@@ -3204,14 +3204,16 @@ def _fill_pr_titles(events: list[ActivityEvent]) -> None:
                 ev.body = pr.get("body") or ""
 
 
-def fetch_activity(limit: int = 100) -> tuple[list[ActivityEvent], bool]:
-    """The signed-in user's activity feed, newest first.
+def fetch_activity(limit: int = 100, of: str = "") -> tuple[list[ActivityEvent], bool]:
+    """The signed-in user's activity feed, newest first; or with ``of``,
+    what that person has done in public lately (``users/{of}/events/public``).
 
     Returns the events and whether GitHub has more to give. Event pages are
     not reliably full (filtered events leave gaps, so a page of 100 can hold
     96), which is why a short page is not taken to be the last one here.
     """
-    login = current_login()
+    endpoint = (f"users/{of}/events/public" if of
+                else f"users/{current_login()}/received_events")
     pages = max(1, min(-(-limit // 100), _ACTIVITY_PAGES))
     raw_events: list[dict] = []
     seen: set = set()
@@ -3220,7 +3222,7 @@ def fetch_activity(limit: int = 100) -> tuple[list[ActivityEvent], bool]:
     for page in range(1, pages + 1):
         try:
             out = _run_gh([
-                "api", f"users/{login}/received_events?per_page=100&page={page}",
+                "api", f"{endpoint}?per_page=100&page={page}",
             ])
             rows = json.loads(out) if out.strip() else []
         except (GhError, ValueError):
@@ -5241,3 +5243,301 @@ def fetch_gist(gist_id: str) -> Gist:
     gist = _parse_gist(data if isinstance(data, dict) else {})
     gist.loaded = True
     return gist
+
+
+# ── People ──────────────────────────────────────────────────────────────
+#
+# Followers, the people you follow, and anyone's profile (#25). GraphQL, so a
+# row of a list carries the whole profile (name, bio, counts, whether you
+# follow each other) in one query, where REST gives only logins and would
+# need a call per person. Following someone is REST (PUT/DELETE
+# user/following/{login}) and needs gh's user:follow permission, which
+# `gh auth login` doesn't ask for.
+
+PEOPLE_COLUMNS = ["login", "name", "bio", "followers", "following", "repositories",
+                  "connection", "company", "location", "joined"]
+PEOPLE_DEFAULT_COLUMNS = ["login", "name", "bio", "followers", "following", "repositories"]
+FOLLOW_SCOPE = "user:follow"
+
+# A User's fields, for a row of a list. A list of followers is all Users, so
+# it asks for these plainly (spreading Organization into a User is an error).
+# Stars are left to the profile: counting them made a page of 100 take most
+# of a minute.
+_USER_FIELDS = (
+    "__typename login url name createdAt bio company location websiteUrl twitterUsername "
+    "pronouns isViewer viewerIsFollowing isFollowingViewer "
+    "status { message } "
+    "followers { totalCount } following { totalCount } "
+    "publicRepos: repositories(ownerAffiliations: OWNER, privacy: PUBLIC) { totalCount } "
+)
+# Anyone with repositories, a person or an organization: one profile, so the
+# costlier counts too.
+_PERSON_FIELDS = (
+    "__typename login url "
+    "... on User { " + _USER_FIELDS + "starredRepositories { totalCount } "
+    "allRepos: repositories(ownerAffiliations: OWNER) { totalCount } } "
+    "... on Organization { name createdAt description location websiteUrl email "
+    "publicRepos: repositories(privacy: PUBLIC) { totalCount } } "
+)
+
+
+@dataclass
+class Person:
+    """Someone on GitHub, or an organization: a row of People I Follow, My
+    Followers, someone else's followers, or View User's profile."""
+
+    login: str
+    name: str = ""
+    bio: str = ""
+    company: str = ""
+    location: str = ""
+    website: str = ""
+    twitter: str = ""
+    pronouns: str = ""
+    email: str = ""
+    status: str = ""
+    created_at: str = ""
+    url: str = ""
+    is_org: bool = False
+    is_viewer: bool = False
+    you_follow: Optional[bool] = None   # None: not known (an organization)
+    follows_you: Optional[bool] = None
+    followers: Optional[int] = None     # None for an organization
+    following: Optional[int] = None
+    starred: Optional[int] = None
+    repos: int = 0
+    repos_public: bool = True           # repos counts public ones only (False: yours, all)
+    full: bool = False                  # read with fetch_person: stars, and yours all counted
+
+    @property
+    def title(self) -> str:
+        """``alice (Alice Smith)``, or the login alone with no name."""
+        if self.name and self.name != self.login:
+            return f"{self.login} ({self.name})"
+        return self.login
+
+    @property
+    def connection(self) -> str:
+        """How you and they are connected, in words; "" for none."""
+        if self.is_viewer:
+            return "you"
+        if self.you_follow and self.follows_you:
+            return "you follow each other"
+        if self.you_follow:
+            return "you follow them"
+        if self.follows_you:
+            return "follows you"
+        return ""
+
+    def to_row(self, columns: list[str]) -> dict[str, str]:
+        def n(value: Optional[int]) -> str:
+            return "" if value is None else f"{value:,}"
+
+        mapping = {
+            "login": self.login,
+            "name": self.name,
+            "bio": " ".join(self.bio.split()),
+            "followers": n(self.followers),
+            "following": n(self.following),
+            "repositories": n(self.repos),
+            "connection": self.connection,
+            "company": self.company,
+            "location": self.location,
+            "joined": self.created_at[:10] if self.created_at else "",
+        }
+        return {col: mapping.get(col, "") for col in columns}
+
+
+def _total(node: dict, key: str) -> Optional[int]:
+    value = node.get(key)
+    count = value.get("totalCount") if isinstance(value, dict) else None
+    return count if isinstance(count, int) else None
+
+
+def _parse_person(node: dict) -> Person:
+    """A GraphQL User or Organization (``_PERSON_FIELDS``) as a Person."""
+    is_org = node.get("__typename") == "Organization"
+    is_viewer = bool(node.get("isViewer"))
+    status = node.get("status") if isinstance(node.get("status"), dict) else {}
+    login = node.get("login") or ""
+    return Person(
+        login=login,
+        name=node.get("name") or "",
+        bio=(node.get("description") if is_org else node.get("bio")) or "",
+        company=node.get("company") or "",
+        location=node.get("location") or "",
+        website=node.get("websiteUrl") or "",
+        twitter=node.get("twitterUsername") or "",
+        pronouns=node.get("pronouns") or "",
+        email=node.get("email") or "",
+        status=status.get("message") or "",
+        created_at=node.get("createdAt") or "",
+        url=node.get("url") or (f"https://github.com/{login}" if login else ""),
+        is_org=is_org,
+        is_viewer=is_viewer,
+        you_follow=None if is_org else bool(node.get("viewerIsFollowing")),
+        follows_you=None if is_org else bool(node.get("isFollowingViewer")),
+        followers=None if is_org else _total(node, "followers"),
+        following=None if is_org else _total(node, "following"),
+        starred=None if is_org else _total(node, "starredRepositories"),
+        # Yours with the private ones, where the profile counted them.
+        repos=(_total(node, "allRepos") if is_viewer and "allRepos" in node
+               else _total(node, "publicRepos")) or 0,
+        repos_public=not (is_viewer and "allRepos" in node),
+    )
+
+
+def _reply_error(reply: dict, fallback: str) -> GhError:
+    errors = reply.get("errors") or []
+    first = errors[0] if errors and isinstance(errors[0], dict) else {}
+    return GhError(first.get("message") or reply.get("message") or fallback)
+
+
+def fetch_person(login: str) -> Optional[Person]:
+    """``login``'s profile, a person's or an organization's; None when
+    there is no such account."""
+    query = ("query($login: String!) { repositoryOwner(login: $login) { "
+             + _PERSON_FIELDS + "} }")
+    reply = _graphql(query, {"login": login})
+    data = reply.get("data")
+    if not isinstance(data, dict):
+        raise _reply_error(reply, f"Couldn't read {login}'s profile")
+    node = data.get("repositoryOwner")
+    if not isinstance(node, dict):
+        if reply.get("errors"):
+            raise _reply_error(reply, f"Couldn't read {login}'s profile")
+        return None
+    person = _parse_person(node)
+    person.full = True
+    return person
+
+
+# A repository's people (#31): who starred it, who watches it.
+REPO_PEOPLE = ("stargazers", "watchers")
+
+
+def fetch_people(kind: str, login: str = "", limit: int = 100) -> list[Person]:
+    """``login``'s followers (``kind`` "followers") or the people they
+    follow ("following"), yours with no ``login``; or a repository's
+    stargazers or watchers, ``login`` being OWNER/NAME. In GitHub's order,
+    most recent first, ``limit`` at most, 100 to a query."""
+    if kind not in ("followers", "following") + REPO_PEOPLE:
+        raise ValueError(kind)
+    on_repo = kind in REPO_PEOPLE
+    if on_repo:
+        owner = "repository(owner: $owner, name: $name)"
+        params = "$first: Int!, $after: String, $owner: String!, $name: String!"
+    else:
+        owner = "user(login: $login)" if login else "viewer"
+        params = "$first: Int!, $after: String" + (", $login: String!" if login else "")
+    holder = "repository" if on_repo else ("user" if login else "viewer")
+    query = (f"query({params}) {{ {owner} {{ {kind}(first: $first, after: $after) {{ "
+             "pageInfo { hasNextPage endCursor } nodes { " + _USER_FIELDS + "} } } }")
+    people: list[Person] = []
+    after = None
+    while len(people) < limit:
+        variables: dict = {"first": min(100, limit - len(people)), "after": after}
+        if on_repo:
+            variables["owner"], _, variables["name"] = login.partition("/")
+        elif login:
+            variables["login"] = login
+        reply = _graphql(query, variables)
+        data = reply.get("data") if isinstance(reply.get("data"), dict) else None
+        who = data.get(holder) if data else None
+        if not isinstance(who, dict):
+            errors = reply.get("errors") or []
+            missing = any(isinstance(e, dict) and e.get("type") == "NOT_FOUND" for e in errors)
+            if data is not None and login and (missing or not errors):
+                if on_repo:
+                    raise GhError(f"There's no repository called {login} that you can see.")
+                raise GhError(f"There's no GitHub user called {login}.")
+            raise _reply_error(reply, f"Couldn't list {kind}")
+        conn = who.get(kind) if isinstance(who.get(kind), dict) else {}
+        for node in conn.get("nodes") or []:
+            if isinstance(node, dict) and node.get("login"):
+                people.append(_parse_person(node))
+        page = conn.get("pageInfo") or {}
+        if not page.get("hasNextPage") or not page.get("endCursor"):
+            break
+        after = page["endCursor"]
+    return people[:limit]
+
+
+def count_people(kind: str) -> int:
+    """How many followers you have (``kind`` "followers"), or people you
+    follow ("following")."""
+    if kind not in ("followers", "following"):
+        raise ValueError(kind)
+    reply = _graphql(f"{{ viewer {{ {kind} {{ totalCount }} }} }}")
+    data = reply.get("data") if isinstance(reply.get("data"), dict) else {}
+    viewer = data.get("viewer")
+    total = _total(viewer, kind) if isinstance(viewer, dict) else None
+    if total is None:
+        raise _reply_error(reply, f"Couldn't count {kind}")
+    return total
+
+
+def count_following() -> int:
+    """How many people you follow, for the People I Follow entry."""
+    return count_people("following")
+
+
+def count_followers() -> int:
+    """How many followers you have, for the My Followers entry."""
+    return count_people("followers")
+
+
+def fetch_user_repos(login: str, limit: int = 100, viewer: bool = False) -> list[RepoEntry]:
+    """``login``'s own repositories, most recently pushed first: yours with
+    ``viewer``, private ones included; anyone else's public ones (an
+    organization's too)."""
+    endpoint = ("user/repos?affiliation=owner&sort=pushed" if viewer
+                else f"users/{login}/repos?type=owner&sort=pushed")
+    return [_repo_entry(r) for r in _api_pages(endpoint, limit) if r.get("full_name")]
+
+
+def fetch_repo_forks(repo: str, limit: int = 100) -> list[RepoEntry]:
+    """``repo``'s forks, the newest first (#31)."""
+    return [_repo_entry(r) for r in _api_pages(f"repos/{repo}/forks?sort=newest", limit)
+            if r.get("full_name")]
+
+
+def fetch_user_starred(login: str, limit: int = 100) -> list[RepoEntry]:
+    """The repositories ``login`` has starred, most recently starred first."""
+    return [_repo_entry(r) for r in _api_pages(f"users/{login}/starred", limit)
+            if r.get("full_name")]
+
+
+def _follow_error(exc: GhError, login: str = "") -> GhError:
+    """gh's failure to follow or unfollow, as something to act on. Without
+    user:follow GitHub answers 404 (it hides what a token can't reach) or gh
+    names the scope; either way, say which permission and how to add it."""
+    if _scope_error(exc) is not None:
+        return MissingScope(FOLLOW_SCOPE)
+    text = str(exc)
+    if "403" in text:
+        return MissingScope(FOLLOW_SCOPE)
+    if "404" in text or "Not Found" in text:
+        # GitHub hides from a token what it can't reach, so this is most
+        # likely the permission; but the account may be gone, so say both.
+        missing = MissingScope(FOLLOW_SCOPE)
+        missing.args = (f"GitHub said Not Found for {login or 'that account'}. If the "
+                        f"account still exists, {str(missing)[0].lower()}{str(missing)[1:]}",)
+        return missing
+    return exc
+
+
+def follow_user(login: str) -> None:
+    """Follow ``login`` (needs gh's user:follow permission)."""
+    try:
+        _run_gh(["api", "-X", "PUT", f"user/following/{login}"])
+    except GhError as exc:
+        raise _follow_error(exc, login) from exc
+
+
+def unfollow_user(login: str) -> None:
+    """Stop following ``login`` (needs gh's user:follow permission)."""
+    try:
+        _run_gh(["api", "-X", "DELETE", f"user/following/{login}"])
+    except GhError as exc:
+        raise _follow_error(exc, login) from exc

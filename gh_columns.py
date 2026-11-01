@@ -19,6 +19,7 @@ from gh_data import (
     MILESTONE_COLUMNS, MILESTONE_DEFAULT_COLUMNS,
     INSIGHT_COLUMNS, INSIGHT_DEFAULT_COLUMNS,
     GIST_COLUMNS, GIST_DEFAULT_COLUMNS,
+    PEOPLE_COLUMNS, PEOPLE_DEFAULT_COLUMNS,
     COMMIT_COLUMNS, COMMIT_DEFAULT_COLUMNS,
     JOB_COLUMNS, JOB_DEFAULT_COLUMNS,
     LABEL_COLUMNS, LABEL_DEFAULT_COLUMNS,
@@ -138,6 +139,16 @@ CATALOG: dict[str, ColumnDef] = {c.id: c for c in [
     _c("uniques", "Unique", 160, STATE),
     # Gists
     _c("visibility", "Visibility", 80, STATE),
+    # People
+    _c("login", "User", 140),
+    _c("bio", "Bio", 340),
+    _c("followers", "Followers", 80),
+    _c("following", "Following", 80),
+    # Says what it is ("you follow each other"), so Full mode adds no name.
+    _c("connection", "Connection", 160, STATE),
+    _c("company", "Company", 120),
+    _c("location", "Location", 120),
+    _c("joined", "Joined", 100),
 ]}
 
 
@@ -214,6 +225,9 @@ INSIGHT_SET = _set("insights", "Insights", INSIGHT_COLUMNS, INSIGHT_DEFAULT_COLU
 GIST_SET = _set("gists", "Gists", GIST_COLUMNS, GIST_DEFAULT_COLUMNS,
                 {"title": {"heading": "Gist", "width": 300}, "files": {"width": 220},
                  "comments": {"width": 80}})
+# A person is named by their login; Name is their display name.
+PEOPLE_SET = _set("people", "People", PEOPLE_COLUMNS, PEOPLE_DEFAULT_COLUMNS,
+                  {"name": {"width": 160}, "repositories": {"width": 90}})
 FAVORITES_SET = _set("favorites", "Favorites", FAVORITES_COLUMNS,
                      FAVORITES_DEFAULT_COLUMNS)
 
@@ -222,5 +236,5 @@ COLUMN_SETS: list[ColumnSet] = [
     ASSET_SET, RELEASE_SET, WORKFLOW_RUN_SET, ARTIFACT_SET, WORKFLOW_SET,
     PAGES_SET, PAGEFILE_SET, ACTIVITY_SET, NOTIFICATION_SET, SEARCH_ITEM_SET,
     MY_WORK_SET, JOB_SET, FAVORITES_SET, CHANGED_FILE_SET, REPO_FILE_SET, SECURITY_SET,
-    DISCUSSION_SET, MILESTONE_SET, INSIGHT_SET, GIST_SET,
+    DISCUSSION_SET, MILESTONE_SET, INSIGHT_SET, GIST_SET, PEOPLE_SET,
 ]

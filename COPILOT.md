@@ -29,6 +29,9 @@ milestoneview.py — A milestone as text to read (no wx): milestone_details, pro
 gistview.py   — A gist as text to read (no wx): gist_text (text and a stop per file heading),
                 file_heading, file_body, status_message.
 insightview.py — Insights as text to read (no wx): insight_details, notes, status_message.
+peopleview.py — People as text (no wx): person_details, the lists' names (people_label,
+                repos_label, activity_label), person_keys, status_message, and people_of
+                (who View User offers for an item) with is_login.
 discussionview.py — A discussion as text to read (no wx): discussion_details (text and
                 Alt+N/Alt+P stops per comment and reply), answer_line, status_message.
 ```
@@ -144,6 +147,19 @@ UI thread via `wx.CallAfter`. Never touch wx widgets from a worker thread.
   repository's 403 is `contributors_error`. ghviewer lists up to `INSIGHT_CONTRIBUTORS` (500);
   Insights is in `NO_MORE_VIEWS`; F and sorting are refused aloud; the notes are spoken
   (STATUS) after the first row.
+- `Person`, `fetch_people(kind, login, limit)`, `fetch_person(login)`, `count_following` /
+  `count_followers`, `fetch_user_repos(login, limit, viewer)`, `fetch_user_starred`,
+  `fetch_repo_forks(repo, limit)`, `follow_user` / `unfollow_user` — People (#25) and a
+  repository's Stargazers, Watchers and Forks (#31). Lists are GraphQL (`_USER_FIELDS`, cursor
+  paging, login/owner/name as variables): kinds followers/following (of `viewer` or
+  `user(login:)`) and stargazers/watchers (`repository(owner:,name:)`, `REPO_PEOPLE`). **A list
+  row asks no `starredRepositories` and no unrestricted repo count**: they made a page of 100 take
+  most of a minute; `fetch_person` (`_PERSON_FIELDS`, `repositoryOwner`, User or Organization)
+  asks them and sets `full`, and ghviewer reads it 250 ms after a row rests
+  (`_fetch_person_later`). User `email` needs `user:email`, so it's asked of organizations only.
+  Follow/unfollow (`PUT`/`DELETE user/following/{login}`) need `user:follow`; a 404, 403 or gh's
+  scope hint becomes `MissingScope("user:follow")`. `fetch_activity(limit, of=login)` reads
+  `users/{login}/events/public`.
 - `fetch_tags(repo, limit)` / `fetch_releases(repo, limit)` / `fetch_workflow_runs(repo, limit)`.
 - `fetch_release_assets(repo, release_id, release_tag, limit)` — a release's files with their
   download counts. The releases endpoint already returns assets inline, so the Releases list
@@ -302,6 +318,26 @@ UI thread via `wx.CallAfter`. Never touch wx widgets from a worker thread.
   line (`_caret_line`) → `_file_view.target`, a TextEntryDialog, then head SHA + post + refetch
   in a thread; `_on_line_comment_done` re-attaches comments, redraws rows, re-renders and puts
   the caret back on the same line (comments go after it, so its index doesn't move).
+- **People** (`VIEW_PEOPLE`, `VIEW_USER_REPOS`, and `VIEW_ACTIVITY` with `_activity_of`).
+  `_people = (kind, login)`: kind following/followers (login "" is you, the two repo-list entries
+  `PEOPLE_ENTRIES`, both mapped to VIEW_PEOPLE in `ENTRY_VIEWS`; `_view_entry` says which),
+  "user" (View User's list of one) or stargazers/watchers (login is OWNER/NAME).
+  `_user_repos = (kind, login)`: repos, starred or forks. **`_people_trail`** is the way back:
+  every drill (O/W/S/A/Enter on a person, View User, Stargazers/Watchers/Forks) pushes
+  `_people_snapshot()` and `_go_back` pops it (`_people_back`) while `_in_people()`. People
+  views come back from their cached items; any other view (View User from Issues, Files…) via
+  `_restore_view`: repo, `_VIEW_CONTEXT` attributes, `_restore_code` for Files, or a reload
+  landing on the item by pending kind "url" (silent). None of `_people`, `_user_repos`,
+  `_activity_of` or the trail is cleared by `_switch_view`, so `_return_to_list` back into them
+  works. `_open_my_people` and `_on_account_switched` clear the trail (the latter the three
+  attributes too), `_select_category(VIEW_ACTIVITY)` clears `_activity_of`, and `_push_people`
+  starts a new trail from outside People (except in a repository opened from someone's
+  repositories); bounded at 50, keeping the first step. A step saved mid-load has items None
+  and is reloaded on Backspace (`_landed_token`, set in `_populate_filtered_list`). A "url"
+  pending target that misses lands on `_url_fallback_row`.
+  Keys O/W/S/A/Insert/Delete are in `on_char_hook` (work from the profile);
+  `peopleview.person_keys` names only those that work (an organization: A). `_current_entry`
+  keeps the trail's root entry selected in the repo list.
 - `on_select_branch` — Ctrl+B branch picker dialog for Commits view; in Files,
   `_choose_code_ref` (branches, then tags marked "(tag)"), which keeps the folder and entry. Its first entry, "All branches", sets `commit_branch` to `ALL_BRANCHES` ("*"), which `fetch_commits` hands to `fetch_all_branch_commits` (GraphQL, newest 100 commits of up to 100 branches, merged).
 - **The Labels view is a view of the Issues view, not a drill-down.** Enter on a label
@@ -544,6 +580,11 @@ UI thread via `wx.CallAfter`. Never touch wx widgets from a worker thread.
 | Discussions | GraphQL `repository.discussions`, `discussion(number:).comments{replies}`, mutation `addDiscussionComment` |
 | Security alerts | `repos/{owner}/{repo}/dependabot/alerts` (cursor paging), `…/code-scanning/alerts`, `…/secret-scanning/alerts?hide_secret=true` |
 | Activity feed | `users/{login}/received_events?per_page=100&page=` (max 3 pages; page 4 is HTTP 422; pages are not reliably full) |
+| A person's activity | `users/{login}/events/public?per_page=100&page=` |
+| People, stargazers, watchers | GraphQL `viewer`/`user(login:)` `followers`/`following`, `repository` `stargazers`/`watchers`; `repositoryOwner(login:)` for one profile |
+| A person's repositories, stars | `users/{u}/repos?type=owner&sort=pushed` (yours: `user/repos?affiliation=owner`), `users/{u}/starred` |
+| Forks | `repos/{r}/forks?sort=newest` |
+| Follow / unfollow | `PUT` / `DELETE user/following/{login}` (needs `user:follow`) |
 | PR titles for the feed | GraphQL `repository(owner,name){ pN: pullRequest(number:N){title body} }`, batched, per repo on error |
 
 ## Tests

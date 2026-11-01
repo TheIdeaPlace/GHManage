@@ -157,9 +157,22 @@ def test_repositories_and_stars(fake_gh):
 
 def test_someones_activity_is_their_public_events(fake_gh):
     fake_gh.route("users/alice/events/public", [])
+    fake_gh.route("orgs/alice/events", GhError("HTTP 404"))
     events, more = gh_data.fetch_activity(100, of="alice")
-    assert fake_gh.calls == [["api", "users/alice/events/public?per_page=100&page=1"]]
+    assert fake_gh.calls[0] == ["api", "users/alice/events/public?per_page=100&page=1"]
     assert events == [] and not more
+
+
+def test_an_organizations_activity_is_its_own_events(fake_gh):
+    event = {"id": "1", "type": "WatchEvent", "actor": {"login": "bob"},
+             "repo": {"name": "nvaccess/nvda"}, "payload": {"action": "started"},
+             "created_at": "2026-10-01T00:00:00Z"}
+    fake_gh.route("users/nvaccess/events/public", [])
+    fake_gh.route("orgs/nvaccess/events?per_page=100&page=1", [event])
+    fake_gh.route("orgs/nvaccess/events?per_page=100&page=2", [])
+    events, more = gh_data.fetch_activity(200, of="nvaccess")
+    assert [e.actor for e in events] == ["bob"] and not more
+    assert fake_gh.calls[-1] == ["api", "orgs/nvaccess/events?per_page=100&page=2"]
 
 
 # ── Following ──────────────────────────────────────────────────────────

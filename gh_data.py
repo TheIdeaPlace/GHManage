@@ -3206,7 +3206,8 @@ def _fill_pr_titles(events: list[ActivityEvent]) -> None:
 
 def fetch_activity(limit: int = 100, of: str = "") -> tuple[list[ActivityEvent], bool]:
     """The signed-in user's activity feed, newest first; or with ``of``,
-    what that person has done in public lately (``users/{of}/events/public``).
+    what that person has done in public lately (``users/{of}/events/public``),
+    or what has happened in that organization (``orgs/{of}/events``).
 
     Returns the events and whether GitHub has more to give. Event pages are
     not reliably full (filtered events leave gaps, so a page of 100 can hold
@@ -3232,6 +3233,16 @@ def fetch_activity(limit: int = 100, of: str = "") -> tuple[list[ActivityEvent],
             # says nothing about whether older events exist, so `more` stays
             # true and View More tries again.
             break
+        if of and page == 1 and not rows:
+            # An organization's events are under orgs/; users/ gives none,
+            # which isn't the same as nothing having happened. A person's
+            # login there is a 404: they have simply done nothing lately.
+            try:
+                out = _run_gh(["api", f"orgs/{of}/events?per_page=100&page=1"])
+                rows = json.loads(out) if out.strip() else []
+                endpoint = f"orgs/{of}/events"
+            except (GhError, ValueError):
+                rows = []
         if not isinstance(rows, list) or not rows:
             exhausted = True
             break

@@ -3204,17 +3204,22 @@ def _fill_pr_titles(events: list[ActivityEvent]) -> None:
                 ev.body = pr.get("body") or ""
 
 
-def fetch_activity(limit: int = 100, of: str = "") -> tuple[list[ActivityEvent], bool]:
+def fetch_activity(limit: int = 100, of: str = "",
+                   org: bool = False) -> tuple[list[ActivityEvent], bool]:
     """The signed-in user's activity feed, newest first; or with ``of``,
-    what that person has done in public lately (``users/{of}/events/public``),
-    or what has happened in that organization (``orgs/{of}/events``).
+    what that person has done in public lately (``users/{of}/events/public``);
+    with ``org`` too, what has happened in that organization
+    (``orgs/{of}/events``: under users/ it has few events or none, those of
+    its own account).
 
     Returns the events and whether GitHub has more to give. Event pages are
     not reliably full (filtered events leave gaps, so a page of 100 can hold
     96), which is why a short page is not taken to be the last one here.
     """
-    endpoint = (f"users/{of}/events/public" if of
-                else f"users/{current_login()}/received_events")
+    if of:
+        endpoint = f"orgs/{of}/events" if org else f"users/{of}/events/public"
+    else:
+        endpoint = f"users/{current_login()}/received_events"
     pages = max(1, min(-(-limit // 100), _ACTIVITY_PAGES))
     raw_events: list[dict] = []
     seen: set = set()
@@ -3233,16 +3238,6 @@ def fetch_activity(limit: int = 100, of: str = "") -> tuple[list[ActivityEvent],
             # says nothing about whether older events exist, so `more` stays
             # true and View More tries again.
             break
-        if of and page == 1 and not rows:
-            # An organization's events are under orgs/; users/ gives none,
-            # which isn't the same as nothing having happened. A person's
-            # login there is a 404: they have simply done nothing lately.
-            try:
-                out = _run_gh(["api", f"orgs/{of}/events?per_page=100&page=1"])
-                rows = json.loads(out) if out.strip() else []
-                endpoint = f"orgs/{of}/events"
-            except (GhError, ValueError):
-                rows = []
         if not isinstance(rows, list) or not rows:
             exhausted = True
             break

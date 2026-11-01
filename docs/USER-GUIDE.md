@@ -32,6 +32,7 @@ GHManage is a keyboard-driven desktop app for your GitHub repositories, built fo
 - [Starred and Watched Repositories](#starred-and-watched-repositories)
 - [My Organizations and Shared With Me](#my-organizations-and-shared-with-me)
 - [Gists](#gists)
+- [People](#people)
 - [Favorites](#favorites)
 - [Quick Filter](#quick-filter)
 - [Copying](#copying)
@@ -332,14 +333,16 @@ It is in this order:
 6. **My Work**: open issues and pull requests that need you, with how many once it has loaded. See [My Work](#my-work).
 7. **My Organizations**: the organizations you belong to, with how many, for example "My Organizations (3)". See [My Organizations and Shared With Me](#my-organizations-and-shared-with-me).
 8. **Gists**: your gists, with how many, for example "Gists (4)". See [Gists](#gists).
-9. **Shared With Me**: other people's repositories you have been made a collaborator on, with how many. It is only there when there is at least one.
-10. **Your saved searches**, each marked with a magnifying glass, for example "🔍 NVDA braille bugs". See [Saved searches](#saved-searches).
-11. **Repositories you opened by address**, each marked with a pin, for example "📌 nvaccess/nvda — NVDA, the free and open source screen reader".
-12. **Your own repositories**, most recently pushed first, each followed by its description, up to 100.
+9. **People I Follow**: the people you follow on GitHub, with how many. See [People](#people).
+10. **My Followers**: the people who follow you, with how many.
+11. **Shared With Me**: other people's repositories you have been made a collaborator on, with how many. It is only there when there is at least one.
+12. **Your saved searches**, each marked with a magnifying glass, for example "🔍 NVDA braille bugs". See [Saved searches](#saved-searches).
+13. **Repositories you opened by address**, each marked with a pin, for example "📌 nvaccess/nvda — NVDA, the free and open source screen reader".
+14. **Your own repositories**, most recently pushed first, each followed by its description, up to 100.
 
-The first eight are always there, so the same keystrokes from the top of the list always reach them. The first four are where they were before Notifications, My Work and My Organizations arrived. When the list first loads, the status bar says how many repositories it found: "Loaded 42 repositories. Select one to view issues and PRs."
+The first ten are always there, so the same keystrokes from the top of the list always reach them. The first four are where they were before Notifications, My Work and My Organizations arrived. When the list first loads, the status bar says how many repositories it found: "Loaded 42 repositories. Select one to view issues and PRs."
 
-The notification, starred, watched and gist counts are asked for once the list is up, so they appear a moment after the names, without moving you from the entry you are on. If GitHub can't be asked, the entry shows just its name rather than a number that might be wrong. Opening Starred, Watched or Gists, or pressing `R` in it, brings its count up to date, so a repository you starred on the web since GHManage started is counted then.
+The notification, starred, watched, gist, following and follower counts are asked for once the list is up, so they appear a moment after the names, without moving you from the entry you are on. If GitHub can't be asked, the entry shows just its name rather than a number that might be wrong. Opening Starred, Watched, Gists, People I Follow or My Followers, or pressing `R` in it, brings its count up to date, so a repository you starred on the web since GHManage started is counted then.
 
 Opening a repository shows its **Issues & PRs**. Use `Ctrl+2` through `Ctrl+0` to reach its other views.
 
@@ -1133,6 +1136,47 @@ GitHub sends up to a megabyte of each file. A larger one shows its start and say
 
 ---
 
+## People
+
+**People I Follow** and **My Followers** list people on GitHub, and **View User** (`Ctrl+U`, on the Actions menu) opens anyone's profile. Open the lists from their entries in the repository list, after Gists, or from **View → View Mode**. Like Starred, they aren't about one repository, so they work at any time.
+
+Each row shows a person's user name, their name, their bio, how many followers they have, how many people they follow, and how many public repositories they have. **View → Columns…** adds how you are connected ("you follow each other", "you follow them", "follows you"), their company, their location and when they joined.
+
+Selecting a person shows their profile in the details panel: their name and pronouns, their status, whether you follow each other, their company, location, website and X (Twitter) name, their follower, following, repository and starred counts, when they joined, their address, and then their bio. The starred count follows a moment after the selection rests on a row.
+
+From a person:
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Their repositories, most recently pushed first |
+| `O` | Their followers |
+| `W` | The people they follow |
+| `S` | The repositories they have starred |
+| `A` | What they have done in public lately, as in [Activity](#activity) |
+| `Insert` | Follow them |
+| `Delete` | Unfollow them |
+| `Ctrl+O` | Open their profile on GitHub |
+
+Each of these lists works the same way, so you can go as far as you like: from one of your followers to the people they follow, to one of those people's repositories, and into it. `Backspace` comes back one step at a time, to the row you left. `Enter` on a repository opens it here, and on an Activity event it opens what the event was about. These keys also work from the profile in the details panel, and are on the **Actions** menu.
+
+Following or unfollowing changes the person's row and profile in place, and the People I Follow count; the row stays, so `Insert` puts back what `Delete` took away. Following needs a permission `gh` doesn't ask for when you sign in. The first time, GHManage shows the command that adds it:
+
+```
+gh auth refresh -h github.com -s user:follow
+```
+
+### View User
+
+**View User** (`Ctrl+U`) works from anywhere. It offers the people the selected item names, most likely first: an issue's author, the people assigned to it and those who commented on it; an Activity event's actor; a repository's owner; a discussion's author, commenters and those who replied; a contributor in Insights. Choose one, or type any user name, and the profile opens with focus at its top. `Backspace` from there goes to its row, and `Backspace` again back to where you were, on the same item.
+
+An organization's profile shows its description, location, website, email and public repositories. `Enter` lists its repositories, and `A` what has happened in it lately; organizations have no followers or following to list.
+
+### Stargazers, Watchers and Forks
+
+**Stargazers**, **Watchers** and **Forks**, on the **Actions** menu and on a repository's context menu in the repository list, list who starred the repository in front of you, who watches it, and its forks, newest first. Stargazers and Watchers are lists of people, with everything above. Forks are a list of repositories: `Enter` opens one here, and the Pushed column shows which forks are still active. `Backspace` comes back to where you were.
+
+---
+
 ## Favorites
 
 Favorites gather the things you come back to, from any repository, into one list. Press `F` on almost anything to add it: an issue or pull request, a branch, a commit, a tag, a release, a label, a workflow, a workflow run, a published page, the subject of an Activity event, or a repository, whether in the repository list or in Starred, Watched, Shared With Me, an organization's repositories or search results. Press `F` again to remove it.
@@ -1333,6 +1377,7 @@ Everything that acts on what the list is showing is on the **Actions** menu, whi
 | Search This Repository… | `Ctrl+Shift+S` | Everywhere, for the repository in front of you: a search starting `repo:owner/name` |
 | Read README | `Ctrl+Shift+R` | Everywhere, for the repository in front of you: its README, in Files |
 | Pull Request → Checks, Review…, Merge…, Ready for Review or Back to Draft, Request Reviewers…, Update Branch… | `K`, `V`, `D` in the list | Issues & PRs, on a pull request |
+| Stargazers, Watchers, Forks | | Everywhere, for the repository in front of you; in a repository's Stargazers or Watchers, that repository |
 | Watch Settings… | `Ctrl+Shift+U` | Everywhere, for the repository in front of you |
 | Save Search… | `Ctrl+S` | Search results |
 | New Label… (Insert) | `Ctrl+I`, or `Insert` in Labels | Any view of a repository; switches to Labels to show the new one |
@@ -1349,6 +1394,9 @@ Everything that acts on what the list is showing is on the **Actions** menu, whi
 | Go to Event's Repository | `Ctrl+Shift+G` | Activity, and Notifications where it reads **Go to Notification's Repository** |
 | Mark as Read, Unsubscribe from Thread | `M`, `U` in the list | Notifications |
 | Mark All as Read… | | Notifications |
+| View User… | `Ctrl+U` | Everywhere: the people the selected item names, or a name you type |
+| Followers, Following, Starred Repositories, Recent Activity | `O`, `W`, `S`, `A` in the list | People, on a person (Recent Activity on an organization too) |
+| Follow, Unfollow | `Insert`, `Delete` in the list | People, on someone other than you |
 
 On a Mac, use `Cmd` for `Ctrl`.
 
@@ -1402,6 +1450,7 @@ On a Mac, use `Cmd` in place of `Ctrl` for every shortcut that has one, `Option`
 | `Ctrl+Shift+E` | Open that diff in your default app for `.diff` files |
 | `Ctrl+Shift+U` | Watch settings for the repository |
 | `Ctrl+Shift+K` | Switch GitHub account |
+| `Ctrl+U` | View User: anyone's profile |
 | Applications key or `Shift+F10` | Context menu for the selected item or repository |
 | `Ctrl+Q` | Quit |
 
@@ -1508,6 +1557,18 @@ On a Mac, use `Cmd` in place of `Ctrl` for every shortcut that has one, `Option`
 | `Ctrl+O` | Open it on GitHub |
 | `Alt+N` / `Alt+P` | Next / previous file, in the details panel |
 
+### In People
+
+| Key | Action |
+|-----|--------|
+| `Enter` | The person's repositories |
+| `O` / `W` | Their followers / the people they follow |
+| `S` | The repositories they have starred |
+| `A` | What they have done lately |
+| `Insert` / `Delete` | Follow / unfollow them |
+| `Ctrl+O` | Open their profile on GitHub |
+| `Backspace` | Back one step |
+
 ### In My Work and search results
 
 | Key | Action |
@@ -1590,7 +1651,7 @@ On a Mac, use `Cmd` in place of `Ctrl` for every shortcut that has one, `Option`
 | `G` or `Ctrl+Shift+G` | Open the event's repository in GHManage |
 | `F` | Favorite what the event is about |
 
-### In Starred, Watched, Shared With Me and an organization
+### In lists of repositories
 
 | Key | Action |
 |-----|--------|

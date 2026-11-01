@@ -16,6 +16,7 @@ import threading
 import unicodedata
 import webbrowser
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Callable, Optional
 from urllib.parse import quote, unquote, urlsplit
 
@@ -36,6 +37,7 @@ import diffview
 import discussionview
 import insightview
 import gistview
+import peopleview
 import milestoneview
 import settings
 import search_help
@@ -53,7 +55,7 @@ from gh_columns import (
     ISSUE_SET, JOB_SET, LABEL_SET, MY_WORK_SET, NOTIFICATION_SET, ORG_SET,
     PAGEFILE_SET, PAGES_SET, RELEASE_SET, REPO_FILE_SET, REPO_SET, SEARCH_ITEM_SET, TAG_SET,
     SECURITY_SET, WORKFLOW_RUN_SET, WORKFLOW_SET, DISCUSSION_SET, MILESTONE_SET,
-    INSIGHT_SET, GIST_SET,
+    INSIGHT_SET, GIST_SET, PEOPLE_SET,
 )
 from gh_data import (
     ACTIVITY_MAX,
@@ -79,6 +81,16 @@ from gh_data import (
     count_gists,
     fetch_gist,
     fetch_gists,
+    Person,
+    count_followers,
+    count_following,
+    fetch_people,
+    fetch_person,
+    fetch_repo_forks,
+    fetch_user_repos,
+    fetch_user_starred,
+    follow_user,
+    unfollow_user,
     ALL_BRANCHES,
     ALL_BRANCHES_PER_BRANCH_MAX,
     GhError,
@@ -636,6 +648,9 @@ def copy_values(item) -> CopyValues | None:
         return CopyValues(item.url, item.title, item.title, "Milestone Title", item.title)
     if isinstance(item, Gist):
         return CopyValues(item.url, item.title, item.id, "Gist ID", item.title)
+    if isinstance(item, Person):
+        return CopyValues(item.url, item.title, item.login, "User Name",
+                          peopleview.person_details(item))
     if isinstance(item, InsightRow):
         text = ", ".join(x for x in (item.section, item.name, item.count_display,
                                      item.uniques_display) if x)
@@ -844,6 +859,18 @@ ID_VIEW_DISCUSSIONS = wx.NewIdRef()
 ID_VIEW_MILESTONES = wx.NewIdRef()
 ID_VIEW_INSIGHTS = wx.NewIdRef()
 ID_VIEW_GISTS = wx.NewIdRef()
+ID_VIEW_FOLLOWING = wx.NewIdRef()
+ID_VIEW_FOLLOWERS = wx.NewIdRef()
+ID_VIEW_USER = wx.NewIdRef()
+ID_PERSON_FOLLOWERS = wx.NewIdRef()
+ID_PERSON_FOLLOWING = wx.NewIdRef()
+ID_PERSON_STARRED = wx.NewIdRef()
+ID_PERSON_ACTIVITY = wx.NewIdRef()
+ID_FOLLOW = wx.NewIdRef()
+ID_UNFOLLOW = wx.NewIdRef()
+ID_REPO_STARGAZERS = wx.NewIdRef()
+ID_REPO_WATCHERS = wx.NewIdRef()
+ID_REPO_FORKS = wx.NewIdRef()
 
 
 # View modes
@@ -879,15 +906,18 @@ VIEW_DISCUSSIONS = "discussions"  # a repository's discussions (GraphQL)
 VIEW_MILESTONES = "milestones"   # a repository's milestones and their progress
 VIEW_INSIGHTS = "insights"       # traffic of the last 14 days, and contributors
 VIEW_GISTS = "gists"             # your gists (not of a repository)
+VIEW_PEOPLE = "people"           # people: followers, following, or one profile (_people)
+VIEW_USER_REPOS = "user_repos"   # one person's repositories or stars (_user_repos)
 
 # Views that are not views *of a repo*, so they work with none selected.
 REPOLESS_VIEWS = (VIEW_FAVORITES, VIEW_NOTIFICATIONS, VIEW_MY_WORK, VIEW_ACTIVITY,
                   VIEW_STARRED, VIEW_WATCHED, VIEW_SEARCH_ISSUES, VIEW_SEARCH_REPOS,
-                  VIEW_ORGS, VIEW_ORG, VIEW_SHARED, VIEW_GISTS)
+                  VIEW_ORGS, VIEW_ORG, VIEW_SHARED, VIEW_GISTS, VIEW_PEOPLE,
+                  VIEW_USER_REPOS)
 # The repoless views fetched from GitHub (Favorites is read from disk).
 FEED_VIEWS = (VIEW_NOTIFICATIONS, VIEW_MY_WORK, VIEW_ACTIVITY, VIEW_STARRED,
               VIEW_WATCHED, VIEW_SEARCH_ISSUES, VIEW_SEARCH_REPOS, VIEW_ORGS, VIEW_ORG,
-              VIEW_SHARED, VIEW_GISTS)
+              VIEW_SHARED, VIEW_GISTS, VIEW_PEOPLE, VIEW_USER_REPOS)
 # Views listing issues and pull requests (Items), shown with the issue
 # details. Only Issues & PRs is of one repo; the issue actions (close,
 # reopen, comment) belong to it alone.
@@ -984,7 +1014,7 @@ NO_MORE_VIEWS = (VIEW_FAVORITES, VIEW_MY_WORK, VIEW_ORGS, VIEW_JOBS, VIEW_ARTIFA
 # Insights lists up to this many contributors, most commits first (GitHub gives 500).
 INSIGHT_CONTRIBUTORS = 500
 # Views listing repositories; Enter on one opens it here.
-REPO_LIST_VIEWS = (VIEW_STARRED, VIEW_WATCHED, VIEW_ORG, VIEW_SHARED)
+REPO_LIST_VIEWS = (VIEW_STARRED, VIEW_WATCHED, VIEW_ORG, VIEW_SHARED, VIEW_USER_REPOS)
 
 # clientData of the pseudo-entries at the top of the repository list.
 FAVORITES_ENTRY = "__favorites__"
@@ -997,6 +1027,8 @@ STARRED_ENTRY = "__starred__"
 WATCHED_ENTRY = "__watched__"
 MY_ORGS_ENTRY = "__my_orgs__"
 GISTS_ENTRY = "__gists__"
+FOLLOWING_ENTRY = "__following__"
+FOLLOWERS_ENTRY = "__followers__"
 # Shown only when someone has shared a repository with you.
 SHARED_ENTRY = "__shared__"
 SHARED_LABEL = "Shared With Me"
@@ -1012,6 +1044,8 @@ CATEGORY_ENTRIES = [
     (MY_WORK_ENTRY, "My Work"),
     (MY_ORGS_ENTRY, "My Organizations"),
     (GISTS_ENTRY, "Gists"),
+    (FOLLOWING_ENTRY, "People I Follow"),
+    (FOLLOWERS_ENTRY, "My Followers"),
 ]
 # Which repo-list entry stands for which view, both ways.
 VIEW_ENTRIES = {
@@ -1026,6 +1060,10 @@ VIEW_ENTRIES = {
     VIEW_GISTS: GISTS_ENTRY,
 }
 ENTRY_VIEWS = {entry: view for view, entry in VIEW_ENTRIES.items()}
+# Two entries open People, each on its own list (_people); _view_entry says
+# which one stands for what is showing.
+PEOPLE_ENTRIES = {FOLLOWING_ENTRY: "following", FOLLOWERS_ENTRY: "followers"}
+ENTRY_VIEWS.update({entry: VIEW_PEOPLE for entry in PEOPLE_ENTRIES})
 # The categories whose entry carries a count, like ★ Favorites (6), and how
 # to ask GitHub for it. Activity has none: it is a feed, not a set of things.
 COUNTED_ENTRIES = {
@@ -1033,6 +1071,8 @@ COUNTED_ENTRIES = {
     STARRED_ENTRY: count_starred_repos,
     WATCHED_ENTRY: count_watched_repos,
     GISTS_ENTRY: count_gists,
+    FOLLOWING_ENTRY: count_following,
+    FOLLOWERS_ENTRY: count_followers,
 }
 
 # The Actions menu item for F. Context menus name what it will do instead.
@@ -1093,6 +1133,8 @@ OPEN_LABELS = {
     VIEW_MILESTONES: "List Its Issues and PRs",
     VIEW_INSIGHTS: "Read",
     VIEW_GISTS: "Read",
+    VIEW_PEOPLE: "List Repositories",
+    VIEW_USER_REPOS: "Open Here",
 }
 # Where Enter reads: focus moves into the details panel, at the top, and
 # Backspace there comes back to the row. Enter in the panel itself does
@@ -1221,6 +1263,8 @@ VIEW_COLUMNS = {
     VIEW_MILESTONES: MILESTONE_SET,
     VIEW_INSIGHTS: INSIGHT_SET,
     VIEW_GISTS: GIST_SET,
+    VIEW_PEOPLE: PEOPLE_SET,
+    VIEW_USER_REPOS: REPO_SET,
 }
 
 
@@ -2549,6 +2593,42 @@ def format_checks(pr_label: str, checks: list) -> str:
 # ── New issue dialog ────────────────────────────────────────────────────
 
 
+class ViewUserDialog(wx.Dialog):
+    """View User (Ctrl+U): whose profile to open. An editable list, offering
+    the people the selected item names ("alice — author"), the first chosen;
+    or type any user name."""
+
+    def __init__(self, parent: wx.Window, suggestions: list[tuple[str, str]]) -> None:
+        super().__init__(parent, title="View User")
+        outer = wx.BoxSizer(wx.VERTICAL)
+        label = "&User name"
+        outer.Add(wx.StaticText(self, label=label), 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
+        choices = [f"{login} — {role}" if role else login for login, role in suggestions]
+        self.user_ctrl = wx.ComboBox(self, value=choices[0] if choices else "",
+                                     choices=choices, style=wx.CB_DROPDOWN)
+        _name(self.user_ctrl, label.replace("&", ""))
+        self.user_ctrl.SetMinSize((320, -1))
+        outer.Add(self.user_ctrl, 0, wx.EXPAND | wx.ALL, 10)
+        buttons = self.CreateStdDialogButtonSizer(wx.OK | wx.CANCEL)
+        ok = self.FindWindow(wx.ID_OK)
+        if ok:
+            ok.SetLabel("&View")
+            ok.SetDefault()
+        outer.Add(buttons, 0, wx.ALIGN_RIGHT | wx.ALL, 10)
+        self.SetSizerAndFit(outer)
+        self.user_ctrl.SetFocus()
+        self.user_ctrl.SelectAll()
+
+    def login(self) -> str:
+        """The user name chosen or typed, without its role or an @."""
+        return login_from_choice(self.user_ctrl.GetValue())
+
+
+def login_from_choice(text: str) -> str:
+    """"alice — author" or "@alice" as "alice"."""
+    return text.split(" — ", 1)[0].strip().lstrip("@").strip()
+
+
 class NewIssueDialog(wx.Dialog):
     """Title and body for a new issue.
 
@@ -3059,6 +3139,16 @@ class GhViewerFrame(wx.Frame):
         # whose repositories are showing.
         self._orgs: list = []
         self._org: str = ""
+        # People (#25). The list showing: (kind, login), kind "following",
+        # "followers" or "user" (View User's one profile); login "" is you.
+        self._people: tuple[str, str] = ("following", "")
+        # A person's repositories showing: (kind "repos" or "starred", login).
+        self._user_repos: tuple[str, str] = ("repos", "")
+        # Activity of one person rather than your feed; "" for your feed.
+        self._activity_of: str = ""
+        # Where Backspace goes from People and what was reached from it:
+        # snapshots of the views you came through (_people_snapshot).
+        self._people_trail: list[dict] = []
         # Whether the Shared With Me entry is in the repo list.
         self._show_shared: bool = False
 
@@ -3293,6 +3383,10 @@ class GhViewerFrame(wx.Frame):
         self._act_search_repo = actions_menu.Append(
             ID_SEARCH_REPO, "Search This Repository…\tCtrl+Shift+S")
         self._act_readme = actions_menu.Append(ID_READ_README, "Read README\tCtrl+Shift+R")
+        # Who starred, watches or forked the repository in front of you (#31).
+        self._act_stargazers = actions_menu.Append(ID_REPO_STARGAZERS, "Stargazers")
+        self._act_watchers = actions_menu.Append(ID_REPO_WATCHERS, "Watchers")
+        self._act_forks = actions_menu.Append(ID_REPO_FORKS, "Forks")
         self._act_watch = actions_menu.Append(ID_WATCH_SETTINGS, "Watch Settings…\tCtrl+Shift+U")
         self._act_save_search = actions_menu.Append(ID_SAVE_SEARCH, "Save Search…\tCtrl+S")
         actions_menu.AppendSeparator()
@@ -3343,6 +3437,18 @@ class GhViewerFrame(wx.Frame):
             ID_UNSUBSCRIBE, "Unsubscribe from Thread (U)"
         )
         self._act_mark_all_read = actions_menu.Append(ID_MARK_ALL_READ, "Mark All as Read…")
+        actions_menu.AppendSeparator()
+        # People (#25). View User works anywhere, on whoever the selected
+        # item is by; the rest act on the person selected in People. O, W, S,
+        # A, Insert and Delete are the keys there.
+        self._act_view_user = actions_menu.Append(ID_VIEW_USER, "View User…	Ctrl+U")
+        self._act_person_followers = actions_menu.Append(ID_PERSON_FOLLOWERS, "Followers (O)")
+        self._act_person_following = actions_menu.Append(ID_PERSON_FOLLOWING, "Following (W)")
+        self._act_person_starred = actions_menu.Append(
+            ID_PERSON_STARRED, "Starred Repositories (S)")
+        self._act_person_activity = actions_menu.Append(ID_PERSON_ACTIVITY, "Recent Activity (A)")
+        self._act_follow = actions_menu.Append(ID_FOLLOW, "Follow (Insert)")
+        self._act_unfollow = actions_menu.Append(ID_UNFOLLOW, "Unfollow (Delete)")
         menu_bar.Append(actions_menu, "Actions")
         self._actions_menu = actions_menu
 
@@ -3382,6 +3488,8 @@ class GhViewerFrame(wx.Frame):
         show_menu.AppendRadioItem(ID_VIEW_WATCHED, "Watched Repositories")
         show_menu.AppendRadioItem(ID_VIEW_SHARED, "Shared With Me")
         show_menu.AppendRadioItem(ID_VIEW_GISTS, "Gists")
+        show_menu.AppendRadioItem(ID_VIEW_FOLLOWING, "People I Follow")
+        show_menu.AppendRadioItem(ID_VIEW_FOLLOWERS, "My Followers")
         # Checked too while one organization's repositories are showing.
         show_menu.AppendRadioItem(ID_VIEW_ORGS, "My Organizations")
         view_menu.AppendSubMenu(show_menu, "View Mode")
@@ -3511,6 +3619,18 @@ class GhViewerFrame(wx.Frame):
         self.Bind(wx.EVT_MENU, self.on_view_watched, id=ID_VIEW_WATCHED)
         self.Bind(wx.EVT_MENU, self.on_view_shared, id=ID_VIEW_SHARED)
         self.Bind(wx.EVT_MENU, lambda e: self._select_category(VIEW_GISTS), id=ID_VIEW_GISTS)
+        self.Bind(wx.EVT_MENU, lambda e: self._open_my_people("following"), id=ID_VIEW_FOLLOWING)
+        self.Bind(wx.EVT_MENU, lambda e: self._open_my_people("followers"), id=ID_VIEW_FOLLOWERS)
+        self.Bind(wx.EVT_MENU, lambda e: self._view_user_flow(), id=ID_VIEW_USER)
+        self.Bind(wx.EVT_MENU, lambda e: self._repo_people("stargazers"), id=ID_REPO_STARGAZERS)
+        self.Bind(wx.EVT_MENU, lambda e: self._repo_people("watchers"), id=ID_REPO_WATCHERS)
+        self.Bind(wx.EVT_MENU, lambda e: self._repo_people("forks"), id=ID_REPO_FORKS)
+        self.Bind(wx.EVT_MENU, lambda e: self._person_people("followers"), id=ID_PERSON_FOLLOWERS)
+        self.Bind(wx.EVT_MENU, lambda e: self._person_people("following"), id=ID_PERSON_FOLLOWING)
+        self.Bind(wx.EVT_MENU, lambda e: self._person_repos("starred"), id=ID_PERSON_STARRED)
+        self.Bind(wx.EVT_MENU, lambda e: self._person_activity(), id=ID_PERSON_ACTIVITY)
+        self.Bind(wx.EVT_MENU, lambda e: self._follow_person(True), id=ID_FOLLOW)
+        self.Bind(wx.EVT_MENU, lambda e: self._follow_person(False), id=ID_UNFOLLOW)
         self.Bind(wx.EVT_MENU, self.on_view_orgs, id=ID_VIEW_ORGS)
         self.Bind(wx.EVT_MENU, self.on_favorite, id=ID_FAVORITE)
         for view, menu_id in ID_GO_TO_VIEW.items():
@@ -3814,6 +3934,10 @@ class GhViewerFrame(wx.Frame):
         menu_bar.Check(ID_VIEW_WATCHED, self.view_mode == VIEW_WATCHED)
         menu_bar.Check(ID_VIEW_SHARED, self.view_mode == VIEW_SHARED)
         menu_bar.Check(ID_VIEW_GISTS, self.view_mode == VIEW_GISTS)
+        menu_bar.Check(ID_VIEW_FOLLOWING, self.view_mode == VIEW_PEOPLE
+                       and self._people == ("following", ""))
+        menu_bar.Check(ID_VIEW_FOLLOWERS, self.view_mode == VIEW_PEOPLE
+                       and self._people == ("followers", ""))
         menu_bar.Check(ID_VIEW_ORGS, self.view_mode in (VIEW_ORGS, VIEW_ORG))
         # State filter
         menu_bar.Check(ID_STATE_OPEN, self.state_filter == "open")
@@ -3851,6 +3975,8 @@ class GhViewerFrame(wx.Frame):
         self._act_new_issue.Enable(True)
         self._act_search_repo.Enable(True)
         self._act_readme.Enable(True)
+        for entry in (self._act_stargazers, self._act_watchers, self._act_forks):
+            entry.Enable(True)
         self._act_pr.Enable(issues)
         # Always on: it can act on the repo selected in the repo list from any
         # view, and says "Select a repository first" when there is none.
@@ -3867,6 +3993,18 @@ class GhViewerFrame(wx.Frame):
         notifications = self.view_mode == VIEW_NOTIFICATIONS
         for entry in (self._act_mark_read, self._act_unsubscribe, self._act_mark_all_read):
             entry.Enable(notifications)
+        # Always on: with nobody to suggest it asks for a name.
+        self._act_view_user.Enable(True)
+        person = self._focused_item() if self.view_mode == VIEW_PEOPLE else None
+        person = person if isinstance(person, Person) else None
+        is_user = person is not None and not person.is_org
+        self._act_person_followers.Enable(is_user)
+        self._act_person_following.Enable(is_user)
+        self._act_person_starred.Enable(is_user)
+        self._act_person_activity.Enable(person is not None)
+        followable = is_user and not person.is_viewer
+        self._act_follow.Enable(followable and not person.you_follow)
+        self._act_unfollow.Enable(followable and bool(person.you_follow))
 
         # Delete is the key in these views as well as Ctrl+D.
         if self.view_mode == VIEW_LABELS:
@@ -4256,6 +4394,17 @@ class GhViewerFrame(wx.Frame):
         entry = self._view_entry(self.view_mode)
         if entry:
             return entry
+        trail = getattr(self, "_people_trail", None)
+        if trail and GhViewerFrame._in_people(self):
+            # Someone's followers, repositories or activity: the entry, or the
+            # repository, you started from.
+            root = trail[0]
+            if root["view"] == VIEW_PEOPLE and not root["people"][1]:
+                return next((e for e, k in PEOPLE_ENTRIES.items()
+                             if k == root["people"][0]), None)
+            return GhViewerFrame._view_entry(SimpleNamespace(**{
+                "_people": root["people"], "_activity_of": root["activity_of"],
+                "_user_repos": root["user_repos"]}), root["view"]) or root["repo"]
         if self.view_mode in SEARCH_VIEWS:
             search = getattr(self, "_search", None)
             for saved in getattr(self, "saved_searches", []):
@@ -4354,6 +4503,8 @@ class GhViewerFrame(wx.Frame):
             return
         if name == FAVORITES_ENTRY:
             self._select_favorites()
+        elif name in PEOPLE_ENTRIES:
+            self._open_my_people(PEOPLE_ENTRIES[name])
         elif name in ENTRY_VIEWS:
             self._select_category(ENTRY_VIEWS[name])
         elif name.startswith(SEARCH_ENTRY_PREFIX):
@@ -4398,6 +4549,8 @@ class GhViewerFrame(wx.Frame):
         Unlike Favorites these keep the repository you were in, so Ctrl+1
         after a glance at one takes you straight back to it.
         """
+        if view == VIEW_ACTIVITY:
+            self._activity_of = ""  # your feed, not someone's from People
         if self.view_mode != view:
             self._switch_view(view)
         else:
@@ -4412,6 +4565,393 @@ class GhViewerFrame(wx.Frame):
             self.filter_text = ""
         self._org = login
         self._select_category(VIEW_ORG)
+
+    # ── People (#25) ───────────────────────────────────────────────────
+    #
+    # People I Follow and My Followers are repo-list entries; View User
+    # (Ctrl+U) opens anyone's profile from wherever you are. From a person,
+    # Enter lists their repositories, O their followers, W who they follow, S
+    # their stars and A what they have done lately, each as deep as you like.
+    # _people_trail is the way back: a snapshot of each view you came
+    # through, popped by Backspace while one of those views is showing.
+
+    # What a view keeps beyond its view mode, for coming back to it after
+    # View User (the snapshot's "context"). _switch_view clears most of these.
+    _VIEW_CONTEXT = ("commit_branch", "artifacts_run", "jobs_run", "assets_release",
+                     "_files_of", "_files_back", "_history_of", "_history_back",
+                     "label_filter", "milestone_filter", "pages_site", "_org")
+    _PEOPLE_TRAIL_MAX = 50
+
+    def _open_my_people(self, kind: str) -> None:
+        """People I Follow ("following") or My Followers ("followers"), from
+        the repository list or View ▸ View Mode."""
+        self._people_trail = []
+        if self.view_mode == VIEW_PEOPLE and self._people != (kind, ""):
+            self.filter_text = ""  # a filter typed for one list means nothing in the other
+        self._people = (kind, "")
+        self._read_profile = False
+        self._select_category(VIEW_PEOPLE)
+        self._update_menu_checks()
+        self._restore_repo_selection(None)
+
+    def _in_people(self) -> bool:
+        """Whether the view showing was reached through People, so Backspace
+        follows _people_trail."""
+        view = getattr(self, "view_mode", None)
+        return view in (VIEW_PEOPLE, VIEW_USER_REPOS) or (
+            view == VIEW_ACTIVITY and bool(getattr(self, "_activity_of", "")))
+
+    def _people_snapshot(self) -> dict:
+        """The view showing, to come back to with Backspace."""
+        item = self._focused_item()
+        snap = {
+            "view": self.view_mode, "repo": self.repo, "item": item,
+            "row": max(self.list_ctrl.GetFirstSelected(), 0),
+            "people": self._people, "user_repos": self._user_repos,
+            "activity_of": self._activity_of,
+            "items": list(self._view_source()), "more": self._activity_more,
+            "limit": self.current_limit, "filter_text": self.filter_text,
+            "return_to": self._return_to,
+            "return_view": getattr(self, "_return_view", VIEW_ISSUES),
+            "context": {name: getattr(self, name, None) for name in self._VIEW_CONTEXT},
+        }
+        if self.view_mode == VIEW_CODE:
+            snap["code"] = self._code_snapshot(item)
+        return snap
+
+    def _push_people(self) -> None:
+        self._people_trail.append(self._people_snapshot())
+        del self._people_trail[:-self._PEOPLE_TRAIL_MAX]
+
+    def _snapshot_label(self, snap: dict, lower: bool = False) -> str:
+        """The name of the view a snapshot was taken in, as _view_label
+        names a view: "People I Follow", "alice's Repositories", "Issues"."""
+        context = snap.get("context") or {}
+        view_of = SimpleNamespace(
+            view_mode=snap["view"], _people=snap["people"], _user_repos=snap["user_repos"],
+            _activity_of=snap["activity_of"], _org=context.get("_org") or "")
+        return GhViewerFrame._view_label(view_of, snap["view"], lower=lower)
+
+    def _selected_person(self) -> Person | None:
+        """The person selected in People, or None (said aloud)."""
+        item = self._focused_item() if self.view_mode == VIEW_PEOPLE else None
+        if not isinstance(item, Person):
+            self._tell("Select a person first.")
+            return None
+        return item
+
+    def _person_people(self, kind: str) -> None:
+        """O and W on a person: their followers, or the people they follow."""
+        person = self._selected_person()
+        if person is None:
+            return
+        if person.is_org:
+            self._tell(f"{person.login} is an organization; it has no followers or "
+                       "following to list here.")
+            return
+        self._push_people()
+        self.filter_text = ""
+        self._read_profile = False
+        self._people = (kind, "" if person.is_viewer else person.login)
+        self._show_people_view(VIEW_PEOPLE)
+
+    def _person_repos(self, kind: str = "repos") -> None:
+        """Enter on a person: their repositories; S: the ones they starred."""
+        person = self._selected_person()
+        if person is None:
+            return
+        if kind == "starred" and person.is_org:
+            self._tell(f"{person.login} is an organization; organizations don't star "
+                       "repositories.")
+            return
+        self._push_people()
+        self._user_repos = (kind, person.login)
+        self._show_people_view(VIEW_USER_REPOS)
+
+    def _person_activity(self) -> None:
+        """A on a person: what they have done in public lately."""
+        person = self._selected_person()
+        if person is None:
+            return
+        self._push_people()
+        self._activity_of = person.login
+        self._show_people_view(VIEW_ACTIVITY)
+
+    def _people_back(self) -> None:
+        """Backspace through People: the view before, as it was, on the row
+        you left."""
+        snap = self._people_trail.pop()
+        view = snap["view"]
+        label = self._snapshot_label(snap, lower=True)
+        self._people, self._user_repos = snap["people"], snap["user_repos"]
+        self._activity_of = snap["activity_of"]
+        self._read_profile = False
+        item = snap["item"]
+        focus = item if item is not None else snap["row"]
+        if view in (VIEW_PEOPLE, VIEW_USER_REPOS) or (view == VIEW_ACTIVITY
+                                                       and snap["activity_of"]):
+            self._switch_view(view, load=False)
+            self.current_limit, self.filter_text = snap["limit"], snap["filter_text"]
+            self._return_to, self._return_view = snap["return_to"], snap["return_view"]
+            token = self._begin_fetch()
+            if view == VIEW_PEOPLE:
+                self._on_people_loaded(token, snap["items"], None, focus)
+            elif view == VIEW_USER_REPOS:
+                self._on_repo_list_loaded(token, snap["items"], focus)
+            else:
+                self._on_activity_loaded(token, snap["items"], bool(snap["more"]), focus)
+            self._update_menu_checks()
+            self._restore_repo_selection(None)
+        else:
+            self._restore_view(snap)
+        self._announce(f"Back to {label}")
+
+    def _restore_view(self, snap: dict) -> None:
+        """Back from View User to the view it was chosen in: the same
+        repository, view, drill-down and row. Lists that were read whole are
+        drawn again from what was read; the rest are fetched again and land
+        on the same item."""
+        view, item = snap["view"], snap["item"]
+        if view not in REPOLESS_VIEWS:
+            self.repo = snap["repo"]
+        if view == VIEW_CODE and snap.get("code"):
+            self._restore_code(snap["code"])
+            self._update_title()
+            self._restore_repo_selection(None)
+            return
+        self._switch_view(view, load=False)
+        for name, value in snap["context"].items():
+            setattr(self, name, value)
+        self.current_limit, self.filter_text = snap["limit"], snap["filter_text"]
+        self._return_to, self._return_view = snap["return_to"], snap["return_view"]
+        self._update_actions_menu()
+        self._update_title()
+        self._restore_repo_selection(None)
+        items = snap["items"]
+        if view == VIEW_FAVORITES:
+            self._load_favorites_view(focus=item)
+            return
+        token = self._begin_fetch()
+        if view == VIEW_ACTIVITY:
+            self._on_activity_loaded(token, items, bool(snap["more"]), item)
+        elif view == VIEW_MY_WORK:
+            self._on_my_work_loaded(token, items, item)
+        elif view in SEARCH_VIEWS:
+            self._on_search_loaded(token, items, self._search_total, item)
+        elif view in REPO_LIST_VIEWS:
+            self._on_repo_list_loaded(token, items, item)
+        elif view == VIEW_ORGS:
+            self._on_orgs_loaded(token, items, snap["row"])
+        elif view == VIEW_GISTS:
+            self._on_gists_loaded(token, items, None, snap["row"])
+        else:
+            self._pending_focus_row = snap["row"]
+            self._load_items()
+            url = getattr(item, "url", "") or ""
+            if url:
+                self._set_pending_target(view, "url", url)
+
+    def _show_people_view(self, view: str) -> None:
+        """Show ``view`` (People or a list of repositories) for the
+        _people or _user_repos just set: loaded afresh when it is already
+        the view."""
+        if self.view_mode == view:
+            self.current_limit = self.page_size
+            self._load_items()
+            self._update_menu_checks()
+            self._restore_repo_selection(None)
+        else:
+            self._switch_view(view)
+
+    def _repo_people(self, kind: str) -> None:
+        """Actions ▸ Stargazers, Watchers or Forks: of the repository in
+        front of you. Backspace comes back here."""
+        repo = self._repo_in_front()
+        if not repo:
+            self._tell("Select a repository first.")
+            return
+        self._push_people()
+        self.filter_text = ""
+        self._read_profile = False
+        if kind == "forks":
+            self._user_repos = ("forks", repo)
+            self._show_people_view(VIEW_USER_REPOS)
+        else:
+            self._people = (kind, repo)
+            self._show_people_view(VIEW_PEOPLE)
+
+    def _view_user_flow(self) -> None:
+        """View User (Ctrl+U): anyone's profile, offering the people the
+        selected item names (its author first), or a name typed."""
+        item = self._focused_item()
+        suggestions = peopleview.people_of(item, self.repo or "") if item is not None else (
+            peopleview.people_of(None, self.repo or ""))
+        dlg = ViewUserDialog(self, suggestions)
+        try:
+            if dlg.ShowModal() != wx.ID_OK:
+                return
+            login = dlg.login()
+        finally:
+            dlg.Destroy()
+        if not login:
+            return
+        if not peopleview.is_login(login):
+            self._tell(f"{login} isn't a GitHub user name.")
+            return
+        self._view_user(login)
+
+    def _view_user(self, login: str) -> None:
+        """Open ``login``'s profile: a list of one, read from the top when it
+        arrives. Backspace comes back here."""
+        self._push_people()
+        self.filter_text = ""
+        self._people = ("user", login)
+        self._read_profile = True
+        self._show_people_view(VIEW_PEOPLE)
+
+    def _on_people_loaded(self, token: int, people: list, count=None, focus=0) -> None:
+        """A list of people, or View User's one profile."""
+        if not self._fetch_is_current(token):
+            return  # the user has moved on; these belong to a view they left
+        self.git_items = people
+        self.items = []
+        filtered = self._populate_filtered_list(people)
+        kind, login = self._people
+        entry = self._view_entry(VIEW_PEOPLE)
+        if entry:
+            if len(people) < self.current_limit:
+                count = len(people)  # all of them, so newer than the startup count
+            if count is not None and self._category_counts.get(entry) != count:
+                self._category_counts[entry] = count
+                self._refresh_category_labels()
+        message = peopleview.status_message(kind, login, people, self.current_limit)
+        keys = keys_hint(
+            enter_hint(VIEW_PEOPLE) if people else "",
+            ctrl_o_hint(VIEW_PEOPLE) if people else "",
+            peopleview.person_keys(people),
+            "" if kind == "user" or not people else "Ctrl++=view more",
+            "R=refresh", "Ctrl+F=filter")
+        self._set_view_status(message, keys)
+        self._update_title()
+        self._update_actions_menu()
+        read = getattr(self, "_read_profile", False)
+        self._read_profile = False
+        if not people:
+            self.details_text.SetValue(
+                message if kind == "user" else peopleview.empty_text(kind, login))
+            announce.announce(message, announce.RESULT)
+            return
+        row = focus if isinstance(focus, int) else max(self._row_of(focus), 0)
+        if filtered:
+            wx.CallLater(100, self._focus_list, row)
+            if read and kind == "user":
+                # View User goes into the profile, as opening an address goes
+                # into what it points to; Backspace comes out to its row.
+                wx.CallLater(150, self._if_still_current, token, self._read_item)
+
+    def _show_person_details(self, idx: int) -> None:
+        """A person's profile. A row of a list leaves out their stars (too
+        slow to count for a page of people); they are read once the
+        selection rests on it, as a gist's files are."""
+        if idx < 0 or idx >= len(self.git_items) or not isinstance(self.git_items[idx], Person):
+            self.details_text.Clear()
+            return
+        person = self.git_items[idx]
+        self.details_text.SetValue(peopleview.person_details(person))
+        self._comment_positions = []
+        self._current_comment = -1
+        if not person.full and not person.is_org:
+            self._fetch_person_later(person, self._detail_gen)
+
+    def _fetch_person_later(self, person: Person, gen: int) -> None:
+        def worker() -> None:
+            try:
+                got = fetch_person(person.login)
+            except GhError:
+                got = None  # the row's profile stands; nothing to say
+            wx.CallAfter(self._on_person_fetched, gen, person, got)
+
+        def start() -> None:
+            if gen == self._detail_gen:
+                threading.Thread(target=worker, daemon=True).start()
+
+        wx.CallLater(250, start)
+
+    def _on_person_fetched(self, gen: int, person: Person, got: Person | None) -> None:
+        if got is None or got.is_org:
+            return
+        # Kept on the row's own Person, so coming back to it needs no fetch.
+        for name in ("starred", "repos", "repos_public", "followers", "following",
+                     "you_follow", "follows_you", "status", "full"):
+            setattr(person, name, getattr(got, name))
+        if not self._shows(VIEW_PEOPLE, person, gen):
+            return
+        reading = self.FindFocus() is self.details_text
+        caret = self.details_text.GetInsertionPoint() if reading else 0
+        self.details_text.SetValue(peopleview.person_details(person))
+        if reading:
+            # The lines before Starred are the same, so the caret stays put.
+            self.details_text.SetInsertionPoint(min(caret, self.details_text.GetLastPosition()))
+
+    def _follow_person(self, follow: bool) -> None:
+        """Insert follows the selected person, Delete unfollows them."""
+        person = self._selected_person()
+        if person is None:
+            return
+        if person.is_org:
+            self._tell(f"{person.login} is an organization; GHManage follows people, "
+                       "not organizations.")
+            return
+        if person.is_viewer:
+            self._tell("That's you.")
+            return
+        if follow and person.you_follow:
+            self._tell(f"You already follow {person.login}.")
+            return
+        if not follow and not person.you_follow:
+            self._tell(f"You don't follow {person.login}.")
+            return
+        self._announce(f"{'Following' if follow else 'Unfollowing'} {person.login}…")
+
+        def worker() -> None:
+            try:
+                (follow_user if follow else unfollow_user)(person.login)
+            except GhError as exc:
+                wx.CallAfter(self._on_follow_done, person, follow, exc)
+                return
+            wx.CallAfter(self._on_follow_done, person, follow, None)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_follow_done(self, person: Person, follow: bool, exc: GhError | None) -> None:
+        verb = "follow" if follow else "unfollow"
+        if isinstance(exc, MissingScope):
+            self._announce(f"Following people needs gh's \"{exc.scope}\" permission; "
+                           "see the message for how to add it.")
+            wx.MessageBox(str(exc), "Follow" if follow else "Unfollow",
+                          wx.OK | wx.ICON_INFORMATION, self)
+            return
+        if exc is not None:
+            self._tell(f"Couldn't {verb} {person.login}: {exc}")
+            return
+        person.you_follow = follow
+        if person.followers is not None:
+            person.followers = max(0, person.followers + (1 if follow else -1))
+        count = self._category_counts.get(FOLLOWING_ENTRY)
+        if count is not None:
+            self._category_counts[FOLLOWING_ENTRY] = max(0, count + (1 if follow else -1))
+            self._refresh_category_labels()
+        # The row stays, so Insert puts back what Delete took away; its
+        # Connection and Followers say what changed.
+        if self.view_mode == VIEW_PEOPLE:
+            row = self._row_of(person)
+            if row >= 0:
+                self._redraw_row(row, person)
+                if row == self.list_ctrl.GetFirstSelected():
+                    self._show_person_details(self.git_items.index(person))
+        self._update_actions_menu()
+        self._tell(f"Now following {person.login}." if follow
+                   else f"Unfollowed {person.login}.")
 
     # ── Item loading ───────────────────────────────────────────────────
 
@@ -4466,7 +5006,12 @@ class GhViewerFrame(wx.Frame):
         # Name the view as well as the repo: after a Ctrl+<n> switch this is the
         # first confirmation of where you landed.
         view_label = self._VIEW_LABELS.get(self.view_mode, self.view_mode)
-        if self.view_mode == VIEW_ACTIVITY:
+        if self.view_mode == VIEW_ACTIVITY and getattr(self, "_activity_of", ""):
+            self._set_view_status(f"Loading {self._view_label(VIEW_ACTIVITY, lower=True)}…")
+            self._activity_more = None
+        elif self.view_mode == VIEW_PEOPLE:
+            self._set_view_status(f"Loading {self._view_label(VIEW_PEOPLE, lower=True)}…")
+        elif self.view_mode == VIEW_ACTIVITY:
             self._set_view_status("Loading your activity feed…")
             self._activity_more = None  # unknown until this load lands
         elif self.view_mode == VIEW_NOTIFICATIONS:
@@ -4508,6 +5053,9 @@ class GhViewerFrame(wx.Frame):
         milestone = getattr(self, "milestone_filter", None)
         org = self._org
         org_logins = [o.login for o in self._orgs]
+        people = getattr(self, "_people", ("following", ""))
+        user_repos = getattr(self, "_user_repos", ("repos", ""))
+        activity_of = getattr(self, "_activity_of", "")
         entry = self._view_entry(view) if view in REPO_LIST_VIEWS else None
         search = self._search
         # View More in a search: what is already listed, to add the next page to
@@ -4653,10 +5201,26 @@ class GhViewerFrame(wx.Frame):
                     notes, more = fetch_notifications(limit, include_read)
                     wx.CallAfter(self._on_notifications_loaded, token, notes, more, focus_row)
                 elif view == VIEW_ACTIVITY:
-                    events, more = fetch_activity(limit)
+                    events, more = (fetch_activity(limit, of=activity_of) if activity_of
+                                    else fetch_activity(limit))
                     wx.CallAfter(self._on_activity_loaded, token, events, more, focus_row)
                 elif view == VIEW_ORGS:
                     wx.CallAfter(self._on_orgs_loaded, token, fetch_orgs(), focus_row)
+                elif view == VIEW_PEOPLE:
+                    kind, login = people
+                    count = None
+                    if kind == "user":
+                        person = fetch_person(login)
+                        found = [person] if person else []
+                    else:
+                        found = fetch_people(kind, login, limit)
+                        if not login and len(found) >= limit:
+                            try:
+                                count = (count_following if kind == "following"
+                                         else count_followers)()
+                            except GhError:
+                                pass
+                    wx.CallAfter(self._on_people_loaded, token, found, count, focus_row)
                 elif view in REPO_LIST_VIEWS:
                     if view == VIEW_ORG:
                         repos = fetch_org_repos(org, limit)
@@ -4664,6 +5228,16 @@ class GhViewerFrame(wx.Frame):
                         repos = fetch_shared_repos(limit, org_logins)
                     elif view == VIEW_STARRED:
                         repos = fetch_starred_repos(limit)
+                    elif view == VIEW_USER_REPOS:
+                        kind, login = user_repos
+                        if kind == "starred":
+                            repos = fetch_user_starred(login, limit)
+                        elif kind == "forks":
+                            repos = fetch_repo_forks(login, limit)
+                        else:
+                            # Yours with your private ones; anyone else's public.
+                            mine = login.lower() == gh_data.current_login().lower()
+                            repos = fetch_user_repos(login, limit, viewer=mine)
                     else:
                         repos = fetch_watched_repos(limit)
                     # A full page may not be all of them; ask for the count
@@ -4768,6 +5342,8 @@ class GhViewerFrame(wx.Frame):
         VIEW_MILESTONES: "Milestones",
         VIEW_INSIGHTS: "Insights",
         VIEW_GISTS: "Gists",
+        VIEW_PEOPLE: "People",
+        VIEW_USER_REPOS: "Repositories",
     }
 
     def _view_label(self, view: str, lower: bool = False) -> str:
@@ -4776,6 +5352,14 @@ class GhViewerFrame(wx.Frame):
         org = getattr(self, "_org", "")
         if view == VIEW_ORG and org:
             return f"{org} {'repositories' if lower else 'Repositories'}"
+        if view == VIEW_PEOPLE:
+            kind, login = getattr(self, "_people", ("following", ""))
+            return peopleview.people_label(kind, login, lower=lower)
+        if view == VIEW_USER_REPOS:
+            kind, login = getattr(self, "_user_repos", ("repos", ""))
+            return peopleview.repos_label(kind, login, lower=lower)
+        if view == VIEW_ACTIVITY and getattr(self, "_activity_of", ""):
+            return peopleview.activity_label(self._activity_of, lower=lower)
         if view == VIEW_SHARED and lower:
             return "repositories shared with you"  # "back to shared with me" isn't English
         label = GhViewerFrame._VIEW_LABELS.get(view, view.title())
@@ -4786,6 +5370,14 @@ class GhViewerFrame(wx.Frame):
         organization's repositories are reached through My Organizations."""
         if view == VIEW_ORG:
             return MY_ORGS_ENTRY
+        if view == VIEW_PEOPLE:
+            kind, login = getattr(self, "_people", ("following", ""))
+            if login:
+                return None
+            return next((e for e, k in PEOPLE_ENTRIES.items() if k == kind), None)
+        if view == VIEW_USER_REPOS or (view == VIEW_ACTIVITY
+                                       and getattr(self, "_activity_of", "")):
+            return None
         return VIEW_ENTRIES.get(view)
 
     def _update_title(self) -> None:
@@ -5088,7 +5680,11 @@ class GhViewerFrame(wx.Frame):
                 " Ctrl++ loads older ones." if more
                 else " That is all GitHub keeps."
             )
-            message = f"Activity — {n} event{'s' if n != 1 else ''}, newest first.{tail}"
+            label = self._view_label(VIEW_ACTIVITY)
+            message = f"{label} — {n} event{'s' if n != 1 else ''}, newest first.{tail}"
+        elif getattr(self, "_activity_of", ""):
+            message = (f"{self._view_label(VIEW_ACTIVITY)} — nothing public in the "
+                       "last 90 days.")
         else:
             message = (
                 "Activity — nothing yet. The feed shows what happens in "
@@ -5271,7 +5867,7 @@ class GhViewerFrame(wx.Frame):
             for org in self._orgs:
                 if org.login == self._org:
                     org.repo_count = count
-        elif count is not None:
+        elif count is not None and self._view_entry(self.view_mode):
             self._category_counts[self._view_entry(self.view_mode)] = count
             self._refresh_category_labels()
         if n:
@@ -5283,6 +5879,11 @@ class GhViewerFrame(wx.Frame):
             message = f"{label} — none that you can see."
         elif self.view_mode == VIEW_SHARED:
             message = f"{label} — nobody has shared a repository with you."
+        elif self.view_mode == VIEW_USER_REPOS:
+            kind, login = self._user_repos
+            message = (f"{label} — {login} hasn't starred any repositories."
+                       if kind == "starred" else f"{label} — {login} has no forks."
+                       if kind == "forks" else f"{label} — none that you can see.")
         else:
             message = f"{label} — you aren't watching any repositories."
         self._set_view_status(
@@ -5358,6 +5959,8 @@ class GhViewerFrame(wx.Frame):
         def matches(it) -> bool:
             if kind == "same":
                 return it is ref
+            if kind == "url":
+                return getattr(it, "url", "") == ref
             if kind == "item":
                 return isinstance(it, Item) and str(it.number) == ref
             if kind == "commit":
@@ -5386,7 +5989,7 @@ class GhViewerFrame(wx.Frame):
         found = next((it for it in items if matches(it)), None)
         row = self._row_of(found) if found is not None else -1
         if row >= 0:
-            if kind != "same":
+            if kind not in ("same", "url"):
                 msg = self._describe_landing(found)
                 if getattr(self, "_speak_landing", False) and kind in GO_IN_KINDS:
                     # Opening an address of something you read goes into it,
@@ -5397,7 +6000,7 @@ class GhViewerFrame(wx.Frame):
                 else:
                     wx.CallLater(150, self._say_landing, msg)
             return row
-        if kind == "same":
+        if kind in ("same", "url"):
             return 0
         # After the list has settled on its first row, or that would land on
         # top of the item these select — and only if that list is still the
@@ -5648,6 +6251,8 @@ class GhViewerFrame(wx.Frame):
             self._show_insight_details(idx)
         elif self.view_mode == VIEW_GISTS:
             self._show_gist_details(idx)
+        elif self.view_mode == VIEW_PEOPLE:
+            self._show_person_details(idx)
         else:
             self._show_git_details(idx)
 
@@ -6430,6 +7035,8 @@ class GhViewerFrame(wx.Frame):
         VIEW_MILESTONES: "Milestone Title",
         VIEW_INSIGHTS: "Name",
         VIEW_GISTS: "Gist ID",
+        VIEW_PEOPLE: "User Name",
+        VIEW_USER_REPOS: "Repository Name",
     }
 
     _COPY_WHAT = {
@@ -6644,6 +7251,9 @@ class GhViewerFrame(wx.Frame):
         if self.view_mode == VIEW_ORGS and isinstance(item, OrgEntry):
             self._select_org(item.login)
             return
+        if self.view_mode == VIEW_PEOPLE and isinstance(item, Person):
+            self._person_repos("repos")
+            return
         # In the lists of repositories, Enter opens the repository here
         if self.view_mode in REPO_LIST_VIEWS and isinstance(item, RepoEntry):
             self._open_repo_from_list(item.name, item)
@@ -6725,7 +7335,7 @@ class GhViewerFrame(wx.Frame):
         # nothing it could favorite.
         if self.view_mode == VIEW_FAVORITES:
             fav_label = "Remove from Favorites (F)"
-        elif (item is None or isinstance(item, (OrgEntry, ChangedFile, Gist, InsightRow))
+        elif (item is None or isinstance(item, (OrgEntry, ChangedFile, Gist, InsightRow, Person))
               or not getattr(item, "url", "")):
             fav_label = None
         elif self._favorite_prefix(item):
@@ -6809,6 +7419,9 @@ class GhViewerFrame(wx.Frame):
                 ("item", ID_NEW_ISSUE, "New Issue…\tCtrl+N"),
                 ("item", ID_SEARCH_REPO, "Search This Repository…\tCtrl+Shift+S"),
                 ("item", ID_READ_README, "Read README\tCtrl+Shift+R"),
+                ("item", ID_REPO_STARGAZERS, "Stargazers"),
+                ("item", ID_REPO_WATCHERS, "Watchers"),
+                ("item", ID_REPO_FORKS, "Forks"),
                 ("item", ID_WATCH_SETTINGS, "Watch Settings…\tCtrl+Shift+U"),
                 ("item", ID_FAVORITE,
                  "Remove from Favorites (F)" if is_favorite(f"https://github.com/{data}",
@@ -7139,6 +7752,19 @@ class GhViewerFrame(wx.Frame):
                 return
             if key in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER) and self._enter_from_details():
                 return
+        if self.view_mode == VIEW_PEOPLE and plain:
+            # Here so they work from the profile in the details panel too.
+            action = {
+                ord("O"): lambda: self._person_people("followers"),
+                ord("W"): lambda: self._person_people("following"),
+                ord("S"): lambda: self._person_repos("starred"),
+                ord("A"): self._person_activity,
+                wx.WXK_INSERT: lambda: self._follow_person(True),
+                wx.WXK_DELETE: lambda: self._follow_person(False),
+            }.get(key)
+            if action:
+                action()
+                return
         if key == wx.WXK_INSERT and plain and self.view_mode == VIEW_LABELS:
             self._do_new_label()
             return
@@ -7344,6 +7970,10 @@ class GhViewerFrame(wx.Frame):
             name = GhViewerFrame._view_label(self, target, lower=lower)
             return f"{'back' if lower else 'Back'} to {name}"
 
+        trail = getattr(self, "_people_trail", None)
+        if trail and GhViewerFrame._in_people(self):
+            name = GhViewerFrame._snapshot_label(self, trail[-1], lower=lower)
+            return f"{'back' if lower else 'Back'} to {name}"
         if view == VIEW_FILES:
             files_back = getattr(self, "_files_back", None)
             return to(files_back["view"] if files_back else VIEW_ISSUES)
@@ -7371,7 +8001,9 @@ class GhViewerFrame(wx.Frame):
         """Backspace in the list, or File ▸ Back: out to where Enter came in
         from. False when there is nowhere to go back to."""
         view = self.view_mode
-        if view == VIEW_FILES:
+        if getattr(self, "_people_trail", None) and self._in_people():
+            self._people_back()
+        elif view == VIEW_FILES:
             self._back_from_files()
         elif view == VIEW_CODE:
             self._code_up()  # at the top, it says so
@@ -7541,6 +8173,10 @@ class GhViewerFrame(wx.Frame):
 
         if isinstance(item, Gist):
             self._tell("Gists can't be favorites. Ctrl+Shift+C copies its link.")
+            return
+
+        if isinstance(item, Person):
+            self._tell("People can't be favorites. Insert follows them.")
             return
 
         if isinstance(item, InsightRow):
@@ -7807,8 +8443,9 @@ class GhViewerFrame(wx.Frame):
                 self._announce("Activity is still loading.")
                 return
             if not self._activity_more:
+                whose = "the" if getattr(self, "_activity_of", "") else "your"
                 self._announce(
-                    "No older activity. GitHub keeps only your latest "
+                    f"No older activity. GitHub keeps only {whose} latest "
                     f"{ACTIVITY_MAX} events, from the last 90 days."
                 )
                 return
@@ -7843,13 +8480,18 @@ class GhViewerFrame(wx.Frame):
         elif self.view_mode in REPO_LIST_VIEWS:
             if len(self.git_items) < self.current_limit:
                 label = self._view_label(self.view_mode, lower=True)
-                whose = "" if self.view_mode in (VIEW_ORG, VIEW_SHARED) else "your "
+                whose = "" if self.view_mode in (VIEW_ORG, VIEW_SHARED, VIEW_USER_REPOS) else "your "
                 self._announce(f"That is all {whose}{label}.")
                 return
             self._pending_focus_row = len(self._shown)
         elif self.view_mode == VIEW_GISTS:
             if len(self.git_items) < self.current_limit:
                 self._announce("That is all your gists.")
+                return
+            self._pending_focus_row = len(self._shown)
+        elif self.view_mode == VIEW_PEOPLE:
+            if self._people[0] == "user" or len(self.git_items) < self.current_limit:
+                self._announce(f"That is all of {self._view_label(VIEW_PEOPLE, lower=True)}.")
                 return
             self._pending_focus_row = len(self._shown)
         elif not self.repo:
@@ -7915,6 +8557,8 @@ class GhViewerFrame(wx.Frame):
             return item.url, item.title
         if isinstance(item, (Item, Discussion)):
             return item.url, f"#{item.number}"
+        if isinstance(item, Person):
+            return item.url, item.login
         label = (getattr(item, "name", "") or getattr(item, "short_sha", "")
                  or getattr(item, "title", "") or getattr(item, "path", "")
                  or getattr(item, "login", "") or "it")
@@ -11030,6 +11674,10 @@ class GhViewerFrame(wx.Frame):
         if self.view_mode in REPOLESS_VIEWS:
             if isinstance(item, RepoEntry):
                 return item.name, "row"
+            people = getattr(self, "_people", ("following", ""))
+            if self.view_mode == VIEW_PEOPLE and people[0] in gh_data.REPO_PEOPLE:
+                # Its stargazers or watchers: the repository they are of.
+                return people[1], "row"
             if isinstance(item, FavoriteEntry):
                 return (item.repo or None), "row"
             return (getattr(item, "repo", "") or None), "row"

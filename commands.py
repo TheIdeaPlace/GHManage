@@ -81,6 +81,7 @@ CODE = "Files"
 HISTORY = "File History"
 COMMITS = "Commits list"
 WINDOW = "Anywhere in the window"
+PEOPLE = "People lists and a profile"
 
 LIST_KEYS: list[Command] = [
     Command("Move to the next pane", "F6", WINDOW),
@@ -138,6 +139,13 @@ LIST_KEYS: list[Command] = [
     Command("Include read notifications, or unread only", "I", NOTIFICATIONS),
     Command("Go to the repository", "G", FEEDS),
     Command("Open the published site", "S", PAGES),
+    Command("The person's repositories", "Enter", PEOPLE),
+    Command("Their followers", "O", PEOPLE),
+    Command("The people they follow", "W", PEOPLE),
+    Command("The repositories they starred", "S", PEOPLE),
+    Command("What they have done lately", "A", PEOPLE),
+    Command("Follow them", "Insert", PEOPLE),
+    Command("Unfollow them", "Delete", PEOPLE),
 ]
 
 

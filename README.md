@@ -34,6 +34,10 @@ User Guide (`F1`) opens it from the app. This README is a summary.
   repository; switch between the github.com accounts gh is signed in to
 - **Activity** — your GitHub feed: what happens in the repositories you star or watch and
   what the people you follow do, newest first, across every repository
+- **People** — People I Follow and My Followers, anyone's profile with View User (Ctrl+U), and
+  from a person their repositories (Enter), followers (O), who they follow (W), stars (S) and
+  recent activity (A), as deep as you like, with Backspace back each step; follow and unfollow
+  with Insert and Delete. A repository's Stargazers, Watchers and Forks are on the Actions menu
 - **Issues & PRs view** — issues and PRs in one list, like an email inbox
 - **Git views** — browse branches, commits, tags, releases, workflows (run them on a branch), and workflow runs (drill into a run's artifacts and download them)
 - **GitHub Pages** — if a repo publishes a site, see every publish and whether it worked, then browse the pages it serves and open any of them in your browser
@@ -148,6 +152,7 @@ python ghviewer.py --repo owner/repo-name
 | `Ctrl+Shift+F` | Search GitHub; `Ctrl+S` in the results saves the search |
 | `Ctrl+Shift+U` | Watch settings for the repository |
 | `Ctrl+Shift+K` | Switch GitHub account |
+| `Ctrl+U` | View User — anyone's profile, starting with the people the selected item names |
 | `Ctrl+G` | Go to a specific issue/PR by number (issues view only) |
 | `Ctrl+B` | Select a branch for the Commits view (commits view only) |
 | `Ctrl+I` | Create — a new label (Labels view) |
@@ -200,11 +205,11 @@ the repository you are in, so `Ctrl+1` takes you back to it.
 
 ### Starred and watched repositories
 
-The repository list starts with eight entries that aren't single repositories:
+The repository list starts with ten entries that aren't single repositories:
 **★ Favorites**, **Activity**, **Starred Repositories**, **Watched Repositories**,
 **Notifications**, **My Work**, **My Organizations** (Enter on an organization
-lists its repositories) and **Gists** (your gists, each file's text in the details
-panel). After them come **Shared With Me** (other people's
+lists its repositories), **Gists** (your gists, each file's text in the details
+panel), **People I Follow** and **My Followers**. After them come **Shared With Me** (other people's
 repositories you collaborate on, when there are any), your saved searches, any
 repositories you opened by address, then your own repositories. Starred and Watched are also on View ▸ View Mode.
 

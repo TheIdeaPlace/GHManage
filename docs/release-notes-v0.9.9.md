@@ -24,7 +24,8 @@ have done in public lately. Each of these works the same way, so you can go as
 deep as you like, and `Backspace` comes back a step at a time, to the row you
 left. `Insert` follows someone and `Delete` unfollows them. Following needs a
 permission `gh` doesn't ask for when you sign in; the first time, GHManage shows
-the command that adds it.
+the command that adds it. A Mac keyboard has no `Insert` key, so on a Mac use
+**Actions → Follow** and **Actions → Unfollow**.
 
 ## View User
 
@@ -33,7 +34,8 @@ are. It offers the people the selected item names, such as an issue's author,
 assignees and commenters, an Activity event's actor or a repository's owner, or
 you can type any user name. The profile opens with focus at its top, and
 `Backspace` takes you back to where you were, on the same item. An
-organization's profile shows its description, website and repositories.
+organization's profile shows its description, website and repositories, and `A`
+lists what has happened in it lately.
 
 ## Stargazers, Watchers and Forks
 

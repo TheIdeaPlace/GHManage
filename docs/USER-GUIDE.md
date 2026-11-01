@@ -1159,7 +1159,7 @@ From a person:
 
 Each of these lists works the same way, so you can go as far as you like: from one of your followers to the people they follow, to one of those people's repositories, and into it. `Backspace` comes back one step at a time, to the row you left. `Enter` on a repository opens it here, and on an Activity event it opens what the event was about. These keys also work from the profile in the details panel, and are on the **Actions** menu.
 
-Following or unfollowing changes the person's row and profile in place, and the People I Follow count; the row stays, so `Insert` puts back what `Delete` took away. Following needs a permission `gh` doesn't ask for when you sign in. The first time, GHManage shows the command that adds it:
+Following or unfollowing changes the person's row and profile in place, and the People I Follow count; the row stays, so `Insert` puts back what `Delete` took away. A Mac keyboard has no `Insert` key, so on a Mac use **Actions → Follow** and **Actions → Unfollow**. Following needs a permission `gh` doesn't ask for when you sign in. The first time, GHManage shows the command that adds it:
 
 ```
 gh auth refresh -h github.com -s user:follow

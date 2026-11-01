@@ -358,6 +358,7 @@ def _frame(**attrs):
         _people=("following", ""), _user_repos=("repos", ""), _activity_of="",
         _people_trail=[], _detail_gen=1, _category_counts={}, _comment_positions=[],
         _current_comment=-1, filter_text="", _read_profile=False,
+        _follow_count={}, _follow_pending=set(), _fetch_token=1, _landed_token=1,
         _fetch_is_current=lambda token: token == 1,
         _populate_filtered_list=lambda items, use_favorite_prefix=False: list(items),
         _update_title=lambda: None, _focus_list=lambda row: None,
@@ -374,6 +375,8 @@ def _frame(**attrs):
     f._focused = None
     f._focused_item = lambda: f._focused
     f._fetch_person_later = lambda person, gen: f.events.append(("fetch", person.login))
+    f._in_people = lambda: Frame._in_people(f)
+    f._redraw_profile = lambda person: Frame._redraw_profile(f, person)
     f.FindFocus = lambda: None
     for k, v in attrs.items():
         setattr(f, k, v)
@@ -522,11 +525,13 @@ def test_organizations_are_refused_what_they_dont_have():
     assert "organization" in f.told[0]
 
 
-def test_the_trail_is_kept_to_a_bounded_length():
+def test_the_trail_is_kept_to_a_bounded_length_keeping_the_way_out():
     f = _trail_frame()
+    Frame._push_people(f)
+    first = f._people_trail[0]
     for _ in range(60):
         Frame._push_people(f)
-    assert len(f._people_trail) == 50
+    assert len(f._people_trail) == 50 and f._people_trail[0] is first
 
 
 def test_backspace_from_your_own_list_goes_nowhere():
@@ -557,7 +562,7 @@ def test_view_user_from_issues_returns_to_the_issue(monkeypatch):
     f._snapshot_label = lambda snap, lower=False: Frame._snapshot_label(f, snap, lower)
     Frame._people_back(f)
     assert f.view_mode == V.VIEW_ISSUES and f.repo == "o/r" and f.label_filter == "bug"
-    assert f.loads == [V.VIEW_ISSUES] and f._pending_focus_row == 1
+    assert f.loads == [V.VIEW_ISSUES] and f._url_fallback_row == 1
     assert pending == [(V.VIEW_ISSUES, "url", issue.url)]
     assert f.events[-1] == "Back to issues"
 
@@ -596,12 +601,12 @@ def test_following_updates_the_row_and_the_count():
     f._shown = [bob]
     redrawn = []
     f._redraw_row = lambda row, item: redrawn.append((row, item))
-    f._show_person_details = lambda idx: redrawn.append(("details", idx))
+    f._redraw_profile = lambda person: redrawn.append(("details", person.login))
     f.list_ctrl = FakeList(0)
     Frame._on_follow_done(f, bob, True, None)
     assert bob.you_follow and bob.followers == 11
     assert f._category_counts[V.FOLLOWING_ENTRY] == 5
-    assert redrawn == [(0, bob), ("details", 0)]
+    assert redrawn == [(0, bob), ("details", "bob")]
     assert f.told[-1] == "Now following bob."
     Frame._on_follow_done(f, bob, False, None)
     assert not bob.you_follow and bob.followers == 10 and f.told[-1] == "Unfollowed bob."
@@ -700,3 +705,114 @@ def test_in_a_repositorys_stargazers_that_repository_is_in_front():
     assert Frame._repo_in_front_from(f) == ("o/r", "row")
     f._people = ("followers", "")
     assert Frame._repo_in_front_from(f) == (None, "row")
+
+
+
+# ── From the review ────────────────────────────────────────────────────
+
+
+def test_a_step_saved_while_loading_is_reloaded_not_redrawn():
+    f = _trail_frame(git_items=[gh_data.RepoEntry("o/r")], _fetch_token=5, _landed_token=4)
+    snap = Frame._people_snapshot(f)
+    assert snap["items"] is None
+    f._landed_token = 5
+    assert Frame._people_snapshot(f)["items"] == f.git_items
+
+
+def test_a_people_step_saved_while_loading_reloads_on_backspace():
+    f = _trail_frame()
+    f._people_trail = [dict(Frame._people_snapshot(f), items=None, row=3)]
+    f.view_mode = V.VIEW_PEOPLE
+    f._people = ("user", "bob")
+    restored = []
+    f._restore_view = restored.append
+    f._snapshot_label = lambda snap, lower=False: "people you follow"
+    Frame._people_back(f)
+    assert restored and restored[0]["row"] == 3 and f._people == ("following", "")
+
+
+def test_from_outside_people_a_new_trail_starts():
+    f = _trail_frame(view_mode=V.VIEW_STARRED)
+    f._people_trail = [{"view": V.VIEW_PEOPLE, "stale": True}]
+    Frame._push_people(f)
+    assert len(f._people_trail) == 1 and "stale" not in f._people_trail[0]
+
+
+def test_a_repository_opened_from_someones_repositories_keeps_the_trail():
+    f = _trail_frame(view_mode=V.VIEW_ISSUES)
+    f._return_to = (V.VIEW_USER_REPOS, [], False, None, 100)
+    f._people_trail = [{"view": V.VIEW_PEOPLE}]
+    Frame._push_people(f)
+    assert len(f._people_trail) == 2
+
+
+def test_empty_starred_forks_and_activity_are_spoken(monkeypatch):
+    spoken = []
+    monkeypatch.setattr(announce, "announce", lambda text, *a, **k: spoken.append(text))
+    for kind, said in [("starred", "bob hasn't starred any repositories."),
+                       ("forks", "o/r has no forks.")]:
+        f = _frame(view_mode=V.VIEW_USER_REPOS, _user_repos=(kind, "o/r" if kind == "forks"
+                                                              else "bob"))
+        f._orgs = []
+        Frame._on_repo_list_loaded(f, 1, [])
+        assert spoken[-1].endswith(said)
+    f = _frame(view_mode=V.VIEW_ACTIVITY, _activity_of="bob", _activity_more=None)
+    Frame._on_activity_loaded(f, 1, [])
+    assert spoken[-1] == "bob's Activity — nothing public in the last 90 days."
+
+
+def test_a_one_word_commit_author_is_not_offered():
+    commit = gh_data.Commit("a" * 40, "aaaaaaa", "m", "Kelly", "")
+    assert peopleview.people_of(commit, "kellylford/GHManage") == [("kellylford", "owner")]
+
+
+def test_insert_twice_sends_one_follow(monkeypatch):
+    started = []
+    monkeypatch.setattr(V.threading, "Thread",
+                        lambda target, daemon: SimpleNamespace(start=lambda: started.append(1)))
+    bob = Person("bob", you_follow=False)
+    f = _trail_frame()
+    f._focused = bob
+    Frame._follow_person(f, True)
+    Frame._follow_person(f, True)
+    assert started == [1] and f.told[-1] == "Still following bob…"
+    assert f._follow_count == {"bob": 1}
+
+
+def test_a_profile_read_begun_before_a_follow_does_not_undo_it():
+    bob = Person("bob", you_follow=True, followers=11)
+    stale = Person("bob", you_follow=False, followers=10, starred=3, full=True)
+    f = _frame(git_items=[bob], _follow_count={"bob": 1})
+    f._shows = lambda view, item, gen: False
+    Frame._on_person_fetched(f, 1, bob, stale, 0)
+    assert bob.you_follow and bob.followers == 11 and bob.starred == 3
+
+
+def test_a_url_target_that_misses_lands_on_the_saved_row():
+    f = SimpleNamespace(_pending_target=(3, V.VIEW_ISSUES, "url", "https://x/7"),
+                        view_mode=V.VIEW_ISSUES, _shown=[], _url_fallback_row=4)
+    f._row_of = lambda item: -1
+    assert Frame._take_pending_row(f, [], 3) == 4
+
+
+def test_not_found_names_the_account_and_the_permission(monkeypatch):
+    def boom(args, **kw):
+        raise GhError("gh: Not Found (HTTP 404)")
+    monkeypatch.setattr(gh_data, "_run_gh", boom)
+    with pytest.raises(MissingScope) as info:
+        gh_data.follow_user("gone")
+    text = str(info.value)
+    assert text.startswith("GitHub said Not Found for gone. If the account still exists, this")
+    assert "gh auth refresh -h github.com -s user:follow" in text
+
+
+def test_account_switch_forgets_the_old_accounts_people(monkeypatch):
+    monkeypatch.setattr(V.wx, "CallLater", lambda *a: None)
+    f = SimpleNamespace(_update_title=lambda: None, _announce=lambda m: None, _account_gen=0, _search=None, _search_total=0, repo="o/r",
+                        _return_to=None, _pending_target=None, _issue_drafts={},
+                        _category_counts={}, _people_trail=[{}], _people=("followers", "x"),
+                        _user_repos=("starred", "x"), _activity_of="x",
+                        view_mode=V.VIEW_NOTIFICATIONS, page_size=100, current_limit=100)
+    f._load_repos = f._load_items = lambda: None
+    Frame._on_account_switched(f, "other")
+    assert f._people_trail == [] and f._people == ("following", "") and f._activity_of == ""

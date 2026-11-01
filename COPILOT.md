@@ -329,7 +329,12 @@ UI thread via `wx.CallAfter`. Never touch wx widgets from a worker thread.
   `_restore_view`: repo, `_VIEW_CONTEXT` attributes, `_restore_code` for Files, or a reload
   landing on the item by pending kind "url" (silent). None of `_people`, `_user_repos`,
   `_activity_of` or the trail is cleared by `_switch_view`, so `_return_to_list` back into them
-  works; the entries (`_open_my_people`) and `_select_category(VIEW_ACTIVITY)` reset them.
+  works. `_open_my_people` and `_on_account_switched` clear the trail (the latter the three
+  attributes too), `_select_category(VIEW_ACTIVITY)` clears `_activity_of`, and `_push_people`
+  starts a new trail from outside People (except in a repository opened from someone's
+  repositories); bounded at 50, keeping the first step. A step saved mid-load has items None
+  and is reloaded on Backspace (`_landed_token`, set in `_populate_filtered_list`). A "url"
+  pending target that misses lands on `_url_fallback_row`.
   Keys O/W/S/A/Insert/Delete are in `on_char_hook` (work from the profile);
   `peopleview.person_keys` names only those that work (an organization: A). `_current_entry`
   keeps the trail's root entry selected in the repo list.

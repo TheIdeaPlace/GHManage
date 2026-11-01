@@ -5508,15 +5508,22 @@ def fetch_user_starred(login: str, limit: int = 100) -> list[RepoEntry]:
             if r.get("full_name")]
 
 
-def _follow_error(exc: GhError) -> GhError:
+def _follow_error(exc: GhError, login: str = "") -> GhError:
     """gh's failure to follow or unfollow, as something to act on. Without
     user:follow GitHub answers 404 (it hides what a token can't reach) or gh
     names the scope; either way, say which permission and how to add it."""
     if _scope_error(exc) is not None:
         return MissingScope(FOLLOW_SCOPE)
     text = str(exc)
-    if "404" in text or "Not Found" in text or "403" in text:
+    if "403" in text:
         return MissingScope(FOLLOW_SCOPE)
+    if "404" in text or "Not Found" in text:
+        # GitHub hides from a token what it can't reach, so this is most
+        # likely the permission; but the account may be gone, so say both.
+        missing = MissingScope(FOLLOW_SCOPE)
+        missing.args = (f"GitHub said Not Found for {login or 'that account'}. If the "
+                        f"account still exists, {str(missing)[0].lower()}{str(missing)[1:]}",)
+        return missing
     return exc
 
 
@@ -5525,7 +5532,7 @@ def follow_user(login: str) -> None:
     try:
         _run_gh(["api", "-X", "PUT", f"user/following/{login}"])
     except GhError as exc:
-        raise _follow_error(exc) from exc
+        raise _follow_error(exc, login) from exc
 
 
 def unfollow_user(login: str) -> None:
@@ -5533,4 +5540,4 @@ def unfollow_user(login: str) -> None:
     try:
         _run_gh(["api", "-X", "DELETE", f"user/following/{login}"])
     except GhError as exc:
-        raise _follow_error(exc) from exc
+        raise _follow_error(exc, login) from exc

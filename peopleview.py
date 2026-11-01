@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import re
 
-from gh_data import Person
+from gh_data import BlameRange, Commit, Person
 
 RULE = "─" * 60
 
@@ -176,7 +176,10 @@ def people_of(item, repo: str = "") -> list[tuple[str, str]]:
     login = getattr(item, "login", "")
     if isinstance(login, str):
         add(login, "")
-    add(getattr(item, "author", ""), "author")
+    if not isinstance(item, (Commit, BlameRange)):
+        # A commit's author is the name in git, not a GitHub user name:
+        # "Kelly" would open a stranger's profile.
+        add(getattr(item, "author", ""), "author")
     add(getattr(item, "actor", ""), "")
     add(getattr(item, "creator", ""), "creator")
     add(getattr(item, "pusher", ""), "pushed it")

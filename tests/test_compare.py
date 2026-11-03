@@ -636,6 +636,17 @@ def test_branch_counts_fill_every_branch_but_the_default():
     assert (new.ahead, new.behind) == (None, None)
 
 
+def test_branch_counts_read_with_the_list_say_nothing_if_github_wont(monkeypatch):
+    monkeypatch.setattr(ghviewer, "fetch_default_branch", lambda repo: "main")
+    monkeypatch.setattr(ghviewer, "fetch_branch_counts", lambda *a: {"dev": (1, 2)})
+    assert ghviewer.read_branch_counts("o/r", 30) == ("main", {"dev": (1, 2)})
+
+    def refuse(*a):
+        raise GhError("no")
+    monkeypatch.setattr(ghviewer, "fetch_branch_counts", refuse)
+    assert ghviewer.read_branch_counts("o/r", 30) == ("", {})
+
+
 def test_a_comparison_favorite_opens_again(tmp_path):
     from favorites import FavoriteEntry
     f = _in_comparison(_result(ahead_by=1), favorites=[])

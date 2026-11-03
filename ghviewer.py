@@ -6,6 +6,7 @@ Requires the `gh` CLI (https://cli.github.com/) and wxPython.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 import argparse
 import os
 import re
@@ -431,6 +432,30 @@ def parse_github_url(value: str) -> GitHubTarget | None:
     if section in _URL_VIEWS and len(rest) == 1:
         return GitHubTarget(repo, "view", _URL_VIEWS[section])
     return GitHubTarget(repo, "inside")
+
+
+# How long Branches waits for the ahead and behind counts once its rows are in,
+# in seconds, before showing them without and filling the counts in after.
+BRANCH_COUNT_WAIT = 3
+BRANCH_COUNT_POOL = ThreadPoolExecutor(max_workers=2, thread_name_prefix="branch-counts")
+
+
+def read_branch_counts(repo: str, limit: int) -> tuple[str, dict]:
+    """(default branch, each branch's counts). Nothing if GitHub won't say: the
+    list is still right without them."""
+    try:
+        default = fetch_default_branch(repo)
+        return default, fetch_branch_counts(repo, default, limit) if default else {}
+    except Exception:  # noqa: BLE001 — never costs the list its rows
+        return "", {}
+
+
+def apply_branch_counts(branches: list, default: str, counts: dict) -> None:
+    """Each branch's counts, but the default branch's: it is what they count from."""
+    for b in branches:
+        if b.name != default and b.name in counts:
+            b.ahead, b.behind = counts[b.name]
+            b.compared_with = default
 
 
 def compare_choice_problem(base: str, head: str) -> str:
@@ -5334,11 +5359,17 @@ class GhViewerFrame(wx.Frame):
                         self._on_items_loaded, token, combined, len(issues), len(prs)
                     )
                 elif view == VIEW_BRANCHES:
+                    # Read alongside the list, so a row usually arrives whole:
+                    # filling one in later makes a screen reader read it twice.
+                    counts = BRANCH_COUNT_POOL.submit(read_branch_counts, repo, limit)
                     branches = fetch_branches(self.repo, self.current_limit)
-                    wx.CallAfter(self._on_git_items_loaded, token, branches, "branches")
-                    # After the list: it can take seconds on a big repository,
-                    # and the rows are worth having without it.
-                    self._read_branch_counts(token, repo, branches, limit)
+                    try:
+                        apply_branch_counts(branches, *counts.result(BRANCH_COUNT_WAIT))
+                        wx.CallAfter(self._on_git_items_loaded, token, branches, "branches")
+                    except FutureTimeout:
+                        # The rows are worth having without them on a big repository.
+                        wx.CallAfter(self._on_git_items_loaded, token, branches, "branches")
+                        wx.CallAfter(self._on_branch_counts, token, branches, *counts.result())
                 elif view == VIEW_COMMITS and commit_branch == ALL_BRANCHES:
                     commits, unread = fetch_all_branch_commits(self.repo, limit)
                     wx.CallAfter(self._on_all_branch_commits_loaded, token, commits, unread)
@@ -9801,8 +9832,10 @@ class GhViewerFrame(wx.Frame):
                 return
             if filtered:
                 self._focus_list(row)
-                # A status, so it waits for the row focus lands on to be read.
-                announce.announce(said, announce.STATUS)
+                # Later than the row focus lands on, whose reading would
+                # otherwise cut this off; a status, so it waits for that.
+                wx.CallLater(200, self._if_still_current, token, announce.announce,
+                             said, announce.STATUS)
             else:
                 # An empty list gives a screen reader nothing else to say.
                 announce.announce(said, announce.RESULT)
@@ -9976,25 +10009,11 @@ class GhViewerFrame(wx.Frame):
 
     # ── Branch counts ───────────────────────────────────────────────────
 
-    def _read_branch_counts(self, token: int, repo: str, branches: list, limit: int) -> None:
-        """On the load's thread: how far each branch is from the default. Left
-        blank if GitHub won't say: the list is still right without it."""
-        if not repo or not branches:
-            return
-        try:
-            default = fetch_default_branch(repo)
-            counts = fetch_branch_counts(repo, default, limit) if default else {}
-        except GhError:
-            return
-        wx.CallAfter(self._on_branch_counts, token, branches, default, counts)
-
     def _on_branch_counts(self, token: int, branches: list, default: str, counts: dict) -> None:
-        for b in branches:
-            # Still set if you have moved on: Backspace may bring these rows back.
-            if b.name != default and b.name in counts:
-                b.ahead, b.behind = counts[b.name]
-                b.compared_with = default
-        if not self._fetch_is_current(token) or self.view_mode != VIEW_BRANCHES:
+        """Counts that came after the list. Still set if you have moved on:
+        Backspace may bring these rows back."""
+        apply_branch_counts(branches, default, counts)
+        if not counts or not self._fetch_is_current(token) or self.view_mode != VIEW_BRANCHES:
             return
         for row, shown in enumerate(self._shown):
             self._redraw_row(row, shown)

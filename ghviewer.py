@@ -9813,7 +9813,6 @@ class GhViewerFrame(wx.Frame):
                 "F=favorite  R=refresh  Ctrl+F=filter",
             ),
         )
-        self._update_title()
         self._update_actions_menu()
 
     def _compare_arrive(self, token: int, filtered, row: int) -> None:
@@ -9824,6 +9823,7 @@ class GhViewerFrame(wx.Frame):
                 else compareview.list_said(r, self._compare_list))
         self._compare_summary_due = False
         self._set_compare_status()
+        self._update_title()
         if not self.git_items:
             self.details_text.SetValue(compareview.summary(r))
 

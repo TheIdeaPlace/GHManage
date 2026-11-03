@@ -320,6 +320,93 @@ def test_only_a_comparison_is_a_comparison():
     assert Frame._comparison(_frame(ghviewer.VIEW_BRANCHES, _files_of=r)) is None
 
 
+def test_a_load_keeps_its_token_filter_and_the_row_waiting_for_it():
+    commits = [_commit("a"), _commit("b")]
+    r = _result(commits=commits, ahead_by=2)
+    f = _in_comparison(r, compareview.AHEAD, filter_text="x")
+    token = Frame._begin_fetch(f)
+    f._pending_target = (token, ghviewer.VIEW_COMPARE, "url", "u/b")
+    seen = []
+    f._on_compare_commits_loaded = lambda t, c: seen.append((t, f.filter_text, f._pending_target))
+    Frame._on_compare_loaded(f, token, _result(commits=commits, ahead_by=2))
+    assert seen == [(token, "x", (token, ghviewer.VIEW_COMPARE, "url", "u/b"))]
+    assert f._compare_summary_due is False   # coming back to a row isn't news
+
+
+def test_refresh_keeps_the_filter_and_says_the_summary():
+    r = _result(files=[FILE])
+    f = _in_comparison(r, filter_text="a")
+    token = Frame._begin_fetch(f)
+    Frame._on_compare_loaded(f, token, _result(files=[FILE]))
+    assert f.filter_text == "a" and f._compare_summary_due is True
+
+
+def test_l_is_a_new_list_so_the_filter_goes():
+    r = _result(files=[FILE], commits=[_commit("a")], ahead_by=1)
+    f = _in_comparison(r, filter_text="a")
+    Frame._compare_next_list(f)
+    assert f.filter_text == ""
+
+
+def test_a_new_comparison_leaves_nothing_of_the_last_view_to_draw():
+    branch = Branch("dev", "s", "m", "a", "d")
+    f = _frame(ghviewer.VIEW_BRANCHES, git_items=[branch], _landed_token=0)
+    Frame._open_compare(f, "main", "nope")
+    assert f.git_items == [] and f._files_back["items"] == [branch]
+
+
+def test_a_list_still_loading_is_read_again_on_the_way_back():
+    branch = Branch("dev", "s", "m", "a", "d")
+    f = _frame(ghviewer.VIEW_BRANCHES, git_items=[branch], _landed_token=0, _fetch_token=5)
+    assert Frame._compare_back(f)["items"] is None
+
+
+@pytest.mark.parametrize("view", [ghviewer.VIEW_FILES, ghviewer.VIEW_COMPARE])
+def test_state_and_filter_wait_for_the_way_back(view):
+    back = {"view": ghviewer.VIEW_ISSUES, "items": ["x"]}
+    f = _frame(view, _files_of=_result(), _files_back=back)
+    Frame._reload_after_filter(f)
+    assert back["items"] is None and f.calls == [] and "go back" in f.told[-1]
+
+
+def test_a_pull_gh_didnt_say_the_address_of_is_not_offered_again_as_a_draft():
+    key = ("o/r", "main", "dev")
+    f = _in_comparison(_result(), _pull_busy=True, _pull_drafts={key: ("t", "b", False)})
+    Frame._on_pull_unreadable(f, key)
+    assert f._pull_drafts == {} and f._pull_busy is False and "was created" in f.told[-1]
+
+
+def test_p_says_what_isnt_a_branch_instead_of_offering_the_form():
+    r = _result(ahead_by=1, head="v1.2")
+    f = _in_comparison(r, _pull_busy=False)
+    Frame._show_pull_dialog(f, r, "v1.2")
+    assert "isn't a branch" in f.told[-1]
+
+
+def test_is_branch(fake_gh):
+    fake_gh.route("heads/yes", "refs/heads/yes")
+    fake_gh.route("heads/tag", GhError("gh: Not Found (HTTP 404)"))
+    fake_gh.route("heads/down", GhError("gh: server error (HTTP 502)"))
+    assert gh_data.is_branch("o/r", "yes") is True
+    assert gh_data.is_branch("o/r", "tag") is False
+    assert gh_data.is_branch("o/r", "down") is None
+
+
+def test_whole_file_of_another_owners_head_says_so():
+    item = ChangedFile("a.py")
+    f = _in_comparison(_result(head="them:feat"), _whole_file_busy=False)
+    f._focused_item = lambda: item
+    Frame._open_whole_file(f)
+    assert "them's" in f.told[-1]
+
+
+def test_previous_skips_a_draft():
+    rel = [gh_data.Release("v3", "", False, False), gh_data.Release("v2", "", True, False),
+           gh_data.Release("v1", "", False, False)]
+    f = _frame(ghviewer.VIEW_RELEASES, git_items=rel)
+    assert Frame._previous_ref(f, rel[0]) == "v1"
+
+
 def test_keys_of_a_comparison_that_failed_to_load_say_so():
     f = _in_comparison(_result(loaded=False))
     assert Frame._loaded_comparison(f) is None
@@ -526,6 +613,8 @@ def test_going_to_the_pull_and_back_returns_to_the_same_list():
     Frame._return_to_list(f)
     assert f.view_mode == ghviewer.VIEW_COMPARE and f._files_of is r and f._files_back is origin
     assert f._compare_list == compareview.AHEAD and f.calls[-1] == ("commits", commits)
+    # On the row it left, with the filter it had.
+    assert f._pending_target[2:] == ("same", None)
 
 
 def test_a_pull_on_a_fork_is_said_not_opened():

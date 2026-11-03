@@ -20,6 +20,8 @@ for (branches, commits, tags, compare, workflow runs).
 ```
 ghviewer.py   — UI layer (wxPython). All event handlers, menus, dialogs, list population.
 gh_data.py    — Data layer. All `gh` CLI and `gh api` calls, data classes, parsing.
+compareview.py — A comparison in words (no wx): name, relation, summary, list_said, its
+                lists (lists_of, first_list, next_list) and pull_prefill.
 diffview.py   — A changed file as text to read (no wx). Lines are marked by app-kit's
                 `theideaplace_appkit.difftext`, shared with The Chat Place.
 codeview.py   — A repository's files as text to read (no wx): a file one line out per line

@@ -151,6 +151,7 @@ from gh_data import (
     switch_account,
     create_issue,
     create_pull_request,
+    is_branch,
     create_label,
     detect_repo,
     delete_label,
@@ -2814,7 +2815,7 @@ class CompareDialog(wx.Dialog):
     def __init__(self, parent: wx.Window, repo: str, refs: list[str],
                  base: str, head: str) -> None:
         super().__init__(parent, title="Compare Branches",
-                         style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER, size=(520, 270))
+                         style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
         outer = wx.BoxSizer(wx.VERTICAL)
         outer.Add(wx.StaticText(
             self, label=f"Compare two branches, tags or commits in {repo}"), 0, wx.ALL, 10)
@@ -2829,11 +2830,14 @@ class CompareDialog(wx.Dialog):
         if ok:
             ok.SetLabel("Com&pare")
         outer.Add(buttons, 0, wx.ALIGN_RIGHT | wx.ALL, 10)
-        self.SetSizer(outer)
+        self.SetSizerAndFit(outer)
+        self.SetMinSize((max(self.GetSize().width, 520), self.GetSize().height))
         self.Bind(wx.EVT_BUTTON, self._on_ok, id=wx.ID_OK)
         # The one that needs filling in, or else the first, ready for Enter.
         start = self.base_ctrl if not base or head else self.head_ctrl
         wx.CallAfter(start.SetFocus)
+        # Selected, so typing replaces what is there rather than adding to it.
+        wx.CallAfter(start.SelectAll)
 
     def _field(self, outer: wx.Sizer, label: str, refs: list[str], value: str) -> wx.ComboBox:
         outer.Add(wx.StaticText(self, label=label), 0, wx.LEFT | wx.RIGHT, 10)
@@ -2857,6 +2861,7 @@ class CompareDialog(wx.Dialog):
                 field = self.head_ctrl
             wx.MessageBox(problem, "Compare Branches", wx.OK | wx.ICON_INFORMATION, self)
             field.SetFocus()
+            field.SelectAll()
             return
         event.Skip()
 
@@ -8411,6 +8416,8 @@ class GhViewerFrame(wx.Frame):
             self._files_of = more["files_of"]
             self._files_back = more["files_back"]
             self._compare_list = more["compare_list"]
+            self.filter_text = more["filter_text"]
+            self._pending_target = (token, view, "same", item)
             if view == VIEW_FILES:
                 self._on_files_loaded(token, items)
             else:
@@ -8773,7 +8780,7 @@ class GhViewerFrame(wx.Frame):
         elif self.view_mode == VIEW_ORGS:
             self._announce("That is all your organizations.")
             return
-        elif self.view_mode in (VIEW_CODE, VIEW_FILES):
+        elif self.view_mode in (VIEW_CODE, VIEW_FILES, VIEW_COMPARE):
             self._announce(f"{self._view_label(self.view_mode)} lists everything at once.")
             return
         elif self.view_mode in REPO_LIST_VIEWS:
@@ -9587,9 +9594,11 @@ class GhViewerFrame(wx.Frame):
         for the last, or one that isn't in the list."""
         source = self.git_items
         idx = next((i for i, it in enumerate(source) if it is item), -1)
-        if idx < 0 or idx + 1 >= len(source):
+        if idx < 0:
             return ""
-        return self._ref_name(source[idx + 1])
+        # A draft release's tag may not exist yet.
+        return next((self._ref_name(it) for it in source[idx + 1:]
+                     if not getattr(it, "draft", False)), "")
 
     def _commits_branch(self) -> str:
         """The branch the Commits view is on; "" for the default, or for every
@@ -9647,9 +9656,12 @@ class GhViewerFrame(wx.Frame):
             return self._files_back
         view = self.view_mode
         restorable = view == VIEW_ISSUES or view in COMPARE_BACK_KINDS
+        # Still loading, or failed: what the list holds is the last view's, so
+        # coming back reads it again rather than drawing those.
+        landed = getattr(self, "_landed_token", None) == self._fetch_token
         return {
             "view": view if restorable else VIEW_BRANCHES,
-            "items": list(self._view_source()) if restorable else None,
+            "items": list(self._view_source()) if restorable and landed else None,
             "item": self._focused_item() if restorable else None,
             "limit": self.current_limit,
             "filter_text": self.filter_text if restorable else "",
@@ -9671,6 +9683,9 @@ class GhViewerFrame(wx.Frame):
         self._files_back = back
         self._compare_list = compareview.FILES
         self.filter_text = ""
+        # The way back has its copy. Left here, they would be drawn as files
+        # if this fails and the list is redrawn.
+        self.git_items, self.items = [], []
         self._update_title()
         self._tell(f"Comparing {head or 'the default branch'} with "
                    f"{base or 'the default branch'}…")
@@ -9710,7 +9725,8 @@ class GhViewerFrame(wx.Frame):
                 + ("GitHub can't find one of them." if "Not Found" in err else err))
         self.details_text.SetValue(said)
         self._set_view_status(said, keys_hint("R=try again", "Backspace=back"))
-        announce.announce(said, announce.STATUS)
+        # Focus is on an empty list, which gives a screen reader nothing else.
+        announce.announce(said, announce.RESULT)
 
     def _on_compare_loaded(self, token: int, result: CompareResult) -> None:
         if not self._fetch_is_current(token):
@@ -9721,18 +9737,23 @@ class GhViewerFrame(wx.Frame):
         refreshed = isinstance(was, CompareResult) and was.loaded
         keep = refreshed and self._compare_list in compareview.lists_of(result)
         which = self._compare_list if keep else compareview.first_list(result)
-        self._compare_summary_due = True
-        self._show_compare_list(which)
+        # Coming back to a row of it (from View User, say) isn't news.
+        target = self._pending_target
+        self._compare_summary_due = not (target and target[0] == token)
+        self._show_compare_list(which, token)
 
-    def _show_compare_list(self, which: str) -> None:
-        """One of the comparison's lists, in the view that shows it."""
+    def _show_compare_list(self, which: str, token: int | None = None) -> None:
+        """One of the comparison's lists, in the view that shows it. With the
+        ``token`` of the load that just read it, what that load was waiting to
+        land on and the filter stay; without, it is a new list and they go."""
         result, back = self._files_of, self._files_back
+        filter_text = self.filter_text
         self._compare_list = which
         self._switch_view(VIEW_FILES if which == compareview.FILES else VIEW_COMPARE, load=False)
         # Set after the switch, as a switch to anything else clears them.
         self._files_of, self._files_back = result, back
-        self.filter_text = ""
-        token = self._begin_fetch()
+        self.filter_text = filter_text if token is not None else ""
+        token = self._begin_fetch() if token is None else token
         if which == compareview.FILES:
             self._on_files_loaded(token, result.files)
         else:
@@ -9780,8 +9801,11 @@ class GhViewerFrame(wx.Frame):
                 return
             if filtered:
                 self._focus_list(row)
-            # A status, so it waits for the row focus lands on to be read.
-            announce.announce(said, announce.STATUS)
+                # A status, so it waits for the row focus lands on to be read.
+                announce.announce(said, announce.STATUS)
+            else:
+                # An empty list gives a screen reader nothing else to say.
+                announce.announce(said, announce.RESULT)
 
         wx.CallLater(100, land)
 
@@ -9807,7 +9831,8 @@ class GhViewerFrame(wx.Frame):
     def _compare_say_summary(self) -> None:
         r = self._loaded_comparison()
         if r is not None:
-            self._tell(compareview.summary(r))
+            # The key exists only to say this.
+            self._tell(compareview.summary(r), force=True)
 
     def _compare_open_web(self) -> None:
         r = self._loaded_comparison()
@@ -9828,8 +9853,8 @@ class GhViewerFrame(wx.Frame):
         entry = FavoriteEntry(self.repo or "", "compare", r.url, f"{r.base}...{r.head}",
                               compareview.relation(r))
         self.favorites, added = toggle_favorite(entry, self.favorites)
-        self._announce("Comparison added to favorites" if added
-                       else "Comparison removed from favorites")
+        self._tell("Comparison added to favorites" if added
+                   else "Comparison removed from favorites")
         self._refresh_repo_list_fav_count()
 
     def _compare_pull(self) -> None:
@@ -9846,6 +9871,28 @@ class GhViewerFrame(wx.Frame):
             return
         if self._pull_busy:
             self._tell("Already creating a pull request.")
+            return
+        if ":" in r.base:
+            self._tell(f"A pull request can't go into {r.base}, which is in another "
+                       "owner's repository, from here.")
+            return
+        repo = self.repo
+        self._announce("Checking the branches…")
+
+        def worker() -> None:
+            # The head may be another owner's, which can't be looked up here.
+            refs = [r.base] + ([] if ":" in r.head else [r.head])
+            not_branch = next((ref for ref in refs if is_branch(repo, ref) is False), "")
+            wx.CallAfter(self._show_pull_dialog, r, not_branch)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _show_pull_dialog(self, r: CompareResult, not_branch: str) -> None:
+        if self._comparison() is not r or self._pull_busy:
+            return  # moved on while GitHub was asked
+        if not_branch:
+            self._tell(f"{not_branch} isn't a branch, and a pull request needs a branch "
+                       "at each end.")
             return
         key = (self.repo, r.base, r.head)
         title, body, draft = self._pull_drafts.get(key, (*compareview.pull_prefill(r), False))
@@ -9866,8 +9913,15 @@ class GhViewerFrame(wx.Frame):
         def worker() -> None:
             try:
                 number, url = create_pull_request(repo, r.base, r.head, title, body, draft)
+            except IssueCreatedUnreadable:
+                # It exists; keeping the draft would invite creating it twice.
+                wx.CallAfter(self._on_pull_unreadable, key)
+                return
             except GhError as exc:
                 wx.CallAfter(self._on_pull_failed, str(exc))
+                return
+            except Exception as exc:  # noqa: BLE001 — never leave it busy for good
+                wx.CallAfter(self._on_pull_failed, f"{type(exc).__name__}: {exc}")
                 return
             wx.CallAfter(self._on_pull_created, key, r, ComparePull(number, title, url))
 
@@ -9877,6 +9931,12 @@ class GhViewerFrame(wx.Frame):
         self._pull_busy = False
         # What was typed is kept: P brings it back.
         self._tell(f"Couldn't create the pull request. {err}")
+
+    def _on_pull_unreadable(self, key: tuple) -> None:
+        self._pull_busy = False
+        self._pull_drafts.pop(key, None)
+        self._tell("The pull request was created, but GitHub didn't say its number. "
+                   "Reading the comparison again will find it.")
 
     def _on_pull_created(self, key: tuple, r: CompareResult, pull: ComparePull) -> None:
         self._pull_busy = False
@@ -9905,7 +9965,7 @@ class GhViewerFrame(wx.Frame):
             self._tell(fork_said(number, repo, parent))
             return
         snap = {"files_of": r, "files_back": self._files_back,
-                "compare_list": self._compare_list}
+                "compare_list": self._compare_list, "filter_text": self.filter_text}
         item = self._focused_item()
         view, items, limit = self.view_mode, list(self.git_items), self.current_limit
         self._open_repo_from_list(repo, item)
@@ -10037,7 +10097,7 @@ class GhViewerFrame(wx.Frame):
             return
         self.sort_order = self._sort_menu_items.get(event.GetId(), SORT_ORDERS[0])
         self._update_menu_checks()
-        back = self._files_back if self.view_mode == VIEW_FILES else None
+        back = self._files_back if self.view_mode in (VIEW_FILES, VIEW_COMPARE) else None
         if back and back["view"] == VIEW_ISSUES and back["items"]:
             back["items"] = sort_items(back["items"], self.sort_order)
         if self.items:
@@ -10125,7 +10185,7 @@ class GhViewerFrame(wx.Frame):
         """After View ▸ State or Filter: the list again, with it. In Changed
         Files, the issues and pull requests are read again on the way back
         instead, rather than the files now."""
-        if self.view_mode == VIEW_FILES:
+        if self.view_mode in (VIEW_FILES, VIEW_COMPARE):
             back = self._files_back
             if back and back["view"] == VIEW_ISSUES:
                 back["items"] = None
@@ -11575,6 +11635,10 @@ class GhViewerFrame(wx.Frame):
             self._open_code_at(item, src.sha, f"at commit {src.short_sha}")
             return
         if isinstance(src, CompareResult):
+            if ":" in src.head:
+                self._tell(f"{item.filename} is in another owner's repository, "
+                           f"{src.head.split(':', 1)[0]}'s, so it can't be opened whole here.")
+                return
             self._open_code_at(item, src.head, f"at {src.head}")
             return
         if not isinstance(src, Item):

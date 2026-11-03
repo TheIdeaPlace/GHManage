@@ -2131,6 +2131,15 @@ def fetch_open_pull(repo: str, base: str, head: str) -> Optional[ComparePull]:
                        url=rows[0].get("html_url") or "")
 
 
+def is_branch(repo: str, ref: str) -> Optional[bool]:
+    """Whether ``ref`` is a branch of ``repo``; None if GitHub couldn't be asked."""
+    try:
+        _run_gh(["api", f"repos/{repo}/git/ref/heads/{_compare_ref(ref)}", "-q", ".ref"])
+    except GhError as exc:
+        return False if "404" in str(exc) else None
+    return True
+
+
 def create_pull_request(repo: str, base: str, head: str, title: str, body: str,
                         draft: bool = False) -> tuple[int, str]:
     """Open a pull request of ``head`` into ``base``; its number and address.

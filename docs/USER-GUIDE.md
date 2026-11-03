@@ -593,7 +593,7 @@ A comparison has up to three lists, and opens on the first with anything in it, 
 
 GitHub gives at most the newest 250 commits and the first 300 files of a comparison. When it stops short, GHManage says so; the ahead and behind counts are always the true totals.
 
-**New Pull Request**, from `P`, starts with the one commit's message if there is one, and otherwise the branch's name in words. It has a title, a description and **Create as a draft**; `Ctrl+Enter` creates it. If GitHub refuses, for instance because head is a tag and not a branch, it says why, and `P` brings back what you typed.
+**New Pull Request**, from `P`, starts with the one commit's message if there is one, and otherwise the branch's name in words. It has a title, a description and **Create as a draft**; `Ctrl+Enter` creates it. A pull request needs a branch at each end, so `P` says so on a tag or a commit. If GitHub refuses, it says why, and `P` brings back what you typed.
 
 ### Commits
 
@@ -1061,7 +1061,7 @@ The details panel gives the whole event as one sentence, then who, what, the rep
 
 | Key | Action |
 |-----|--------|
-| `Enter` | Open what the event is about here in GHManage: an issue or pull request in its repository's Issues & PRs, a release in Releases, a commit in Commits, a branch's commits, a discussion in Discussions, a repository at its Issues & PRs. For anything GHManage has no view for (a push's comparison, a wiki page, a person) it says so, and that `Ctrl+O` opens it on GitHub |
+| `Enter` | Open what the event is about here in GHManage: an issue or pull request in its repository's Issues & PRs, a release in Releases, a commit in Commits, a branch's commits, a discussion in Discussions, a repository at its Issues & PRs. A push opens its comparison. For anything GHManage has no view for (, a wiki page, a person) it says so, and that `Ctrl+O` opens it on GitHub |
 | `Ctrl+O` | Open it on GitHub |
 | `G` or `Ctrl+Shift+G` | Open the event's repository here in GHManage |
 | `Backspace` | From what `Enter` or `G` opened, come back to the same event |

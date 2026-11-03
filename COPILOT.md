@@ -20,6 +20,8 @@ for (branches, commits, tags, compare, workflow runs).
 ```
 ghviewer.py   — UI layer (wxPython). All event handlers, menus, dialogs, list population.
 gh_data.py    — Data layer. All `gh` CLI and `gh api` calls, data classes, parsing.
+compareview.py — A comparison in words (no wx): name, relation, summary, list_said, its
+                lists (lists_of, first_list, next_list) and pull_prefill.
 diffview.py   — A changed file as text to read (no wx). Lines are marked by app-kit's
                 `theideaplace_appkit.difftext`, shared with The Chat Place.
 codeview.py   — A repository's files as text to read (no wx): a file one line out per line
@@ -178,7 +180,9 @@ UI thread via `wx.CallAfter`. Never touch wx widgets from a worker thread.
 - `fetch_issues` / `fetch_prs` take an optional `label` and pass it to `gh` as
   `--label`. Filtering server-side is the point — an unfiltered page of 100 may
   not contain a single issue with the label you picked.
-- `fetch_compare(repo, base, head)` — compare two refs.
+- `fetch_compare(repo, base, head)` — compare two refs: counts, commits each way, files with their lines, the open pull request. Wording lives in `compareview.py`.
+- `fetch_branch_counts(repo, default)` — every branch's ahead and behind, by GraphQL.
+- `create_pull_request(repo, base, head, title, body, draft)` — open a pull request.
 - `fetch_item_detail(item, repo)` — re-fetch a single issue/PR with full detail.
 - `close_item` / `reopen_item` / `add_comment` — actions on issues/PRs.
 - `fetch_pages_site(repo)` → `PagesSite | None` — the repo's Pages config. **None means Pages

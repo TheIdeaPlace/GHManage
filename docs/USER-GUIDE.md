@@ -556,14 +556,44 @@ GitHub keeps traffic for 14 days only, and shows it only to people who can push 
 | Key | Action |
 |-----|--------|
 | `Enter` | Show the branch's commits |
+| `C` | Compare the branch with the default branch |
 | `Ctrl+Shift+B` | Compare two branches |
 | `F` | Add the branch to favorites, or remove it |
 
 ### Comparing branches
 
-**Actions → Compare Branches…** (`Ctrl+Shift+B`, in the Branches view) asks two questions, one after the other. "Step 1 of 2" asks for the **base** branch, the one to compare from, usually `main`. "Step 2 of 2" asks for the **head** branch to compare against it, and starts on the branch you were on in the list.
+Each branch's row says how many commits it is **ahead** of the default branch and how many **behind**. They fill in just after the list appears, because on a big repository GitHub takes a few seconds to work them out. The default branch has neither. If you chose your own columns for Branches before this, add them under **View → Columns…**.
 
-The result opens in a text window you can read line by line: how many commits the head branch is ahead and behind, the commits it adds, and the files changed with their additions and deletions. The status bar gives the short version, for example "'feature' is 3 ahead, 0 behind 'main'." Press `Escape` or **OK** to close it.
+The quickest comparison is `C` on a row, which goes straight to it:
+
+| Where | What `C` compares |
+|-------|-------------------|
+| Branches | The branch with the default branch |
+| Tags | The tag with the one listed after it, the one before it in time |
+| Releases | The release with the one listed after it |
+| Commits | The commit with the latest on the branch you are viewing: what has come since |
+
+**Actions → Compare Branches…** (`Ctrl+Shift+B`, from any view of a repository) lets you choose. **Base** is what to compare from and starts on the default branch, or on the base you last used in this repository; **Head** is what to compare to and starts on the branch, tag or commit you were on. Each lists the branches and tags, and you can type anything else GitHub can compare: a commit's SHA, or another owner's `OWNER:BRANCH`. `Enter` compares.
+
+You can also open a comparison's address with **Open Repository or Address…** (`Ctrl+Shift+O`), or press `Enter` on one in Favorites or Activity.
+
+A comparison has up to three lists, and opens on the first with anything in it, saying how the two stand: "dev and main have diverged: dev is 3 commits ahead and 1 behind. 12 files changed, 240 lines added, 18 removed. Pull request #40 is open: Add search."
+
+| Key | Action |
+|-----|--------|
+| `L` | Next list: **Changed files**, **Commits ahead**, **Commits behind** |
+| `S` | Swap base and head |
+| `P` | Open the comparison's pull request or, if it has none, create one |
+| `I` | Say the summary again |
+| `F` | In Changed files, add the comparison to favorites, or remove it |
+| `R` | Read the comparison again |
+| `Backspace` | Back to where you started the comparison |
+
+**Changed files** is what head has changed since the two parted, and works as it does for a pull request or a commit (see [Changed Files](#changed-files)): `Enter` reads a file's lines, `Alt+N` moves between its changes and `W` opens it whole, as it is on head. In **Commits ahead**, the commits on head that base lacks, and **Commits behind**, those on base that head lacks, `Enter` lists a commit's changed files and `Backspace` comes back to it. **Actions → Open Comparison on GitHub** opens the comparison's page, as `Ctrl+O` does when no row is selected.
+
+GitHub gives at most the newest 250 commits and the first 300 files of a comparison. When it stops short, GHManage says so; the ahead and behind counts are always the true totals.
+
+**New Pull Request**, from `P`, starts with the one commit's message if there is one, and otherwise the branch's name in words. It has a title, a description and **Create as a draft**; `Ctrl+Enter` creates it. A pull request needs a branch at each end, so `P` says so on a tag or a commit. If GitHub refuses, it says why, and `P` brings back what you typed.
 
 ### Commits
 
@@ -1031,7 +1061,7 @@ The details panel gives the whole event as one sentence, then who, what, the rep
 
 | Key | Action |
 |-----|--------|
-| `Enter` | Open what the event is about here in GHManage: an issue or pull request in its repository's Issues & PRs, a release in Releases, a commit in Commits, a branch's commits, a discussion in Discussions, a repository at its Issues & PRs. For anything GHManage has no view for (a push's comparison, a wiki page, a person) it says so, and that `Ctrl+O` opens it on GitHub |
+| `Enter` | Open what the event is about here in GHManage: an issue or pull request in its repository's Issues & PRs, a release in Releases, a commit in Commits, a branch's commits, a discussion in Discussions, a repository at its Issues & PRs. A push opens its comparison. For anything GHManage has no view for (, a wiki page, a person) it says so, and that `Ctrl+O` opens it on GitHub |
 | `Ctrl+O` | Open it on GitHub |
 | `G` or `Ctrl+Shift+G` | Open the event's repository here in GHManage |
 | `Backspace` | From what `Enter` or `G` opened, come back to the same event |
@@ -1384,7 +1414,13 @@ Everything that acts on what the list is showing is on the **Actions** menu, whi
 | Delete | `Ctrl+D`, or `Delete` in the list | Labels (reads **Delete Label… (Delete)**), Workflow Runs (reads **Delete Workflow Run… (Delete)**) and Notifications (reads **Mark as Done (Delete)**) |
 | Open Published Site | | GitHub Pages, once a site is found |
 | Select Branch… | `Ctrl+B` | Commits; in Files it reads **Select Branch or Tag…** |
-| Compare Branches… | `Ctrl+Shift+B` | Branches |
+| Compare Branches… | `Ctrl+Shift+B` | Any view of a repository |
+| Compare With Default Branch, Previous Tag or Release, or Latest on Branch | `C` | Branches, Tags, Releases, Commits |
+| Next List in Comparison | `L` | A comparison |
+| Swap Base and Head | `S` | A comparison |
+| Open or Create Pull Request | `P` | A comparison |
+| Say Comparison Summary | `I` | A comparison |
+| Open Comparison on GitHub | | A comparison |
 | Changed Files | `Ctrl+Shift+H`, or `H` in the list | Issues & PRs, on a pull request; Commits; File History |
 | Open Diff in Default App | `Ctrl+Shift+E` | Issues & PRs, on a pull request; Commits; Changed Files; File History |
 | File History | `H` in the list | Files, on a file |
@@ -1491,7 +1527,8 @@ On a Mac, use `Cmd` in place of `Ctrl` for every shortcut that has one, `Option`
 |-----|--------|
 | `Enter` on a branch | Show its commits |
 | `Enter` on a commit | Show its changed files |
-| `Ctrl+Shift+B` | Compare two branches (Branches view) |
+| `Ctrl+Shift+B` | Compare two branches |
+| `C` | Compare the selected branch, tag, release or commit |
 | `Ctrl+B` | Choose the branch (Commits view) |
 | `H` | The selected commit's changed files, as `Enter` does |
 | `Backspace` | Commits back to branches |

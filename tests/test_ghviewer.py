@@ -1686,8 +1686,8 @@ def test_enter_on_an_event_with_no_view_here_says_so_and_never_opens_the_browser
     opened = []
     monkeypatch.setattr(ghviewer.webbrowser, "open", opened.append)
     f = _event_frame()
-    url = "https://github.com/o/r/compare/aaa...bbb"
-    Frame._open_event(f, _subject_event(event_type="PushEvent", action="pushed 2 commits", url=url))
+    url = "https://github.com/o/r/wiki"
+    Frame._open_event(f, _subject_event(event_type="GollumEvent", action="edited the wiki", url=url))
     assert f.opened == [] and opened == []
     assert f.announced[-1] == ghviewer.NO_VIEW_SAID
 

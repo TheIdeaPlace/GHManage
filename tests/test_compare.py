@@ -278,7 +278,7 @@ def _frame(view, **attrs):
     f._update_title = lambda: None
     f._load_items = lambda: f.calls.append(("load", f.view_mode, f._files_of))
     f._compare_back = lambda: Frame._compare_back(f)
-    f._show_compare_list = lambda which: Frame._show_compare_list(f, which)
+    f._show_compare_list = lambda which, token=None: Frame._show_compare_list(f, which, token)
     f._on_files_loaded = lambda token, files, *a: f.calls.append(("files", files))
     f._on_compare_commits_loaded = lambda token, commits: f.calls.append(("commits", commits))
     f._on_git_items_loaded = lambda token, items, kind: f.calls.append(("git", items, kind))
@@ -401,9 +401,10 @@ def test_whole_file_of_another_owners_head_says_so():
 
 
 def test_previous_skips_a_draft():
-    rel = [gh_data.Release("v3", "", False, False), gh_data.Release("v2", "", True, False),
-           gh_data.Release("v1", "", False, False)]
+    rel = [SimpleNamespace(tag="v3", draft=False), SimpleNamespace(tag="v2", draft=True),
+           SimpleNamespace(tag="v1", draft=False)]
     f = _frame(ghviewer.VIEW_RELEASES, git_items=rel)
+    f._ref_name = lambda it: it.tag
     assert Frame._previous_ref(f, rel[0]) == "v1"
 
 
@@ -416,7 +417,8 @@ def test_keys_of_a_comparison_that_failed_to_load_say_so():
 def test_c_on_a_branch_compares_with_the_default_branch_keeping_the_way_back():
     branch = Branch("dev", "s", "m", "a", "d")
     rows = [branch]
-    f = _frame(ghviewer.VIEW_BRANCHES, git_items=rows, filter_text="de", current_limit=60)
+    f = _frame(ghviewer.VIEW_BRANCHES, git_items=rows, filter_text="de", current_limit=60,
+               _landed_token=0)
     f._focused_item = lambda: branch
     Frame._compare_with(f)
     assert f.view_mode == ghviewer.VIEW_FILES

@@ -84,7 +84,7 @@ def _isolated(monkeypatch, tmp_path_factory):
     # GraphQL bypasses _run_gh (it needs the output of a failed run), so it
     # is shut off separately: it answers with no data, which leaves PR titles
     # blank. Tests about titles install their own via the `graphql` fixture.
-    monkeypatch.setattr(gh_data, "_graphql", lambda query: {"data": {}})
+    monkeypatch.setattr(gh_data, "_graphql", lambda query, variables=None: {"data": {}})
     monkeypatch.setattr(gh_data, "_gh_exe", None)
     monkeypatch.setattr(gh_data, "_default_branches", {})  # looked up afresh per test
     monkeypatch.setattr(settings, "_session", {})  # each test starts with no choices made

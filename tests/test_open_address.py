@@ -46,7 +46,7 @@ T = ghviewer.GitHubTarget
     ("https://github.com/o/r/discussions/5", T("o/r", "discussion", "5")),
     ("https://github.com/o/r/discussions", T("o/r", "view", "discussions")),
     ("https://github.com/o/r/discussions/categories/q-a", T("o/r", "inside")),
-    ("https://github.com/o/r/compare/a...b", T("o/r", "inside")),
+    ("https://github.com/o/r/compare/a...b", T("o/r", "compare", "a...b")),
     # Pasted from email, chat and Markdown
     ("<https://github.com/o/r>", T("o/r")),
     ("https://github.com/o/r.", T("o/r")),

@@ -32,6 +32,7 @@ import bugreport
 import gh_data
 import alertview
 import codeview
+import compareview
 import commands
 import diffview
 import discussionview
@@ -110,6 +111,7 @@ from gh_data import (
     Tag,
     Workflow,
     WorkflowRun,
+    ComparePull,
     CompareResult,
     DispatchSpec,
     WorkflowInput,
@@ -148,6 +150,7 @@ from gh_data import (
     set_watch_level,
     switch_account,
     create_issue,
+    create_pull_request,
     create_label,
     detect_repo,
     delete_label,
@@ -159,6 +162,7 @@ from gh_data import (
     fetch_branch_names,
     fetch_dispatch_spec,
     fetch_run_artifacts,
+    fetch_branch_counts,
     fetch_compare,
     fetch_all_branch_commits,
     fetch_commits,
@@ -411,6 +415,13 @@ def parse_github_url(value: str) -> GitHubTarget | None:
         return GitHubTarget(repo, "run", rest[2])
     if section == "actions" and arg == "workflows":
         return GitHubTarget(repo, "view", "workflows")
+    if section == "compare" and arg:
+        # Branch names can hold slashes, so everything after "compare" is the refs.
+        ref = "/".join(rest[1:])
+        for suffix in (".patch", ".diff"):
+            if ref.endswith(suffix):
+                ref = ref[: -len(suffix)]
+        return GitHubTarget(repo, "compare", ref)
     if section in ("tree", "commits") and len(rest) == 2:
         # tree/<name> is a branch, and commits/<name> its history. With more
         # after it, it is a folder, and where a branch name ends and the path
@@ -419,6 +430,27 @@ def parse_github_url(value: str) -> GitHubTarget | None:
     if section in _URL_VIEWS and len(rest) == 1:
         return GitHubTarget(repo, "view", _URL_VIEWS[section])
     return GitHubTarget(repo, "inside")
+
+
+def compare_choice_problem(base: str, head: str) -> str:
+    """What is wrong with comparing these two, or "" if nothing."""
+    if not base:
+        return "Choose or type the base to compare from."
+    if not head:
+        return "Choose or type the head to compare to."
+    if base == head:
+        return f"The base and the head are both {base}. Choose two different ones."
+    return ""
+
+
+def compare_refs(ref: str) -> tuple[str, str]:
+    """(base, head) of a compare address's ``main...feature``. With only one
+    named it is the head, compared with the default branch, as on GitHub."""
+    for dots in ("...", ".."):
+        if dots in ref:
+            base, _, head = ref.partition(dots)
+            return base, head
+    return "", ref
 
 
 # ── Workflow run reports ────────────────────────────────────────────────
@@ -801,6 +833,12 @@ ID_OPEN_PAGES_SITE = wx.NewIdRef()
 ID_FILTER = wx.NewIdRef()
 ID_SELECT_BRANCH = wx.NewIdRef()
 ID_COMPARE_BRANCHES = wx.NewIdRef()
+ID_COMPARE_WITH = wx.NewIdRef()
+ID_COMPARE_NEXT_LIST = wx.NewIdRef()
+ID_COMPARE_SWAP = wx.NewIdRef()
+ID_COMPARE_PULL = wx.NewIdRef()
+ID_COMPARE_SUMMARY = wx.NewIdRef()
+ID_COMPARE_WEB = wx.NewIdRef()
 ID_OPEN_REPO = wx.NewIdRef()
 ID_REMOVE_REPO = wx.NewIdRef()
 ID_HIDDEN_REPOS = wx.NewIdRef()
@@ -887,6 +925,7 @@ VIEW_ASSETS = "assets"         # files attached to a single release (drill-down)
 VIEW_FILES = "files"           # files a pull request or commit changed (drill-down)
 VIEW_CODE = "code"             # a repository's files and folders (Files)
 VIEW_HISTORY = "history"       # the commits that changed one file (drill-down)
+VIEW_COMPARE = "compare"       # a comparison's commits; its files are in VIEW_FILES
 VIEW_LABELS = "labels"
 VIEW_FAVORITES = "favorites"
 VIEW_PAGES = "pages"           # GitHub Pages: site config + publish history
@@ -961,6 +1000,7 @@ ADDRESS_VIEWS = {
     "run": VIEW_WORKFLOW,
     "discussion": VIEW_DISCUSSIONS,
     "milestone": VIEW_MILESTONES,
+    "compare": VIEW_BRANCHES,  # what Backspace from the comparison comes back to
 }
 PENDING_KINDS = ("item", "commit", "release", "run", "discussion", "milestone")
 # Views that load everything at once, where View More has nothing to add.
@@ -1010,7 +1050,7 @@ def _text_index(text: str, pos: int) -> int:
 # its details are; going in would list its files, start a run and so on.
 GO_IN_KINDS = ("item", "commit", "discussion", "discussion_title")
 NO_MORE_VIEWS = (VIEW_FAVORITES, VIEW_MY_WORK, VIEW_ORGS, VIEW_JOBS, VIEW_ARTIFACTS,
-                 VIEW_PAGES, VIEW_PAGEFILES, VIEW_FILES, VIEW_CODE, VIEW_INSIGHTS)
+                 VIEW_PAGES, VIEW_PAGEFILES, VIEW_FILES, VIEW_CODE, VIEW_INSIGHTS, VIEW_COMPARE)
 # Insights lists up to this many contributors, most commits first (GitHub gives 500).
 INSIGHT_CONTRIBUTORS = 500
 # Views listing repositories; Enter on one opens it here.
@@ -1083,6 +1123,22 @@ USER_GUIDE_URL = "https://theideaplace.github.io/GHManage/"
 # page_slug); this one is the Searching GitHub section's.
 SEARCH_HELP_URL = USER_GUIDE_URL + "searching-github.html"
 
+# C on a row of these compares it with what the row is most often compared
+# with; each name is the entry on the Actions menu.
+COMPARE_WITH_LABELS = {
+    VIEW_BRANCHES: "Compare With Default Branch (C)",
+    VIEW_COMMITS: "Compare With Latest on Branch (C)",
+    VIEW_TAGS: "Compare With Previous Tag (C)",
+    VIEW_RELEASES: "Compare With Previous Release (C)",
+}
+# Views a comparison can come back to as they were; from any other, Branches.
+COMPARE_BACK_KINDS = {
+    VIEW_BRANCHES: "branches",
+    VIEW_COMMITS: "commits",
+    VIEW_TAGS: "tags",
+    VIEW_RELEASES: "releases",
+}
+
 # Drill-down views: pressing Backspace in the key view returns to its parent.
 # These are the views you reach by activating an item in another view
 # (a branch's commits, a run's artifacts), so Backspace is a natural "up".
@@ -1114,6 +1170,7 @@ OPEN_LABELS = {
     VIEW_FILES: "Read the Changes",
     VIEW_CODE: "Open Folder or File",
     VIEW_HISTORY: "Changed Files",
+    VIEW_COMPARE: "Changed Files",
     VIEW_LABELS: "List Issues and PRs with This Label",
     VIEW_FAVORITES: "Open Here",
     VIEW_PAGES: "Browse Published Pages",
@@ -1244,6 +1301,7 @@ VIEW_COLUMNS = {
     VIEW_FILES: CHANGED_FILE_SET,
     VIEW_CODE: REPO_FILE_SET,
     VIEW_HISTORY: COMMIT_SET,
+    VIEW_COMPARE: COMMIT_SET,
     VIEW_LABELS: LABEL_SET,
     VIEW_FAVORITES: FAVORITES_SET,
     VIEW_PAGES: PAGES_SET,
@@ -2639,15 +2697,26 @@ class NewIssueDialog(wx.Dialog):
     still moves between the fields. Enter in the title moves to the body.
     """
 
+    DIALOG_TITLE = "New Issue"
+    NEEDS_TITLE = "An issue needs a title."
+    # Not "&Create": the stock Cancel button already has Alt+C.
+    OK_LABEL = "C&reate Issue"
+
+    def _intro(self, repo: str) -> str:
+        return f"Create an issue in {repo}"
+
+    def _add_extra_fields(self, outer: wx.Sizer) -> None:
+        """Between the description and the buttons, for a dialog that has more."""
+
     def __init__(self, parent: wx.Window, repo: str, title: str = "", body: str = "") -> None:
         super().__init__(
             parent,
-            title="New Issue",
+            title=self.DIALOG_TITLE,
             style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER,
             size=(620, 480),
         )
         outer = wx.BoxSizer(wx.VERTICAL)
-        outer.Add(wx.StaticText(self, label=f"Create an issue in {repo}"), 0, wx.ALL, 10)
+        outer.Add(wx.StaticText(self, label=self._intro(repo)), 0, wx.ALL, 10)
 
         # The & marks Alt+T and Alt+D on Windows; the accessible name is the
         # label without it.
@@ -2665,12 +2734,12 @@ class NewIssueDialog(wx.Dialog):
         self.body_ctrl = wx.TextCtrl(self, value=body, style=wx.TE_MULTILINE)
         _name(self.body_ctrl, label.replace("&", ""))
         outer.Add(self.body_ctrl, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
+        self._add_extra_fields(outer)
 
         buttons = self.CreateStdDialogButtonSizer(wx.OK | wx.CANCEL)
         ok = self.FindWindow(wx.ID_OK)
         if ok:
-            # Not "&Create": the stock Cancel button already has Alt+C.
-            ok.SetLabel("C&reate Issue")
+            ok.SetLabel(self.OK_LABEL)
         outer.Add(buttons, 0, wx.ALIGN_RIGHT | wx.ALL, 10)
         self.SetSizer(outer)
         self.SetMinSize((420, 320))
@@ -2698,7 +2767,7 @@ class NewIssueDialog(wx.Dialog):
     def _valid(self) -> bool:
         if self.title_ctrl.GetValue().strip():
             return True
-        wx.MessageBox("An issue needs a title.", "New Issue",
+        wx.MessageBox(self.NEEDS_TITLE, self.DIALOG_TITLE,
                       wx.OK | wx.ICON_INFORMATION, self)
         self.title_ctrl.SetFocus()
         return False
@@ -2706,6 +2775,94 @@ class NewIssueDialog(wx.Dialog):
     def values(self) -> tuple[str, str]:
         """(title, body). The body is kept as typed, apart from trailing space."""
         return self.title_ctrl.GetValue().strip(), self.body_ctrl.GetValue().rstrip()
+
+
+class NewPullRequestDialog(NewIssueDialog):
+    """Title, body and whether it is a draft, for a pull request from a
+    comparison. The same form as New Issue, Ctrl+Enter included."""
+
+    DIALOG_TITLE = "New Pull Request"
+    NEEDS_TITLE = "A pull request needs a title."
+    OK_LABEL = "C&reate Pull Request"
+
+    def __init__(self, parent: wx.Window, repo: str, base: str, head: str,
+                 title: str = "", body: str = "", draft: bool = False) -> None:
+        self._refs = (base, head)
+        self._draft_at_start = draft
+        super().__init__(parent, repo, title, body)
+
+    def _intro(self, repo: str) -> str:
+        base, head = self._refs
+        return f"Create a pull request in {repo}, from {head} into {base}"
+
+    def _add_extra_fields(self, outer: wx.Sizer) -> None:
+        self.draft_ctrl = wx.CheckBox(self, label="Create as a dr&aft")
+        self.draft_ctrl.SetValue(self._draft_at_start)
+        outer.Add(self.draft_ctrl, 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
+
+    def pull_values(self) -> tuple[str, str, bool]:
+        """(title, body, draft)."""
+        title, body = self.values()
+        return title, body, self.draft_ctrl.GetValue()
+
+
+class CompareDialog(wx.Dialog):
+    """Which two things to compare. Each field lists the branches and tags and
+    can be typed in, for a commit's SHA or another owner's OWNER:BRANCH. Enter
+    compares, from either field; a mistake keeps the dialog open as it is."""
+
+    def __init__(self, parent: wx.Window, repo: str, refs: list[str],
+                 base: str, head: str) -> None:
+        super().__init__(parent, title="Compare Branches",
+                         style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER, size=(520, 270))
+        outer = wx.BoxSizer(wx.VERTICAL)
+        outer.Add(wx.StaticText(
+            self, label=f"Compare two branches, tags or commits in {repo}"), 0, wx.ALL, 10)
+        self.base_ctrl = self._field(outer, "&Base, to compare from", refs, base)
+        self.head_ctrl = self._field(outer, "&Head, to compare to", refs, head)
+        swap = wx.Button(self, label="S&wap Base and Head")
+        swap.Bind(wx.EVT_BUTTON, self._on_swap)
+        outer.Add(swap, 0, wx.ALL, 10)
+
+        buttons = self.CreateStdDialogButtonSizer(wx.OK | wx.CANCEL)
+        ok = self.FindWindow(wx.ID_OK)
+        if ok:
+            ok.SetLabel("Com&pare")
+        outer.Add(buttons, 0, wx.ALIGN_RIGHT | wx.ALL, 10)
+        self.SetSizer(outer)
+        self.Bind(wx.EVT_BUTTON, self._on_ok, id=wx.ID_OK)
+        # The one that needs filling in, or else the first, ready for Enter.
+        start = self.base_ctrl if not base or head else self.head_ctrl
+        wx.CallAfter(start.SetFocus)
+
+    def _field(self, outer: wx.Sizer, label: str, refs: list[str], value: str) -> wx.ComboBox:
+        outer.Add(wx.StaticText(self, label=label), 0, wx.LEFT | wx.RIGHT, 10)
+        ctrl = wx.ComboBox(self, value=value, choices=refs, style=wx.CB_DROPDOWN)
+        _name(ctrl, label.replace("&", ""))
+        outer.Add(ctrl, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
+        return ctrl
+
+    def _on_swap(self, event: wx.CommandEvent) -> None:
+        base, head = self.values()
+        self.base_ctrl.SetValue(head)
+        self.head_ctrl.SetValue(base)
+        announce.announce(f"Base is now {head or 'empty'}, head is {base or 'empty'}.",
+                          announce.STATUS)
+
+    def _on_ok(self, event: wx.CommandEvent) -> None:
+        base, head = self.values()
+        problem, field = compare_choice_problem(base, head), self.base_ctrl
+        if problem:
+            if base and (not head or base == head):
+                field = self.head_ctrl
+            wx.MessageBox(problem, "Compare Branches", wx.OK | wx.ICON_INFORMATION, self)
+            field.SetFocus()
+            return
+        event.Skip()
+
+    def values(self) -> tuple[str, str]:
+        """(base, head)."""
+        return self.base_ctrl.GetValue().strip(), self.head_ctrl.GetValue().strip()
 
 
 # ── Report a Bug ────────────────────────────────────────────────────────
@@ -3047,6 +3204,13 @@ class GhViewerFrame(wx.Frame):
         # shown, and the list it was opened from, for Backspace.
         self._files_of: Item | Commit | None = None
         self._files_back: dict | None = None
+        # A comparison is in _files_of and goes back by _files_back, in Changed
+        # Files and in VIEW_COMPARE alike; this says which of its lists shows.
+        self._compare_list = compareview.FILES
+        self._compare_summary_due = False
+        self._compare_last_base: dict[str, str] = {}
+        self._pull_drafts: dict[tuple, tuple] = {}
+        self._pull_busy = False
         self._diff_style: str = settings.load_diff_style()
         self._diff_busy = False
         # Files: see _reset_code. History: the file whose commits are shown
@@ -3417,6 +3581,18 @@ class GhViewerFrame(wx.Frame):
         self._act_compare = actions_menu.Append(
             ID_COMPARE_BRANCHES, "Compare Branches…\tCtrl+Shift+B"
         )
+        self._act_compare_with = actions_menu.Append(
+            ID_COMPARE_WITH, COMPARE_WITH_LABELS[VIEW_BRANCHES]
+        )
+        self._act_compare_next = actions_menu.Append(
+            ID_COMPARE_NEXT_LIST, "Next List in Comparison (L)"
+        )
+        self._act_compare_swap = actions_menu.Append(ID_COMPARE_SWAP, "Swap Base and Head (S)")
+        self._act_compare_pull = actions_menu.Append(ID_COMPARE_PULL, "Create Pull Request… (P)")
+        self._act_compare_summary = actions_menu.Append(
+            ID_COMPARE_SUMMARY, "Say Comparison Summary (I)"
+        )
+        self._act_compare_web = actions_menu.Append(ID_COMPARE_WEB, "Open Comparison on GitHub")
         # A pull request's or a commit's changes. H is the key in the list.
         self._act_changed_files = actions_menu.Append(
             ID_CHANGED_FILES, "Changed Files (H)\tCtrl+Shift+H"
@@ -4055,8 +4231,19 @@ class GhViewerFrame(wx.Frame):
         self._act_select_branch.SetItemLabel(
             "Select Branch or Tag…\tCtrl+B" if self.view_mode == VIEW_CODE
             else "Select Branch…\tCtrl+B")
-        self._act_compare.Enable(self.view_mode == VIEW_BRANCHES)
-        changes = self.view_mode in (VIEW_ISSUES, VIEW_COMMITS, VIEW_HISTORY)
+        # Always on, so Ctrl+Shift+B is never silent: it says what it needs.
+        self._act_compare.Enable(True)
+        compare_with = COMPARE_WITH_LABELS.get(self.view_mode)
+        self._act_compare_with.Enable(compare_with is not None)
+        self._act_compare_with.SetItemLabel(compare_with or COMPARE_WITH_LABELS[VIEW_BRANCHES])
+        comparison = GhViewerFrame._comparison(self)
+        for entry in (self._act_compare_next, self._act_compare_swap, self._act_compare_pull,
+                      self._act_compare_summary, self._act_compare_web):
+            entry.Enable(comparison is not None)
+        self._act_compare_pull.SetItemLabel(
+            f"Open Pull Request #{comparison.pull.number} (P)"
+            if comparison is not None and comparison.pull else "Create Pull Request… (P)")
+        changes = self.view_mode in (VIEW_ISSUES, VIEW_COMMITS, VIEW_HISTORY, VIEW_COMPARE)
         self._act_changed_files.Enable(changes)
         # Always on, so Ctrl+Shift+X and Ctrl+Shift+E are never silent:
         # _diff_action says what to select when there is nothing to diff.
@@ -4103,7 +4290,7 @@ class GhViewerFrame(wx.Frame):
             self.jobs_run = None
         if mode != VIEW_ASSETS:
             self.assets_release = None
-        if mode != VIEW_FILES:
+        if mode not in (VIEW_FILES, VIEW_COMPARE):
             self._files_of = None
             self._files_back = None
         if mode != VIEW_CODE:
@@ -4222,6 +4409,12 @@ class GhViewerFrame(wx.Frame):
         self.Bind(wx.EVT_MENU, self.on_open_pages_site, id=ID_OPEN_PAGES_SITE)
         self.Bind(wx.EVT_MENU, self.on_select_branch, id=ID_SELECT_BRANCH)
         self.Bind(wx.EVT_MENU, self.on_compare_branches, id=ID_COMPARE_BRANCHES)
+        self.Bind(wx.EVT_MENU, lambda e: self._compare_with(), id=ID_COMPARE_WITH)
+        self.Bind(wx.EVT_MENU, lambda e: self._compare_next_list(), id=ID_COMPARE_NEXT_LIST)
+        self.Bind(wx.EVT_MENU, lambda e: self._compare_swap(), id=ID_COMPARE_SWAP)
+        self.Bind(wx.EVT_MENU, lambda e: self._compare_pull(), id=ID_COMPARE_PULL)
+        self.Bind(wx.EVT_MENU, lambda e: self._compare_say_summary(), id=ID_COMPARE_SUMMARY)
+        self.Bind(wx.EVT_MENU, lambda e: self._compare_open_web(), id=ID_COMPARE_WEB)
         self.Bind(wx.EVT_MENU, self.on_view_more, id=ID_VIEW_MORE)
         self.Bind(wx.EVT_MENU, self.on_next_comment, id=ID_NEXT_COMMENT)
         self.Bind(wx.EVT_MENU, self.on_prev_comment, id=ID_PREV_COMMENT)
@@ -4584,7 +4777,7 @@ class GhViewerFrame(wx.Frame):
     # What a view keeps beyond its view mode, for coming back to it after
     # View User (the snapshot's "context"). _switch_view clears most of these.
     _VIEW_CONTEXT = ("commit_branch", "artifacts_run", "jobs_run", "assets_release",
-                     "_files_of", "_files_back", "_history_of", "_history_back",
+                     "_files_of", "_files_back", "_compare_list", "_history_of", "_history_back",
                      "label_filter", "milestone_filter", "pages_site", "_org")
     _PEOPLE_TRAIL_MAX = 50
 
@@ -5138,6 +5331,9 @@ class GhViewerFrame(wx.Frame):
                 elif view == VIEW_BRANCHES:
                     branches = fetch_branches(self.repo, self.current_limit)
                     wx.CallAfter(self._on_git_items_loaded, token, branches, "branches")
+                    # After the list: it can take seconds on a big repository,
+                    # and the rows are worth having without it.
+                    self._read_branch_counts(token, repo, branches, limit)
                 elif view == VIEW_COMMITS and commit_branch == ALL_BRANCHES:
                     commits, unread = fetch_all_branch_commits(self.repo, limit)
                     wx.CallAfter(self._on_all_branch_commits_loaded, token, commits, unread)
@@ -5174,6 +5370,9 @@ class GhViewerFrame(wx.Frame):
                     # it may have finished, or been rerun, since.
                     fresh = fetch_workflow_run(self.repo, run.run_id) if run else None
                     wx.CallAfter(self._on_jobs_loaded, token, jobs, fresh)
+                elif view == VIEW_COMPARE or (view == VIEW_FILES
+                                              and isinstance(files_of, CompareResult)):
+                    self._read_comparison(token, repo, files_of)
                 elif view == VIEW_FILES:
                     note, head = "", ""
                     if isinstance(files_of, Item):
@@ -5377,6 +5576,7 @@ class GhViewerFrame(wx.Frame):
         VIEW_FILES: "Changed Files",
         VIEW_CODE: "Files",
         VIEW_HISTORY: "File History",
+        VIEW_COMPARE: "Comparison",
         VIEW_LABELS: "Labels",
         VIEW_FAVORITES: "Favorites",
         VIEW_PAGES: "GitHub Pages",
@@ -5449,7 +5649,7 @@ class GhViewerFrame(wx.Frame):
         # Include the release being drilled into (assets view)
         if self.view_mode == VIEW_ASSETS and self.assets_release:
             parts.append(self.assets_release.tag or self.assets_release.name)
-        if self.view_mode == VIEW_FILES and self._files_of is not None:
+        if self.view_mode in (VIEW_FILES, VIEW_COMPARE) and self._files_of is not None:
             parts.append(self._files_of_label())
         if self.view_mode == VIEW_CODE:
             parts.append(self._code_where())
@@ -5482,6 +5682,10 @@ class GhViewerFrame(wx.Frame):
             label = f"{label}: {self._code_where()}"
         elif self.view_mode == VIEW_HISTORY and self._history_of:
             label = f"{label}: {self._history_of[1]} {self._history_of[2]}".strip()
+        comparison = GhViewerFrame._comparison(self)
+        if comparison is not None:
+            which = getattr(self, "_compare_list", compareview.FILES)
+            label = f"{compareview.LIST_NAMES[which]}: {compareview.name(comparison)}"
         self.list_label.SetLabel(label)
         _name(self.list_ctrl, label)
 
@@ -5663,8 +5867,10 @@ class GhViewerFrame(wx.Frame):
         # The view's own keys, after Enter's and Ctrl+O's; Backspace's is
         # added by _set_view_status, where Backspace goes.
         compare_hint = {
-            VIEW_BRANCHES: "Ctrl+Shift+B=compare branches",
-            VIEW_COMMITS: "H=changed files",
+            VIEW_BRANCHES: "C=compare with default branch  Ctrl+Shift+B=compare branches",
+            VIEW_COMMITS: "H=changed files  C=compare with latest on branch",
+            VIEW_TAGS: "C=compare with previous tag",
+            VIEW_RELEASES: "C=compare with previous release",
             VIEW_WORKFLOW: "J=jobs  L=what failed  E=rerun  X=cancel  Delete/Ctrl+D=delete run",
             VIEW_JOBS: "L=what failed  E=rerun  X=cancel",
             VIEW_LABELS: "Insert/Ctrl+I=new  Delete/Ctrl+D=delete",
@@ -6790,10 +6996,9 @@ class GhViewerFrame(wx.Frame):
             lines.append(f"Author: {item.commit_author}")
             lines.append(f"Date: {item.commit_date}")
             lines.append(f"Protected: {'Yes' if item.protected else 'No'}")
-            if item.ahead:
-                lines.append(f"Ahead: {item.ahead}")
-            if item.behind:
-                lines.append(f"Behind: {item.behind}")
+            if item.ahead is not None and item.behind is not None:
+                lines.append(f"Compared with {item.compared_with}: "
+                             f"{item.ahead} ahead, {item.behind} behind")
             lines.append("URL:")
             lines.append(item.url or "(none)")
         elif isinstance(item, Commit):
@@ -7077,6 +7282,7 @@ class GhViewerFrame(wx.Frame):
         VIEW_FILES: "Path",
         VIEW_CODE: "Path",
         VIEW_HISTORY: "SHA",
+        VIEW_COMPARE: "SHA",
         VIEW_LABELS: "Label Name",
         VIEW_FAVORITES: "Name",
         VIEW_PAGES: "Commit",
@@ -7271,7 +7477,7 @@ class GhViewerFrame(wx.Frame):
             else:
                 self._read_changes()
             return
-        if self.view_mode == VIEW_HISTORY and isinstance(item, Commit):
+        if self.view_mode in (VIEW_HISTORY, VIEW_COMPARE) and isinstance(item, Commit):
             self._show_changed_files()
             return
         # In Commits, Enter steps into the commit's changed files, as Enter on
@@ -7355,7 +7561,7 @@ class GhViewerFrame(wx.Frame):
         # Actions entries that do what the Enter entry already does: in
         # Commits and File History, Enter is Changed Files.
         same_as_enter = set()
-        if self.view_mode in (VIEW_COMMITS, VIEW_HISTORY) and item is not None:
+        if self.view_mode in (VIEW_COMMITS, VIEW_HISTORY, VIEW_COMPARE) and item is not None:
             same_as_enter.add(ID_CHANGED_FILES)
 
         def walk(menu) -> list:
@@ -7837,10 +8043,26 @@ class GhViewerFrame(wx.Frame):
             self._go_to_event_repo()
             return
         if (key == ord("H") and not event.HasAnyModifiers()
-                and self.view_mode in (VIEW_ISSUES, VIEW_COMMITS, VIEW_HISTORY)):
+                and self.view_mode in (VIEW_ISSUES, VIEW_COMMITS, VIEW_HISTORY, VIEW_COMPARE)):
             # Here so it works from the details panel, where the item is read.
             self._show_changed_files()
             return
+        if not event.HasAnyModifiers():
+            # Here so they work from the details panel, where a file or a
+            # commit of the comparison is read.
+            if key == ord("C") and self.view_mode in COMPARE_WITH_LABELS:
+                self._compare_with()
+                return
+            if GhViewerFrame._comparison(self) is not None:
+                action = {
+                    ord("L"): self._compare_next_list,
+                    ord("S"): self._compare_swap,
+                    ord("P"): self._compare_pull,
+                    ord("I"): self._compare_say_summary,
+                }.get(key)
+                if action:
+                    action()
+                    return
         if self.view_mode == VIEW_CODE and not event.HasAnyModifiers():
             # From the list or from the file's text.
             action = {ord("H"): self._show_file_history, ord("B"): self._toggle_blame}.get(key)
@@ -8036,7 +8258,7 @@ class GhViewerFrame(wx.Frame):
         if trail and GhViewerFrame._in_people(self):
             name = GhViewerFrame._snapshot_label(self, trail[-1], lower=lower)
             return f"{'back' if lower else 'Back'} to {name}"
-        if view == VIEW_FILES:
+        if view in (VIEW_FILES, VIEW_COMPARE):
             files_back = getattr(self, "_files_back", None)
             return to(files_back["view"] if files_back else VIEW_ISSUES)
         if view == VIEW_CODE:
@@ -8065,7 +8287,7 @@ class GhViewerFrame(wx.Frame):
         view = self.view_mode
         if getattr(self, "_people_trail", None) and self._in_people():
             self._people_back()
-        elif view == VIEW_FILES:
+        elif view in (VIEW_FILES, VIEW_COMPARE):
             self._back_from_files()
         elif view == VIEW_CODE:
             self._code_up()  # at the top, it says so
@@ -8184,7 +8406,16 @@ class GhViewerFrame(wx.Frame):
         self.current_limit = limit
         self._restore_repo_selection(None)
         token = self._begin_fetch()
-        if view == VIEW_ACTIVITY:
+        if view in (VIEW_FILES, VIEW_COMPARE) and isinstance(more, dict):
+            # From a comparison, to its pull request and back.
+            self._files_of = more["files_of"]
+            self._files_back = more["files_back"]
+            self._compare_list = more["compare_list"]
+            if view == VIEW_FILES:
+                self._on_files_loaded(token, items)
+            else:
+                self._on_compare_commits_loaded(token, items)
+        elif view == VIEW_ACTIVITY:
             self._on_activity_loaded(token, items, more, item)
         elif view == VIEW_MY_WORK:
             self._on_my_work_loaded(token, items, item)
@@ -8207,6 +8438,12 @@ class GhViewerFrame(wx.Frame):
     def _toggle_favorite(self) -> None:
         """Toggle favorite status on the currently focused item (F key)."""
         item = self._focused_item()
+        comparison = GhViewerFrame._comparison(self)
+        if comparison is not None and not isinstance(item, Commit):
+            # A file of a comparison, or none: the comparison, which has an
+            # address and can be opened again from Favorites.
+            self._favorite_comparison(comparison)
+            return
         if not item:
             return
 
@@ -8577,6 +8814,9 @@ class GhViewerFrame(wx.Frame):
             self._repo_entry_action("browser")
             return
         item = self._focused_item()
+        if item is None and GhViewerFrame._comparison(self) is not None:
+            self._compare_open_web()  # identical, say, with no rows to open
+            return
         if item is None:
             self._tell("Select something in the list to open on GitHub.")
             return
@@ -8701,6 +8941,11 @@ class GhViewerFrame(wx.Frame):
             )
             return
         repo = target.repo
+        if target.kind == "compare":
+            self._select_repo(repo, VIEW_BRANCHES)
+            self._select_in_repo_list(repo)
+            self._open_compare_address(target.ref)
+            return
         if target.kind == "inside":
             # A file, the wiki, a discussion: no view of its own here, so the
             # repository opens — without pinning, as for any link opened
@@ -9270,160 +9515,432 @@ class GhViewerFrame(wx.Frame):
         else:
             dlg.Destroy()
 
+    # ── Comparing ───────────────────────────────────────────────────────
+    #
+    # Two branches, tags or commits compared. What head changed shows in
+    # Changed Files, with its lines and its keys; the commits each way in
+    # VIEW_COMPARE, a list like File History's. L moves between them. All of
+    # it is one visit: Backspace from any of them goes back where it began.
+
+    def _comparison(self) -> CompareResult | None:
+        """The comparison showing, or None."""
+        src = getattr(self, "_files_of", None)
+        if (getattr(self, "view_mode", None) in (VIEW_FILES, VIEW_COMPARE)
+                and isinstance(src, CompareResult)):
+            return src
+        return None
+
+    def _loaded_comparison(self) -> CompareResult | None:
+        """The comparison showing, once GitHub has answered; else it says so."""
+        r = self._comparison()
+        if r is None:
+            self._tell("This is for a comparison, and none is showing.")
+        elif not r.loaded:
+            self._tell(f"{compareview.name(r)} hasn't loaded.")
+            return None
+        return r
+
     def on_compare_branches(self, event: wx.CommandEvent) -> None:
-        """Ctrl+Shift+B — compare two branches (ahead/behind, commits, files)."""
-        if not self.repo:
-            self._announce("No repository loaded.")
+        """Ctrl+Shift+B: choose two things to compare, starting from the row."""
+        if not self.repo or self.view_mode in REPOLESS_VIEWS:
+            self._tell("Select a repository first: Compare Branches compares two "
+                       "branches of one.")
             return
-        # Fetch branch names in the background, then run the pickers.
-        self._announce("Loading branches for comparison…")
+        repo = self.repo
+        base, head = self._compare_defaults()
+        self._announce("Getting the branches and tags…")
 
         def worker() -> None:
             try:
-                names = fetch_branch_names(self.repo, 200)
-                wx.CallAfter(self._show_compare_pickers, names)
+                default = fetch_default_branch(repo)
+                branches, tags = fetch_ref_names(repo)
             except GhError as exc:
-                wx.CallAfter(self._on_items_error, str(exc))
+                wx.CallAfter(self._tell, f"Couldn't get the branches: {exc}")
+                return
+            wx.CallAfter(self._show_compare_dialog, repo, default, branches, tags, base, head)
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _show_compare_pickers(self, names: list[str]) -> None:
-        """Pick the base and head branches via two accessible dialogs."""
-        if not names:
-            self._announce("No branches found to compare.")
-            return
-        if len(names) < 2:
-            self._announce("Need at least two branches to compare.")
-            return
+    def _compare_defaults(self) -> tuple[str, str]:
+        """(base, head) to start the dialog on, from what you are on. Empty
+        where it says nothing, for the dialog to fill in."""
+        comparison = self._comparison()
+        if comparison is not None:
+            return comparison.base, comparison.head
+        item = self._focused_item()
+        if isinstance(item, Branch):
+            return "", item.name
+        if isinstance(item, (Tag, Release)):
+            return self._previous_ref(item), self._ref_name(item)
+        if isinstance(item, Commit) and self.view_mode in (VIEW_COMMITS, VIEW_HISTORY):
+            return item.short_sha, self._commits_branch()
+        if self.view_mode == VIEW_CODE:
+            return "", self._code_ref or ""
+        return "", ""
 
-        # Sensible defaults: head = the branch currently focused (if any),
-        # base = the first branch (usually the repo's default branch).
-        focused = self._focused_item()
-        head_default = focused.name if isinstance(focused, Branch) else names[1]
+    @staticmethod
+    def _ref_name(item) -> str:
+        return item.tag if isinstance(item, Release) else item.name
 
-        # Step 1 — base branch (compare FROM).
-        base_dlg = wx.SingleChoiceDialog(
-            self,
-            "Step 1 of 2 — choose the BASE branch (compare FROM, e.g. main):",
-            "Compare Branches — Base",
-            names,
+    def _previous_ref(self, item) -> str:
+        """The tag or release listed after ``item``: they are newest first. ""
+        for the last, or one that isn't in the list."""
+        source = self.git_items
+        idx = next((i for i, it in enumerate(source) if it is item), -1)
+        if idx < 0 or idx + 1 >= len(source):
+            return ""
+        return self._ref_name(source[idx + 1])
+
+    def _commits_branch(self) -> str:
+        """The branch the Commits view is on; "" for the default, or for every
+        branch, where there is no one branch."""
+        return "" if self.commit_branch == ALL_BRANCHES else (self.commit_branch or "")
+
+    def _show_compare_dialog(self, repo: str, default: str, branches: list, tags: list,
+                             base: str, head: str) -> None:
+        if repo != self.repo:
+            return  # moved to another repository while they were read
+        refs = list(dict.fromkeys(([default] if default else []) + branches + tags))
+        base = base or self._compare_last_base.get(repo, default)
+        if head == base:
+            head = ""  # on the branch it would be compared with: choose another
+        dlg = CompareDialog(self, repo, refs, base, head or self._commit_head_default(default))
+        try:
+            if dlg.ShowModal() != wx.ID_OK:
+                self._announce("Compare cancelled.")
+                return
+            base, head = dlg.values()
+        finally:
+            dlg.Destroy()
+        self._compare_last_base[repo] = base
+        self._open_compare(base, head)
+
+    def _commit_head_default(self, default: str) -> str:
+        """A commit's comparison with nothing else named runs up to the default branch."""
+        if self.view_mode in (VIEW_COMMITS, VIEW_HISTORY) and isinstance(self._focused_item(), Commit):
+            return default
+        return ""
+
+    def _compare_with(self) -> None:
+        """C on a row: straight to the comparison it is most often wanted for."""
+        item = self._focused_item()
+        if isinstance(item, Branch):
+            self._open_compare("", item.name)  # "": the default branch, once asked
+        elif isinstance(item, (Tag, Release)):
+            name = self._ref_name(item)
+            previous = self._previous_ref(item)
+            if previous:
+                self._open_compare(previous, name)
+            else:
+                self._tell(f"{name} is the last one listed, so there is none before it "
+                           "to compare with.")
+        elif isinstance(item, Commit):
+            self._open_compare(item.short_sha, self._commits_branch())
+        else:
+            self._tell("Select a branch, commit, tag or release first.")
+
+    def _compare_back(self) -> dict:
+        """Where Backspace from a new comparison goes: the list you are in as
+        it is, or Branches from a list that couldn't be put back as it was.
+        A comparison made from a comparison goes back where the first did."""
+        if self._comparison() is not None and self._files_back:
+            return self._files_back
+        view = self.view_mode
+        restorable = view == VIEW_ISSUES or view in COMPARE_BACK_KINDS
+        return {
+            "view": view if restorable else VIEW_BRANCHES,
+            "items": list(self._view_source()) if restorable else None,
+            "item": self._focused_item() if restorable else None,
+            "limit": self.current_limit,
+            "filter_text": self.filter_text if restorable else "",
+            "label_filter": self.label_filter if restorable else "",
+            "milestone_filter": getattr(self, "milestone_filter", None) if restorable else None,
+            "commit_branch": self.commit_branch if restorable else "",
+            "branches_unread": self._branches_unread,
+            "return_to": self._return_to if restorable else None,
+            "return_view": getattr(self, "_return_view", VIEW_ISSUES),
+        }
+
+    def _open_compare(self, base: str, head: str, back: dict | None = None) -> None:
+        """Compare ``head`` with ``base``; either may be "" for the default
+        branch, which GitHub is asked for on the way."""
+        back = back or self._compare_back()
+        self._switch_view(VIEW_FILES, load=False)
+        # Set after the switch, which clears them on the way in to anything else.
+        self._files_of = CompareResult(base=base, head=head)
+        self._files_back = back
+        self._compare_list = compareview.FILES
+        self.filter_text = ""
+        self._update_title()
+        self._tell(f"Comparing {head or 'the default branch'} with "
+                   f"{base or 'the default branch'}…")
+        self._load_items()
+
+    def _open_compare_address(self, ref: str) -> None:
+        """The comparison a GitHub address names, just after the repository
+        has opened on Branches; back goes to Branches and on from there."""
+        base, head = compare_refs(ref)
+        self._open_compare(base, head, back={
+            "view": VIEW_BRANCHES, "items": None, "item": None,
+            "limit": self.current_limit, "filter_text": "", "label_filter": "",
+            "milestone_filter": None, "commit_branch": "",
+            "branches_unread": self._branches_unread,
+            "return_to": self._return_to,
+            "return_view": getattr(self, "_return_view", VIEW_ISSUES),
+        })
+
+    def _read_comparison(self, token: int, repo: str, src: CompareResult) -> None:
+        """On the load's thread: the comparison from GitHub."""
+        try:
+            base, head = src.base, src.head
+            if not base or not head:
+                default = fetch_default_branch(repo)
+                base, head = base or default, head or default
+            result = fetch_compare(repo, base, head)
+        except GhError as exc:
+            wx.CallAfter(self._on_compare_failed, token, src, str(exc))
+            return
+        wx.CallAfter(self._on_compare_loaded, token, result)
+
+    def _on_compare_failed(self, token: int, src: CompareResult, err: str) -> None:
+        if not self._fetch_is_current(token):
+            return
+        said = (f"Couldn't compare {src.head or 'the default branch'} with "
+                f"{src.base or 'the default branch'}. "
+                + ("GitHub can't find one of them." if "Not Found" in err else err))
+        self.details_text.SetValue(said)
+        self._set_view_status(said, keys_hint("R=try again", "Backspace=back"))
+        announce.announce(said, announce.STATUS)
+
+    def _on_compare_loaded(self, token: int, result: CompareResult) -> None:
+        if not self._fetch_is_current(token):
+            return  # the user has moved on; this belongs to a view they left
+        was = self._files_of
+        self._files_of = result
+        # R stays on the list it was on, if that still has anything in it.
+        refreshed = isinstance(was, CompareResult) and was.loaded
+        keep = refreshed and self._compare_list in compareview.lists_of(result)
+        which = self._compare_list if keep else compareview.first_list(result)
+        self._compare_summary_due = True
+        self._show_compare_list(which)
+
+    def _show_compare_list(self, which: str) -> None:
+        """One of the comparison's lists, in the view that shows it."""
+        result, back = self._files_of, self._files_back
+        self._compare_list = which
+        self._switch_view(VIEW_FILES if which == compareview.FILES else VIEW_COMPARE, load=False)
+        # Set after the switch, as a switch to anything else clears them.
+        self._files_of, self._files_back = result, back
+        self.filter_text = ""
+        token = self._begin_fetch()
+        if which == compareview.FILES:
+            self._on_files_loaded(token, result.files)
+        else:
+            self._on_compare_commits_loaded(token, compareview.commits_of(result, which))
+
+    def _on_compare_commits_loaded(self, token: int, commits: list) -> None:
+        if not self._fetch_is_current(token):
+            return
+        self.git_items = commits
+        self.items = []
+        filtered = self._populate_filtered_list(commits, use_favorite_prefix=True)
+        row = self._take_pending_row(commits, token)
+        self._compare_arrive(token, filtered, row)
+
+    def _set_compare_status(self) -> None:
+        r = self._files_of
+        on_files = self.view_mode == VIEW_FILES
+        has_rows = bool(self.git_items)
+        self._set_view_status(
+            f"{compareview.LIST_NAMES[self._compare_list]}: {compareview.summary(r)}",
+            keys_hint(
+                enter_hint(self.view_mode) if has_rows else "",
+                ctrl_o_hint(self.view_mode) if has_rows else "",
+                "L=next list  S=swap  P=pull request  I=summary",
+                "W=whole file  Alt+N/Alt+P=next/previous change" if on_files and has_rows else "",
+                "F=favorite  R=refresh  Ctrl+F=filter",
+            ),
         )
-        base_dlg.SetSelection(0)
-        if base_dlg.ShowModal() != wx.ID_OK:
-            base_dlg.Destroy()
-            self._announce("Compare cancelled.")
-            return
-        base = base_dlg.GetStringSelection()
-        base_dlg.Destroy()
+        self._update_title()
+        self._update_actions_menu()
 
-        # Step 2 — head branch (compare TO).
-        head_dlg = wx.SingleChoiceDialog(
-            self,
-            f"Step 2 of 2 — choose the HEAD branch to compare against '{base}' "
-            "(compare TO):",
-            "Compare Branches — Head",
-            names,
-        )
-        if head_default in names:
-            head_dlg.SetSelection(names.index(head_default))
-        if head_dlg.ShowModal() != wx.ID_OK:
-            head_dlg.Destroy()
-            self._announce("Compare cancelled.")
-            return
-        head = head_dlg.GetStringSelection()
-        head_dlg.Destroy()
+    def _compare_arrive(self, token: int, filtered, row: int) -> None:
+        """A list of the comparison is in place: its status, then focus on its
+        row, then what it is, the whole summary if this is the first of it."""
+        r = self._files_of
+        said = (compareview.summary(r) if self._compare_summary_due
+                else compareview.list_said(r, self._compare_list))
+        self._compare_summary_due = False
+        self._set_compare_status()
+        if not self.git_items:
+            self.details_text.SetValue(compareview.summary(r))
 
-        if base == head:
-            self._announce("Base and head are the same branch — nothing to compare.")
-            wx.MessageBox(
-                "Pick two different branches to compare.",
-                "Compare Branches",
-                wx.OK | wx.ICON_INFORMATION,
-                self,
-            )
-            return
-        self._run_compare(base, head)
+        def land() -> None:
+            if not self._fetch_is_current(token):
+                return
+            if filtered:
+                self._focus_list(row)
+            # A status, so it waits for the row focus lands on to be read.
+            announce.announce(said, announce.STATUS)
 
-    def _run_compare(self, base: str, head: str) -> None:
-        """Fetch the comparison in the background and show the result."""
-        self._announce(f"Comparing {base}…{head}…")
+        wx.CallLater(100, land)
+
+    def _compare_next_list(self) -> None:
+        """L: from what head changed, to the commits it has, to those it lacks."""
+        r = self._loaded_comparison()
+        if r is None:
+            return
+        which = compareview.next_list(r, self._compare_list)
+        if which == self._compare_list:
+            self._tell(f"{compareview.LIST_NAMES[which]} is the only list here. "
+                       f"{compareview.relation(r)}")
+            return
+        self._show_compare_list(which)
+
+    def _compare_swap(self) -> None:
+        """S: the same two the other way round, from GitHub, since what each
+        one changed differs."""
+        r = self._loaded_comparison()
+        if r is not None:
+            self._open_compare(r.head, r.base, back=self._files_back)
+
+    def _compare_say_summary(self) -> None:
+        r = self._loaded_comparison()
+        if r is not None:
+            self._tell(compareview.summary(r))
+
+    def _compare_open_web(self) -> None:
+        r = self._loaded_comparison()
+        if r is None:
+            return
+        if not r.url:
+            self._tell(f"{compareview.name(r)} has no page to open.")
+            return
+        webbrowser.open(r.url)
+        self._announce(f"Opened {compareview.name(r)} on GitHub")
+
+    def _favorite_comparison(self, r: CompareResult) -> None:
+        """F in a comparison's files: the comparison, for Enter in Favorites
+        to open again."""
+        if not r.url:
+            self._tell("This comparison hasn't loaded, so it has no address to favorite.")
+            return
+        entry = FavoriteEntry(self.repo or "", "compare", r.url, f"{r.base}...{r.head}",
+                              compareview.relation(r))
+        self.favorites, added = toggle_favorite(entry, self.favorites)
+        self._announce("Comparison added to favorites" if added
+                       else "Comparison removed from favorites")
+        self._refresh_repo_list_fav_count()
+
+    def _compare_pull(self) -> None:
+        """P: the open pull request of this comparison, or a new one."""
+        r = self._loaded_comparison()
+        if r is None:
+            return
+        if r.pull is not None:
+            self._open_comparison_pull(r)
+            return
+        if not r.ahead_by:
+            self._tell(f"{r.head} has no commits {r.base} lacks, so there is nothing "
+                       "for a pull request to bring in.")
+            return
+        if self._pull_busy:
+            self._tell("Already creating a pull request.")
+            return
+        key = (self.repo, r.base, r.head)
+        title, body, draft = self._pull_drafts.get(key, (*compareview.pull_prefill(r), False))
+        dlg = NewPullRequestDialog(self, self.repo, r.base, r.head, title, body, draft)
+        try:
+            if dlg.ShowModal() != wx.ID_OK:
+                self._pull_drafts[key] = dlg.pull_values()
+                self._announce("Pull request not created.")
+                return
+            title, body, draft = dlg.pull_values()
+        finally:
+            dlg.Destroy()
+        self._pull_drafts[key] = (title, body, draft)
+        self._pull_busy = True
+        repo = self.repo
+        self._announce("Creating the pull request…")
 
         def worker() -> None:
             try:
-                result = fetch_compare(self.repo, base, head)
-                wx.CallAfter(self._show_compare_result, result)
+                number, url = create_pull_request(repo, r.base, r.head, title, body, draft)
             except GhError as exc:
-                wx.CallAfter(self._on_items_error, str(exc))
+                wx.CallAfter(self._on_pull_failed, str(exc))
+                return
+            wx.CallAfter(self._on_pull_created, key, r, ComparePull(number, title, url))
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _show_compare_result(self, result: CompareResult) -> None:
-        """Display a branch comparison in an accessible, focusable text dialog."""
-        text = self._format_compare(result)
-        summary = (
-            f"identical to '{result.base}'"
-            if result.ahead_by == 0 and result.behind_by == 0
-            else f"{result.ahead_by} ahead, {result.behind_by} behind '{result.base}'"
-        )
-        self._announce(f"'{result.head}' is {summary}.")
-        self._show_text_dialog(
-            f"Compare: {result.base} … {result.head}", text
-        )
+    def _on_pull_failed(self, err: str) -> None:
+        self._pull_busy = False
+        # What was typed is kept: P brings it back.
+        self._tell(f"Couldn't create the pull request. {err}")
 
-    def _format_compare(self, r: CompareResult) -> str:
-        """Render a CompareResult as readable, screen-reader-friendly text."""
-        sep = "─" * 60
-        lines = [
-            f"Comparing branches in {self.repo or 'this repository'}",
-            "",
-            f"Base (compare from): {r.base}",
-            f"Head (compare to):   {r.head}",
-            "",
-        ]
-        if r.ahead_by == 0 and r.behind_by == 0:
-            lines.append(f"'{r.head}' and '{r.base}' are identical — no differences.")
-            return "\n".join(lines)
-        lines += [
-            f"'{r.head}' is {r.ahead_by} commit(s) AHEAD of '{r.base}' "
-            f"and {r.behind_by} commit(s) BEHIND.",
-            "",
-            f"  Ahead {r.ahead_by}: commits on '{r.head}' not on '{r.base}'.",
-            f"  Behind {r.behind_by}: commits on '{r.base}' not on '{r.head}'.",
-            "",
-            sep,
-        ]
-        shown = len(r.commits)
-        if r.ahead_by > shown:
-            lines.append(f"Commits added on '{r.head}' (showing {shown} of {r.ahead_by}):")
-        else:
-            lines.append(f"Commits added on '{r.head}' ({shown}):")
-        lines.append(sep)
-        if r.commits:
-            for c in r.commits:
-                sha = (c.get("sha") or "")[:8]
-                msg = c.get("message") or ""
-                first_line = msg.splitlines()[0] if msg else ""
-                lines.append(f"  {sha}  {first_line}")
-        else:
-            lines.append("  (none)")
-        lines += ["", sep]
-        total_add = sum(f.get("additions", 0) for f in r.files)
-        total_del = sum(f.get("deletions", 0) for f in r.files)
-        lines.append(f"Files changed ({len(r.files)}):")
-        lines.append(sep)
-        if r.files:
-            for f in r.files:
-                status = f.get("status", "")
-                fname = f.get("filename", "")
-                adds = f.get("additions", 0)
-                dels = f.get("deletions", 0)
-                lines.append(f"  {status}: {fname} (+{adds} -{dels})")
-            if len(r.files) >= 100:
-                lines.append("  … (file list capped at 100)")
-            lines += ["", f"Total: +{total_add} -{total_del} across {len(r.files)} file(s)"]
-        else:
-            lines.append("  (none)")
-        return "\n".join(lines)
+    def _on_pull_created(self, key: tuple, r: CompareResult, pull: ComparePull) -> None:
+        self._pull_busy = False
+        self._pull_drafts.pop(key, None)
+        r.pull = pull
+        if self._comparison() is r:
+            self._set_compare_status()
+        self._tell(f"Created pull request #{pull.number} from {r.head} into {r.base}.")
+
+    def _open_comparison_pull(self, r: CompareResult) -> None:
+        """The comparison's pull request in Issues & PRs, with Backspace back
+        here. Not on a fork, whose Issues view shows its upstream's."""
+        repo, number = self.repo, r.pull.number
+        self._tell(f"Opening #{number}…")
+
+        def worker() -> None:
+            wx.CallAfter(self._on_comparison_pull_checked, r, repo, number, parent_repo(repo))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_comparison_pull_checked(self, r: CompareResult, repo: str, number: int,
+                                    parent: str | None) -> None:
+        if self._comparison() is not r or self.repo != repo:
+            return  # moved on while GitHub was asked
+        if parent:
+            self._tell(fork_said(number, repo, parent))
+            return
+        snap = {"files_of": r, "files_back": self._files_back,
+                "compare_list": self._compare_list}
+        item = self._focused_item()
+        view, items, limit = self.view_mode, list(self.git_items), self.current_limit
+        self._open_repo_from_list(repo, item)
+        # The list to come back to is a comparison, with more to it than a row.
+        self._return_to = (view, items, snap, item, limit)
+        self._set_pending_target(VIEW_ISSUES, "item", str(number))
+        self._speak_landing = True
+
+    # ── Branch counts ───────────────────────────────────────────────────
+
+    def _read_branch_counts(self, token: int, repo: str, branches: list, limit: int) -> None:
+        """On the load's thread: how far each branch is from the default. Left
+        blank if GitHub won't say: the list is still right without it."""
+        if not repo or not branches:
+            return
+        try:
+            default = fetch_default_branch(repo)
+            counts = fetch_branch_counts(repo, default, limit) if default else {}
+        except GhError:
+            return
+        wx.CallAfter(self._on_branch_counts, token, branches, default, counts)
+
+    def _on_branch_counts(self, token: int, branches: list, default: str, counts: dict) -> None:
+        for b in branches:
+            # Still set if you have moved on: Backspace may bring these rows back.
+            if b.name != default and b.name in counts:
+                b.ahead, b.behind = counts[b.name]
+                b.compared_with = default
+        if not self._fetch_is_current(token) or self.view_mode != VIEW_BRANCHES:
+            return
+        for row, shown in enumerate(self._shown):
+            self._redraw_row(row, shown)
+        row = self.list_ctrl.GetFirstSelected()
+        if row >= 0 and self._current_focus() is not self.details_text:
+            self._show_details(row)
 
     def _show_text_dialog(self, title: str, text: str, start_line: int = 0) -> None:
         """Show read-only, focusable, scrollable text in a modal dialog.
@@ -10222,7 +10739,8 @@ class GhViewerFrame(wx.Frame):
                 self._tell(f"#{item.number} is an issue. Only pull requests "
                            "and commits have changed files.")
                 return
-        elif not (self.view_mode in (VIEW_COMMITS, VIEW_HISTORY) and isinstance(item, Commit)):
+        elif not (self.view_mode in (VIEW_COMMITS, VIEW_HISTORY, VIEW_COMPARE)
+                  and isinstance(item, Commit)):
             self._tell("Select a pull request or a commit first.")
             return
         back = {
@@ -10240,6 +10758,10 @@ class GhViewerFrame(wx.Frame):
             # From File History: the file, and the Files view behind it.
             "history_of": getattr(self, "_history_of", None),
             "history_back": getattr(self, "_history_back", None),
+            # From a comparison's commits: the comparison, and where it goes back to.
+            "files_of": getattr(self, "_files_of", None),
+            "files_back": getattr(self, "_files_back", None),
+            "compare_list": getattr(self, "_compare_list", compareview.FILES),
         }
         self._switch_view(VIEW_FILES, load=False)
         # Set after the switch, which clears them on the way in to anything else.
@@ -10255,6 +10777,8 @@ class GhViewerFrame(wx.Frame):
             return f"PR #{src.number} {src.title}"
         if isinstance(src, Commit):
             return f"commit {src.short_sha} {_first_line(src.message)}".strip()
+        if isinstance(src, CompareResult):
+            return compareview.name(src)
         return ""
 
     @staticmethod
@@ -10276,6 +10800,9 @@ class GhViewerFrame(wx.Frame):
         filtered = self._populate_filtered_list(files)
         # Back from Files (W): on the file you opened whole.
         row = self._take_pending_row(files, token)
+        if isinstance(self._files_of, CompareResult):
+            self._compare_arrive(token, filtered, row)
+            return
         totals = diffview.totals_message(files)
         if len(files) >= MAX_CHANGED_FILES:
             totals += f" GitHub lists only the first {MAX_CHANGED_FILES:,}."
@@ -10356,12 +10883,19 @@ class GhViewerFrame(wx.Frame):
         if view == VIEW_HISTORY:
             self._history_of = back.get("history_of")
             self._history_back = back.get("history_back")
+        if view == VIEW_COMPARE:
+            # Set after the switch, which keeps them only through a comparison.
+            self._files_of = back["files_of"]
+            self._files_back = back["files_back"]
+            self._compare_list = back["compare_list"]
         items = back["items"]
         if items is None:
-            # A filter changed while you were away: read the list again,
-            # and land on the pull request again if it is still in it.
+            # A filter changed while you were away, or the comparison came from
+            # an address and there is no list yet: read the list, and land on
+            # the pull request again if it is still in it.
             self._load_items()
-            self._set_pending_target(view, "item", str(back["item"].number))
+            if isinstance(back["item"], Item):
+                self._set_pending_target(view, "item", str(back["item"].number))
             return
         token = self._begin_fetch()
         self._pending_target = (token, view, "same", back["item"])
@@ -10370,8 +10904,10 @@ class GhViewerFrame(wx.Frame):
             self._on_items_loaded(token, items, len(items) - prs, prs)
         elif view == VIEW_HISTORY:
             self._on_history_loaded(token, items)
+        elif view == VIEW_COMPARE:
+            self._on_compare_commits_loaded(token, items)
         else:
-            self._on_git_items_loaded(token, items, "commits")
+            self._on_git_items_loaded(token, items, COMPARE_BACK_KINDS.get(view, "commits"))
         self._announce(f"Back to {self._view_label(view, lower=True)}")
 
     def _set_diff_style(self, style: str) -> None:
@@ -10415,7 +10951,8 @@ class GhViewerFrame(wx.Frame):
         if self.view_mode == VIEW_ISSUES and isinstance(item, Item) and item.is_pr:
             what = f"pull request #{item.number}"
             fetch = lambda url=item.url: fetch_pr_diff(url)  # noqa: E731
-        elif self.view_mode in (VIEW_COMMITS, VIEW_HISTORY) and isinstance(item, Commit):
+        elif (self.view_mode in (VIEW_COMMITS, VIEW_HISTORY, VIEW_COMPARE)
+              and isinstance(item, Commit)):
             what = f"commit {item.short_sha}"
             fetch = lambda repo=self.repo, sha=item.sha: fetch_commit_diff(repo, sha)  # noqa: E731
         elif isinstance(item, Item) and not item.is_pr:
@@ -10448,6 +10985,8 @@ class GhViewerFrame(wx.Frame):
             return f"{repo}-pr-{item.number}"
         if isinstance(item, Commit):
             return f"{repo}-{item.short_sha}"
+        if isinstance(item, CompareResult):
+            return f"{repo}-{item.base}-{item.head}".replace("/", "-").replace(":", "-")
         return repo or "changes"
 
     def _diff_failed(self, msg: str) -> None:
@@ -11035,6 +11574,9 @@ class GhViewerFrame(wx.Frame):
         if isinstance(src, Commit):
             self._open_code_at(item, src.sha, f"at commit {src.short_sha}")
             return
+        if isinstance(src, CompareResult):
+            self._open_code_at(item, src.head, f"at {src.head}")
+            return
         if not isinstance(src, Item):
             self._tell("Select a file first.")
             return
@@ -11244,6 +11786,10 @@ class GhViewerFrame(wx.Frame):
             return False
         if target.kind == "item":
             self._open_item_here(item, target.repo, int(target.ref))
+            return True
+        if target.kind == "compare":
+            self._open_repo_from_list(target.repo, item, view)
+            self._open_compare_address(target.ref)
             return True
         branch = target.ref if target.kind == "branch" else ""
         self._open_repo_from_list(target.repo, item, view, branch=branch)

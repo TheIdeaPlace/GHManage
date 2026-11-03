@@ -13,6 +13,7 @@ import webbrowser
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Optional
+from urllib.parse import quote
 
 
 class GhError(RuntimeError):
@@ -1037,25 +1038,29 @@ class Branch:
     commit_author: str
     commit_date: str
     protected: bool = False
-    ahead: int = 0       # ahead of default branch (only set when comparing)
-    behind: int = 0      # behind default branch
+    # Commits ahead of and behind ``compared_with``, the default branch; None
+    # until read (fetch_branch_counts), and on the default branch itself.
+    ahead: Optional[int] = None
+    behind: Optional[int] = None
+    compared_with: str = ""
     url: str = ""
 
     def to_row(self, columns: list[str]) -> dict[str, str]:
         mapping = {
             "branch": self.name,
-            "last commit": self.commit_message[:60],
+            # First line only: the rest of the message is for the details panel.
+            "last commit": (self.commit_message.splitlines() or [""])[0][:60],
             "author": self.commit_author,
             "date": self.commit_date[:10] if self.commit_date else "",
             "protected": "Yes" if self.protected else "No",
-            "ahead": str(self.ahead) if self.ahead else "",
-            "behind": str(self.behind) if self.behind else "",
+            "ahead": "" if self.ahead is None else str(self.ahead),
+            "behind": "" if self.behind is None else str(self.behind),
         }
         return {col: mapping.get(col, "") for col in columns}
 
 
 BRANCH_COLUMNS = ["branch", "last commit", "author", "date", "protected", "ahead", "behind"]
-BRANCH_DEFAULT_COLUMNS = ["branch", "last commit", "author", "date"]
+BRANCH_DEFAULT_COLUMNS = ["branch", "ahead", "behind", "last commit", "author", "date"]
 
 
 def _branch_rows(repo: Optional[str], limit: int) -> list[dict]:
@@ -1073,6 +1078,39 @@ def fetch_branch_names(repo: Optional[str], limit: int = 200) -> list[str]:
     """Just the branches' names, for the pickers: one call a page, rather
     than fetch_branches' look-up of every branch's last commit."""
     return [r.get("name", "") for r in _branch_rows(repo, limit) if r.get("name")]
+
+
+def fetch_branch_counts(repo: str, default: str, limit: int = 100) -> dict[str, tuple[int, int]]:
+    """Each branch's (ahead, behind) against ``default``, by name, up to ``limit``
+    branches: in one query a page, where REST would take a call for each branch.
+
+    GitHub compares from the ref it is asked about, so a branch's own "behind"
+    is what the default branch is ahead of it by, and the other way about. A
+    branch GitHub couldn't compare just isn't in the result.
+    """
+    owner, _, name = repo.partition("/")
+    query = (
+        "query($owner: String!, $name: String!, $head: String!, $after: String) {"
+        " repository(owner: $owner, name: $name) {"
+        ' refs(refPrefix: "refs/heads/", first: 100, after: $after) {'
+        " pageInfo { hasNextPage endCursor }"
+        " nodes { name compare(headRef: $head) { aheadBy behindBy } } } } }"
+    )
+    counts: dict[str, tuple[int, int]] = {}
+    after = None
+    while len(counts) < limit:
+        reply = _graphql(query, {"owner": owner, "name": name, "head": default, "after": after})
+        refs = _graphql_repository(reply).get("refs") or {}
+        for node in refs.get("nodes") or []:
+            compared = (node or {}).get("compare")
+            if compared:
+                counts[node.get("name", "")] = (
+                    compared.get("behindBy") or 0, compared.get("aheadBy") or 0)
+        page = refs.get("pageInfo") or {}
+        after = page.get("endCursor")
+        if not page.get("hasNextPage") or not after:
+            break
+    return counts
 
 
 def fetch_branches(repo: Optional[str], limit: int = 100) -> list[Branch]:
@@ -1968,42 +2006,148 @@ def dispatch_workflow(
     _api(args, repo)
 
 
+# GitHub's limits on one comparison: the newest commits of it, and the first
+# files of it, however many there are.
+COMPARE_MAX_COMMITS = 250
+COMPARE_MAX_FILES = 300
+
+
+@dataclass
+class ComparePull:
+    """The open pull request of a comparison's head into its base."""
+    number: int
+    title: str = ""
+    url: str = ""
+
+
 @dataclass
 class CompareResult:
-    """Result of comparing two refs (branches/tags/SHAs)."""
+    """Two refs (branches, tags, SHAs) compared: head against base.
+
+    ``loaded`` is False while it is only the two names, on its way from GitHub.
+    """
     base: str
     head: str
-    ahead_by: int
-    behind_by: int
-    commits: list[dict] = field(default_factory=list)   # {sha, message}
-    files: list[dict] = field(default_factory=list)      # {filename, status, additions, deletions}
+    ahead_by: int = 0
+    behind_by: int = 0
+    commits: list["Commit"] = field(default_factory=list)         # on head only, newest first
+    behind_commits: list["Commit"] = field(default_factory=list)  # on base only, newest first
+    files: list["ChangedFile"] = field(default_factory=list)
+    url: str = ""
+    pull: Optional[ComparePull] = None
+    loaded: bool = False
+
+
+def _compare_ref(ref: str) -> str:
+    """A ref as it goes in a compare address: a slash or an owner's colon as
+    they are, anything else that means something in an address escaped."""
+    return quote(ref, safe="/:")
+
+
+def _compare_commits(rows, branch: str) -> list["Commit"]:
+    """The commits of a comparison, newest first. GitHub lists them oldest
+    first, and when there are too many it is the newest it keeps."""
+    commits: list[Commit] = []
+    for row in rows if isinstance(rows, list) else []:
+        sha = row.get("sha") or ""
+        commits.append(Commit(
+            sha=sha,
+            short_sha=sha[:8],
+            message=row.get("message") or "",
+            author=row.get("author") or "",
+            date=row.get("date") or "",
+            url=row.get("url") or "",
+            branches=[branch] if branch else [],
+        ))
+    commits.reverse()
+    return commits
+
+
+_COMPARE_COMMIT_FIELDS = ("{sha: .sha, message: .commit.message, author: .commit.author.name,"
+                          " date: .commit.author.date, url: .html_url}")
 
 
 def fetch_compare(repo: Optional[str], base: str, head: str) -> CompareResult:
-    """Compare two refs (branches/tags/SHAs) via the GitHub compare API.
+    """Compare two refs (branches/tags/SHAs) via the GitHub compare API: the
+    counts, the commits each way, the files head changed since the two parted,
+    with their lines, and the open pull request between them if there is one.
 
-    Returns the ahead/behind counts plus the commits that are on ``head`` but
-    not ``base`` and the files that differ. The commit and file lists are
-    capped at 100 entries each to keep the request fast; ``ahead_by`` and
-    ``behind_by`` always reflect the true totals.
+    Up to COMPARE_MAX_COMMITS and COMPARE_MAX_FILES of them, which is what
+    GitHub gives; ``ahead_by`` and ``behind_by`` are always the true totals.
     """
     # NOTE: the path must be repos/{owner}/{repo}/compare/... — the slash
     # before "compare" is required or the API 404s.
+    path = f"repos/{{owner}}/{{repo}}/compare/{_compare_ref(base)}...{_compare_ref(head)}"
     row = _api_json(
-        [f"repos/{{owner}}/{{repo}}/compare/{base}...{head}",
-         "-q", "{ahead: .ahead_by, behind: .behind_by, commits: [.commits[] | {sha: .sha, message: .commit.message}][0:100], files: [(.files // [])[] | {filename, status, additions, deletions}][0:100]}"],
+        [path, "-q",
+         "{ahead: .ahead_by, behind: .behind_by, url: .html_url, "
+         f"commits: [.commits[] | {_COMPARE_COMMIT_FIELDS}], "
+         "files: [(.files // [])[] | {filename, status, additions, deletions, patch, "
+         "previous_filename, blob_url}]}"],
         repo,
     )
     if not isinstance(row, dict):
-        return CompareResult(base=base, head=head, ahead_by=0, behind_by=0)
-    return CompareResult(
+        return CompareResult(base=base, head=head, loaded=True)
+    result = CompareResult(
         base=base,
         head=head,
-        ahead_by=row.get("ahead", 0),
-        behind_by=row.get("behind", 0),
-        commits=row.get("commits", []),
-        files=row.get("files", []),
+        ahead_by=row.get("ahead") or 0,
+        behind_by=row.get("behind") or 0,
+        commits=_compare_commits(row.get("commits"), head),
+        files=[_changed_file(f) for f in row.get("files") or [] if isinstance(f, dict)],
+        url=row.get("url") or "",
+        loaded=True,
     )
+    if result.behind_by:
+        # GitHub lists only what head adds; what base has that head lacks is
+        # the same comparison the other way round.
+        back = _api_json(
+            [f"repos/{{owner}}/{{repo}}/compare/{_compare_ref(head)}...{_compare_ref(base)}",
+             "-q", f"[.commits[] | {_COMPARE_COMMIT_FIELDS}]"],
+            repo,
+        )
+        result.behind_commits = _compare_commits(back, base)
+    if repo:
+        try:
+            result.pull = fetch_open_pull(repo, base, head)
+        except GhError:
+            pass  # the comparison is still worth showing without it
+    return result
+
+
+def fetch_open_pull(repo: str, base: str, head: str) -> Optional[ComparePull]:
+    """The open pull request of ``head`` into ``base``, or None."""
+    owner = repo.split("/", 1)[0]
+    # GitHub filters by OWNER:BRANCH. Head may already name another owner's.
+    named = head if ":" in head else f"{owner}:{head}"
+    rows = _api_json(
+        [f"repos/{repo}/pulls?state=open&per_page=1"
+         f"&base={quote(base, safe='')}&head={quote(named, safe=':')}"],
+        None,
+    )
+    if not isinstance(rows, list) or not rows or not isinstance(rows[0], dict):
+        return None
+    return ComparePull(number=rows[0].get("number") or 0, title=rows[0].get("title") or "",
+                       url=rows[0].get("html_url") or "")
+
+
+def create_pull_request(repo: str, base: str, head: str, title: str, body: str,
+                        draft: bool = False) -> tuple[int, str]:
+    """Open a pull request of ``head`` into ``base``; its number and address.
+    The body goes in on stdin, as a new issue's does."""
+    args = ["pr", "create", "--repo", repo, "--base", base, "--head", head,
+            "--title", title, "--body-file", "-"]
+    if draft:
+        args.append("--draft")
+    out = _run_gh(args, stdin=body)
+    # gh prints the new pull request's address as its last line.
+    url = next((ln.strip() for ln in reversed(out.splitlines()) if ln.strip()), "")
+    tail = url.rstrip("/").rsplit("/", 1)[-1]
+    if not tail.isdigit():
+        raise IssueCreatedUnreadable(
+            f"The pull request was created, but gh didn't say where: {out.strip()!r}"
+        )
+    return int(tail), url
 
 
 # ── Changed files ──────────────────────────────────────────────────────

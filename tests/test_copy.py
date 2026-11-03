@@ -94,6 +94,7 @@ VIEW_SAMPLES = {
     ghviewer.VIEW_FILES: ChangedFile("docs/a.md", url="u"),
     ghviewer.VIEW_CODE: ghviewer.RepoFile("docs/a.md", url="u"),
     ghviewer.VIEW_HISTORY: Commit("a" * 40, "aaaaaaa", "m", "me", "", url="u"),
+    ghviewer.VIEW_COMPARE: Commit("a" * 40, "aaaaaaa", "m", "me", "", url="u"),
     ghviewer.VIEW_LABELS: Label("bug", url="u"),
     ghviewer.VIEW_FAVORITES: FavoriteEntry("o/r", "issue", "u", "#4 — T"),
     ghviewer.VIEW_PAGES: PagesBuild(1, "built", "abc", "me", "", url="u"),

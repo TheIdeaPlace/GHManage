@@ -480,16 +480,18 @@ def test_dispatch_workflow_sends_inputs(fake_gh):
 
 
 def test_fetch_compare(fake_gh):
-    fake_gh.route("compare/main...dev", {"ahead": 2, "behind": 1, "commits": [{"sha": "s"}], "files": []})
+    fake_gh.route("pulls?", [])
+    fake_gh.route("compare/main...dev", {"ahead": 2, "behind": 0, "commits": [{"sha": "s"}], "files": []})
     result = gh_data.fetch_compare("o/r", "main", "dev")
-    assert (result.ahead_by, result.behind_by, result.commits) == (2, 1, [{"sha": "s"}])
+    assert (result.ahead_by, result.behind_by, result.commits[0].sha) == (2, 0, "s")
     # The slash before "compare" is required — the API 404s without it
-    assert fake_gh.calls[-1][1] == "repos/o/r/compare/main...dev"
+    assert fake_gh.calls[0][1] == "repos/o/r/compare/main...dev"
 
 
 def test_fetch_compare_bad_payload(fake_gh):
     fake_gh.route("compare", [])
     result = gh_data.fetch_compare("o/r", "a", "b")
+    assert result.loaded
     assert (result.ahead_by, result.behind_by) == (0, 0)
 
 

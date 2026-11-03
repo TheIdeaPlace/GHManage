@@ -619,7 +619,8 @@ def test_an_event_s_repository_opens_here():
     ("https://github.com/o/r", V.VIEW_ISSUES),
     ("https://github.com/o/r/issues/3", V.VIEW_ISSUES),
     ("https://github.com/o/r/actions", V.VIEW_WORKFLOW),
-    ("https://github.com/o/r/compare/a...b", None),
+    ("https://github.com/o/r/compare/a...b", V.VIEW_BRANCHES),
+    ("https://github.com/o/r/wiki", None),
     ("https://github.com/someone", None),
     ("https://o.github.io/r/", None),
 ])

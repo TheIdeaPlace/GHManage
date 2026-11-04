@@ -3,6 +3,8 @@ words only, so they can be tested without a window."""
 
 from __future__ import annotations
 
+import re
+
 import diffview
 from gh_data import COMPARE_MAX_FILES, CompareResult
 
@@ -18,6 +20,25 @@ def name(r: CompareResult) -> str:
     """``feature compared with main``. An address that names only the head
     has no base until GitHub has been asked what the default branch is."""
     return f"{r.head or 'the default branch'} compared with {r.base or 'the default branch'}"
+
+
+def _short(ref: str) -> str:
+    """A ref to say on every row: a whole SHA cut down as a commit's row has it."""
+    return ref[:8] if re.fullmatch(r"[0-9a-f]{12,40}", ref) else ref
+
+
+def naming(r: CompareResult) -> str:
+    """Which two these are, for a row in Full mode and the top of the details."""
+    return f"Comparing: {_short(r.head)} with {_short(r.base)}"
+
+
+def with_naming(text: str, r: CompareResult) -> str:
+    """A row's ``text`` with the two on the end, as columns.row_text joins parts:
+    nothing to join to an empty row, and only a space after a finished phrase."""
+    words = naming(r)
+    if not text.strip():
+        return words
+    return f"{text} {words}" if text.rstrip()[-1] in ".?!:;" else f"{text}; {words}"
 
 
 def relation(r: CompareResult) -> str:

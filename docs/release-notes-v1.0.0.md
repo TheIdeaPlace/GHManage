@@ -1,10 +1,10 @@
-# GHManage 0.9.10
+# GHManage 1.0.0
 
 GHManage is a desktop app for reading and managing your GitHub repositories from
 a fast, keyboard-driven list.
 
-This release makes comparing branches something you can go into, rather than a
-box of text to read. It also lists how far every branch is from the default
+This is GHManage 1.0. It makes comparing branches something you can go into, rather
+than a box of text to read. It also lists how far every branch is from the default
 branch, and lets you create a pull request.
 
 On a Mac, use `Cmd` where these notes say `Ctrl`, and `Option` where they say `Alt`.
@@ -62,3 +62,39 @@ title, a description and **Create as a draft**.
 - A renamed file lost its old name in a comparison.
 - `Ctrl+Shift+B` did nothing outside Branches, and said nothing.
 - A branch's last commit in the list could run on past its first line.
+
+## Before you start
+
+GHManage drives the [GitHub CLI](https://cli.github.com/), so install it and sign
+in first:
+
+```
+gh auth login
+```
+
+GHManage never asks for or stores credentials of its own — every request goes
+through `gh`.
+
+## Updating
+
+If you already have GHManage installed you do not need to download anything; this
+version will arrive on its own.
+
+## Downloads
+
+| File | Use it if |
+|------|-----------|
+| `GHManage-win-Setup.exe` | Windows, installed and updating itself |
+| `GHManage-win-Portable.zip` | Windows, a folder to run from anywhere, no install, no updates |
+| `GHManage-osx.dmg` | macOS, drag to Applications |
+| `GHManage-osx-Portable.zip` | macOS, unzip it yourself |
+
+The remaining files (`*.nupkg`, `RELEASES`, `releases.win.json`,
+`assets.win.json`, `releases.osx.json`, `assets.osx.json`) are the update feed
+the installed app reads. Leave them alone.
+
+## Requirements
+
+- Windows 10 or 11, 64-bit — or an Apple Silicon Mac on macOS 11 or newer
+- The [GitHub CLI](https://cli.github.com/), installed and authenticated with
+  `gh auth login`

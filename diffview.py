@@ -160,6 +160,15 @@ def _comment_lines(c: ReviewComment, reply: bool, earlier: bool = False) -> List
     return out
 
 
+def with_first_line(view: FileView, line: str) -> FileView:
+    """``view`` with ``line`` above it, its stops and targets moved down one."""
+    return FileView(
+        text=f"{line}\n{view.text}",
+        stops=[(start + 1, count, kind) for start, count, kind in view.stops],
+        targets=[ON_SUMMARY] + list(view.targets),
+    )
+
+
 def file_view(f: ChangedFile, style: str = DEFAULT,
               comments: Optional[List[ReviewComment]] = None) -> FileView:
     """The file's summary and its changed lines in ``style``, each review

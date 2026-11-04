@@ -20,6 +20,11 @@ def name(r: CompareResult) -> str:
     return f"{r.head or 'the default branch'} compared with {r.base or 'the default branch'}"
 
 
+def naming(r: CompareResult) -> str:
+    """Which two these are, for a row in Full mode and the top of the details."""
+    return f"Comparing: {r.head} with {r.base}"
+
+
 def relation(r: CompareResult) -> str:
     """How the two stand, in a sentence."""
     if r.base == r.head:

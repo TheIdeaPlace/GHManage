@@ -5583,7 +5583,15 @@ class GhViewerFrame(wx.Frame):
         val = _row_values(item, self.columns).get(col, "")
         column = _view_columns(self.view_mode).column(col)
         position = self.columns.index(col) if col in self.columns else 0
-        return cell_text(column, val, self.list_mode == "full" and names_cell(position))
+        text = cell_text(column, val, self.list_mode == "full" and names_cell(position))
+        # Full mode, where a row says what each thing is, also says which two
+        # are being compared: at the row's end, in its last cell, since it
+        # isn't a column of the list to choose or lay out.
+        comparison = GhViewerFrame._comparison(self)
+        if comparison is not None and self.list_mode == "full" and col == self.columns[-1]:
+            naming = compareview.naming(comparison)
+            return f"{text}; {naming}" if text else naming
+        return text
 
     def _favorite_prefix(self, item) -> str:
         """Return '★ ' if the item is in favorites, else empty string."""
@@ -7038,6 +7046,9 @@ class GhViewerFrame(wx.Frame):
             lines.append("URL:")
             lines.append(item.url or "(none)")
         elif isinstance(item, Commit):
+            comparison = GhViewerFrame._comparison(self)
+            if comparison is not None:
+                lines.append(compareview.naming(comparison))
             lines.append(f"Commit: {item.sha}")
             lines.append(f"Short SHA: {item.short_sha}")
             if len(item.branches) > 1:
@@ -7456,8 +7467,12 @@ class GhViewerFrame(wx.Frame):
         if self.list_mode == "full":
             item = self._focused_item()
             if item:
-                self._announce(row_text(_row_values(item, self.columns),
-                                        _view_columns(self.view_mode).defs(self.columns)))
+                text = row_text(_row_values(item, self.columns),
+                                _view_columns(self.view_mode).defs(self.columns))
+                comparison = GhViewerFrame._comparison(self)
+                if comparison is not None:
+                    text = f"{text}; {compareview.naming(comparison)}"
+                self._announce(text)
 
     def on_item_activated(self, event) -> None:  # wx.ListEvent / DataViewEvent
         """Double-click or Enter: in, inside GHManage (OPEN_LABELS names it
@@ -10920,6 +10935,9 @@ class GhViewerFrame(wx.Frame):
             return
         f = self.git_items[idx]
         view = diffview.file_view(f, self._diff_style, f.comments)
+        comparison = GhViewerFrame._comparison(self)
+        if comparison is not None:
+            view = diffview.with_first_line(view, compareview.naming(comparison))
         self._file_view = view
         self.details_text.SetValue(view.text)
         # Alt+N and Alt+P move between runs of changes the way they move

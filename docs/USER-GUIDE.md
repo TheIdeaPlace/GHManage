@@ -591,6 +591,8 @@ A comparison has up to three lists, and opens on the first with anything in it, 
 
 **Changed files** is what head has changed since the two parted, and works as it does for a pull request or a commit (see [Changed Files](#changed-files)): `Enter` reads a file's lines, `Alt+N` moves between its changes and `W` opens it whole, as it is on head. In **Commits ahead**, the commits on head that base lacks, and **Commits behind**, those on base that head lacks, `Enter` lists a commit's changed files and `Backspace` comes back to it. **Actions → Open Comparison on GitHub** opens the comparison's page, as `Ctrl+O` does when no row is selected.
 
+To remind you which two these are, the details panel's text for a file or a commit starts with them, for example "Comparing: dev with main". In Full mode each row ends with the same words; Quick mode leaves them out.
+
 GitHub gives at most the newest 250 commits and the first 300 files of a comparison. When it stops short, GHManage says so; the ahead and behind counts are always the true totals.
 
 **New Pull Request**, from `P`, starts with the one commit's message if there is one, and otherwise the branch's name in words. It has a title, a description and **Create as a draft**; `Ctrl+Enter` creates it. A pull request needs a branch at each end, so `P` says so on a tag or a commit. If GitHub refuses, it says why, and `P` brings back what you typed.

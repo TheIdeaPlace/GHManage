@@ -23,6 +23,9 @@ lines added, 18 removed. Pull request #40 is open: Add search."
   lacks. The ones behind were counted before, but never listed. `Enter` opens a
   commit's changed files.
 
+So you can keep track of which two you are in, the details panel starts with them, and
+in Full mode each row ends with them: "Comparing: dev with main".
+
 `S` swaps base and head, `I` says the summary again, `F` in Changed files adds the
 comparison to favorites and `Backspace` goes back to where you started.
 

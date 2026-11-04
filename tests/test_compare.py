@@ -408,6 +408,58 @@ def test_previous_skips_a_draft():
     assert Frame._previous_ref(f, rel[0]) == "v1"
 
 
+def _labelled(mode, columns=("path", "added", "comments")):
+    f = _in_comparison(_result(), compareview.FILES, list_mode=mode, columns=list(columns))
+    return f, ChangedFile("a.py", additions=3)
+
+
+def test_full_mode_ends_each_row_with_the_two_being_compared():
+    f, item = _labelled("full")
+    # The last cell is empty here: a file with no comments to count.
+    assert Frame._item_label(f, item, "comments") == "Comparing: dev with main"
+    assert Frame._item_label(f, item, "path") == "a.py"
+    assert Frame._item_label(f, item, "added") == "Added: 3"
+    f, item = _labelled("full", columns=("path", "added"))
+    assert Frame._item_label(f, item, "added") == "Added: 3; Comparing: dev with main"
+
+
+def test_quick_mode_leaves_them_out():
+    f, item = _labelled("quick", columns=("path", "added"))
+    assert Frame._item_label(f, item, "added") == "3"
+
+
+def test_only_a_comparison_names_them():
+    f, item = _labelled("full", columns=("path", "added"))
+    f._files_of = _commit("a")
+    assert Frame._item_label(f, item, "added") == "Added: 3"
+
+
+def test_a_files_text_starts_with_the_two_and_its_stops_still_land():
+    item = ChangedFile("a.py", patch="@@ -1 +1 @@\n-a\n+b")
+    shown = {}
+    f = _in_comparison(_result(), git_items=[item], _diff_style="words",
+                       details_text=SimpleNamespace(SetValue=lambda t: shown.update(text=t)))
+    Frame._show_file_details(f, 0)
+    plain = ghviewer.diffview.file_view(item, "words")
+    lines = shown["text"].split("\n")
+    assert lines[0] == "Comparing: dev with main"
+    assert lines[1:] == plain.text.split("\n")
+    assert f._comment_positions and all(
+        lines[s[0]] == plain.text.split("\n")[p[0]]
+        for s, p in zip(f._comment_positions, plain.stops))
+    assert f._file_view.target(0) == ghviewer.diffview.ON_SUMMARY
+    assert f._file_view.target(1) == plain.target(0)
+
+
+def test_a_commits_text_starts_with_the_two():
+    commit = _commit("a")
+    shown = {}
+    f = _in_comparison(_result(commits=[commit]), compareview.AHEAD, git_items=[commit],
+                       details_text=SimpleNamespace(SetValue=lambda t: shown.update(text=t)))
+    Frame._show_git_details(f, 0)
+    assert shown["text"].split("\n")[0] == "Comparing: dev with main"
+
+
 def test_keys_of_a_comparison_that_failed_to_load_say_so():
     f = _in_comparison(_result(loaded=False))
     assert Frame._loaded_comparison(f) is None

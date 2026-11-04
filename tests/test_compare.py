@@ -415,12 +415,13 @@ def _labelled(mode, columns=("path", "added", "comments")):
 
 def test_full_mode_ends_each_row_with_the_two_being_compared():
     f, item = _labelled("full")
-    # The last cell is empty here: a file with no comments to count.
-    assert Frame._item_label(f, item, "comments") == "Comparing: dev with main"
+    # On the last cell with something in it, not an empty Comments that a
+    # screen reader would read it under.
+    assert Frame._item_label(f, item, "comments") == ""
     assert Frame._item_label(f, item, "path") == "a.py"
-    assert Frame._item_label(f, item, "added") == "Added: 3"
-    f, item = _labelled("full", columns=("path", "added"))
     assert Frame._item_label(f, item, "added") == "Added: 3; Comparing: dev with main"
+    f, item = _labelled("full", columns=("path",))
+    assert Frame._item_label(f, item, "path") == "a.py; Comparing: dev with main"
 
 
 def test_quick_mode_leaves_them_out():

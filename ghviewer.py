@@ -5580,17 +5580,21 @@ class GhViewerFrame(wx.Frame):
 
     def _item_label(self, item, col: str) -> str:
         """Get the display value for a single column, with mode-aware formatting."""
-        val = _row_values(item, self.columns).get(col, "")
+        values = _row_values(item, self.columns)
+        val = values.get(col, "")
         column = _view_columns(self.view_mode).column(col)
         position = self.columns.index(col) if col in self.columns else 0
         text = cell_text(column, val, self.list_mode == "full" and names_cell(position))
         # Full mode, where a row says what each thing is, also says which two
-        # are being compared: at the row's end, in its last cell, since it
-        # isn't a column of the list to choose or lay out.
+        # are being compared: at the row's end, since it isn't a column of the
+        # list to choose or lay out. In the last cell with something in it, as
+        # a screen reader names the cell it reads: not "Comments: Comparing".
         comparison = GhViewerFrame._comparison(self)
-        if comparison is not None and self.list_mode == "full" and col == self.columns[-1]:
-            naming = compareview.naming(comparison)
-            return f"{text}; {naming}" if text else naming
+        if comparison is not None and self.list_mode == "full":
+            last = next((c for c in reversed(self.columns) if (values.get(c) or "").strip()),
+                        self.columns[0])
+            if col == last:
+                return f"{text}; {compareview.naming(comparison)}"
         return text
 
     def _favorite_prefix(self, item) -> str:

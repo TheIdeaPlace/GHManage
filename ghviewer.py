@@ -5589,12 +5589,12 @@ class GhViewerFrame(wx.Frame):
         # are being compared: at the row's end, since it isn't a column of the
         # list to choose or lay out. In the last cell with something in it, as
         # a screen reader names the cell it reads: not "Comments: Comparing".
-        comparison = GhViewerFrame._comparison(self)
+        comparison = GhViewerFrame._comparison_in_hand(self)
         if comparison is not None and self.list_mode == "full":
             last = next((c for c in reversed(self.columns) if (values.get(c) or "").strip()),
                         self.columns[0])
             if col == last:
-                return f"{text}; {compareview.naming(comparison)}"
+                return compareview.with_naming(text, comparison)
         return text
 
     def _favorite_prefix(self, item) -> str:
@@ -7473,9 +7473,9 @@ class GhViewerFrame(wx.Frame):
             if item:
                 text = row_text(_row_values(item, self.columns),
                                 _view_columns(self.view_mode).defs(self.columns))
-                comparison = GhViewerFrame._comparison(self)
+                comparison = GhViewerFrame._comparison_in_hand(self)
                 if comparison is not None:
-                    text = f"{text}; {compareview.naming(comparison)}"
+                    text = compareview.with_naming(text, comparison)
                 self._announce(text)
 
     def on_item_activated(self, event) -> None:  # wx.ListEvent / DataViewEvent
@@ -9587,6 +9587,16 @@ class GhViewerFrame(wx.Frame):
             return src
         return None
 
+    def _comparison_in_hand(self) -> CompareResult | None:
+        """The comparison to name: the one showing, or the one a commit's files
+        were opened from, which Backspace goes back to."""
+        comparison = GhViewerFrame._comparison(self)
+        if comparison is not None or getattr(self, "view_mode", None) != VIEW_FILES:
+            return comparison
+        back = getattr(self, "_files_back", None) or {}
+        src = back.get("files_of") if back.get("view") == VIEW_COMPARE else None
+        return src if isinstance(src, CompareResult) else None
+
     def _loaded_comparison(self) -> CompareResult | None:
         """The comparison showing, once GitHub has answered; else it says so."""
         r = self._comparison()
@@ -10939,7 +10949,7 @@ class GhViewerFrame(wx.Frame):
             return
         f = self.git_items[idx]
         view = diffview.file_view(f, self._diff_style, f.comments)
-        comparison = GhViewerFrame._comparison(self)
+        comparison = GhViewerFrame._comparison_in_hand(self)
         if comparison is not None:
             view = diffview.with_first_line(view, compareview.naming(comparison))
         self._file_view = view

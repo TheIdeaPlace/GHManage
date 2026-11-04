@@ -591,7 +591,7 @@ A comparison has up to three lists, and opens on the first with anything in it, 
 
 **Changed files** is what head has changed since the two parted, and works as it does for a pull request or a commit (see [Changed Files](#changed-files)): `Enter` reads a file's lines, `Alt+N` moves between its changes and `W` opens it whole, as it is on head. In **Commits ahead**, the commits on head that base lacks, and **Commits behind**, those on base that head lacks, `Enter` lists a commit's changed files and `Backspace` comes back to it. **Actions → Open Comparison on GitHub** opens the comparison's page, as `Ctrl+O` does when no row is selected.
 
-To remind you which two these are, the details panel's text for a file or a commit starts with them, for example "Comparing: dev with main". In Full mode each row ends with the same words; Quick mode leaves them out.
+To remind you which two these are, the details panel's text for a file or a commit starts with them, for example "Comparing: dev with main", including the files of a commit you opened from the comparison. In Full mode each row ends with the same words; Quick mode leaves them out. The preview in **View → Columns…** doesn't show them.
 
 GitHub gives at most the newest 250 commits and the first 300 files of a comparison. When it stops short, GHManage says so; the ahead and behind counts are always the true totals.
 
@@ -619,7 +619,7 @@ Each file has a row with its path, what happened to it (Added, Modified, Deleted
 
 ### Reading a file's changes
 
-The details panel shows the selected file. Its first line sums the file up, for example "src/app.py: modified, 2 lines added, 1 removed." For a renamed file, it also says the name the file had before. Then come the changes: each run of changed lines begins with where it is in the file, such as "Lines 10 to 15:", followed by its lines. A few unchanged lines either side of the changes are included so you know where you are.
+The details panel shows the selected file. (In a comparison, a line naming the two comes first.) Its first line sums the file up, for example "src/app.py: modified, 2 lines added, 1 removed." For a renamed file, it also says the name the file had before. Then come the changes: each run of changed lines begins with where it is in the file, such as "Lines 10 to 15:", followed by its lines. A few unchanged lines either side of the changes are included so you know where you are.
 
 `Enter` on a file moves into its lines, at the top. Read them with your screen reader's reading keys, as in any text. `Alt+N` and `Alt+P` move to the next and previous run of changes, selecting its "Lines…" line; the status bar says "Change 2 of 5". On a Mac, use `Option+N` and `Option+P`. In this view, the **File** menu's Next Comment and Previous Comment read Next Change and Previous Change.
 

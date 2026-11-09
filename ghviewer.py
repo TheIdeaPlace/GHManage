@@ -2863,12 +2863,12 @@ class ChecklistDialog(wx.Dialog):
         self.list.SetString(row, self.model.row(row))
         self.list.SetSelection(row)
         self.summary.SetLabel(self.model.summary())
-        # The row's text changed under the screen reader, which may still
-        # hold the old one. Windows only: on a Mac it raises NotImplementedError.
-        if wx.Platform == "__WXMSW__":
-            wx.Accessible.NotifyEvent(wx.ACC_EVENT_OBJECT_NAMECHANGE, self.list,
-                                      wx.OBJID_CLIENT, row + 1)
-        self._say(said)
+        # NVDA reads the changed row by itself, from SetString (an NVDA run
+        # heard it three times when a name-change event and this were added).
+        # JAWS ignores a change the app makes, and VoiceOver isn't told of
+        # it, so for those it is said, as the details panel does (PR #107).
+        if wx.Platform != "__WXMSW__" or speech.jaws_running():
+            self._say(said)
 
 
 class NewIssueDialog(wx.Dialog):
@@ -10765,7 +10765,19 @@ class GhViewerFrame(wx.Frame):
 
     def _item_edit_done(self, msg: str) -> None:
         self._item_edit_busy = False
-        self._tell(msg)
+        self._tell_after_box(msg)
+
+    # How long after a box closes its result is said. In an NVDA run a result
+    # said as the box closed ("Milestone unchanged.") was lost: the screen
+    # reader reads the row again as focus comes back, and that cancelled it.
+    # This was the silence on TheIdeaPlace/AIChat#575.
+    AFTER_BOX_MS = 300
+
+    def _tell_after_box(self, msg: str) -> None:
+        """The status bar now; said a moment later, behind the row the
+        screen reader reads as focus returns rather than over it."""
+        self._announce(msg)
+        wx.CallLater(self.AFTER_BOX_MS, announce.announce, msg, announce.RESULT, False, True)
 
     def _item_edit_failed(self, msg: str, exc: Exception) -> None:
         """In a box as well as the status bar: it answers a key pressed or a

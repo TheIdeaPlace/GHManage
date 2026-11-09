@@ -921,3 +921,48 @@ def test_who_can_change_items(fake_gh, perms, ok):
 def test_access_unknown_when_github_wont_say(fake_gh):
     fake_gh.route("repos/o/r", GhError("HTTP 500"))
     assert gh_data.can_change_items("o/r") is True
+
+
+# ── Speech, from the NVDA run (nvda-edit-results-2026-11-08) ────────────
+
+
+def test_a_result_is_said_after_the_box_queued_behind_the_row(monkeypatch):
+    # Said as the box closed, "Milestone unchanged." was cancelled by NVDA
+    # reading the row again as focus came back.
+    later = []
+    monkeypatch.setattr(ghviewer.wx, "CallLater", lambda ms, fn, *a: later.append((ms, fn, a)))
+    f = SimpleNamespace(announced=[], _item_edit_busy=True, AFTER_BOX_MS=Frame.AFTER_BOX_MS)
+    f._announce = f.announced.append
+    f._tell_after_box = lambda m: Frame._tell_after_box(f, m)
+    Frame._item_edit_done(f, "Milestone unchanged.")
+    assert f.announced == ["Milestone unchanged."] and f._item_edit_busy is False
+    ((ms, fn, args),) = later
+    assert ms >= 250 and fn is ghviewer.announce.announce
+    assert args == ("Milestone unchanged.", ghviewer.announce.RESULT, False, True)  # queued
+
+
+class FakeListBox:
+    def __init__(self):
+        self.strings = {}
+    def GetSelection(self): return 0
+    def SetString(self, i, s): self.strings[i] = s
+    def SetSelection(self, i): pass
+
+
+@pytest.mark.parametrize("platform, jaws, spoken", [
+    ("__WXMSW__", False, False),   # NVDA reads the changed row itself
+    ("__WXMSW__", True, True),     # JAWS doesn't
+    ("__WXMAC__", False, True),    # VoiceOver isn't told
+])
+def test_space_speaks_once_whatever_the_screen_reader(monkeypatch, platform, jaws, spoken):
+    monkeypatch.setattr(ghviewer.wx, "Platform", platform)
+    monkeypatch.setattr(ghviewer.speech, "jaws_running", lambda: jaws)
+    monkeypatch.setattr(ghviewer.wx.Accessible, "NotifyEvent",
+                        lambda *a: pytest.fail("no name-change event: NVDA spoke it twice"),
+                        raising=False)
+    said = []
+    dlg = SimpleNamespace(model=Checklist(["bug"], []), list=FakeListBox(),
+                          summary=SimpleNamespace(SetLabel=lambda s: None), _say=said.append)
+    ghviewer.ChecklistDialog.toggle(dlg)
+    assert dlg.list.strings[0] == "bug, checked"
+    assert said == (["bug checked"] if spoken else [])

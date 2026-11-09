@@ -41,6 +41,7 @@ import insightview
 import gistview
 import peopleview
 import milestoneview
+import permissions
 import settings
 import search_help
 import speech
@@ -127,6 +128,10 @@ from gh_data import (
     request_reviewers,
     review_pr,
     set_item_milestone,
+    create_milestone,
+    create_label_in,
+    create_project,
+    can_change_items,
     change_item_labels,
     change_item_assignees,
     fetch_item_now,
@@ -823,6 +828,7 @@ ID_CLOSE_ITEM = wx.NewIdRef()
 ID_REOPEN = wx.NewIdRef()
 ID_COMMENT = wx.NewIdRef()
 ID_SET_MILESTONE = wx.NewIdRef()
+ID_PERMISSIONS = wx.NewIdRef()
 ID_SET_LABELS = wx.NewIdRef()
 ID_SET_ASSIGNEES = wx.NewIdRef()
 ID_SET_PROJECTS = wx.NewIdRef()
@@ -896,6 +902,7 @@ ID_HIDDEN_REPOS = wx.NewIdRef()
 ID_ARCHIVE_REPO = wx.NewIdRef()
 ID_DELETE_REPO = wx.NewIdRef()
 ID_CHECK_UPDATES = wx.NewIdRef()
+ID_AUTO_UPDATE = wx.NewIdRef()
 ID_REPORT_BUG = wx.NewIdRef()
 ID_OPEN_LOG_FOLDER = wx.NewIdRef()
 ID_NEW_ISSUE = wx.NewIdRef()
@@ -2764,15 +2771,29 @@ class ChecklistDialog(wx.Dialog):
     checked."""
 
     def __init__(self, parent: wx.Window, title: str, prompt: str, model: Checklist,
-                 say: Callable[[str], bool] | None = None) -> None:
+                 say: Callable[[str], bool] | None = None, new_label: str = "",
+                 new_prompt: str = "", note: str = "", same_as=None) -> None:
+        """``new_label`` ("&New Label…") adds a button that asks for a name
+        (``new_prompt``) and adds it checked, to be created on save; without
+        it, nothing can be added. With nothing listed, focus starts on it,
+        and ``note`` (why there is nothing) is shown under the prompt and
+        said as the box opens. ``same_as(typed)`` names the rows a typed
+        name already means, when they read differently from it."""
         super().__init__(parent, title=title, style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
         self.model = model
         self._say = say or (lambda text: False)
+        self._new_prompt = new_prompt
+        self._same_as = same_as or (lambda typed: [])
         outer = wx.BoxSizer(wx.VERTICAL)
         label = "&" + prompt.replace("&", "&&")
         text = wx.StaticText(self, label=label)
         text.Wrap(420)
         outer.Add(text, 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
+        self.note = None
+        if note:
+            self.note = wx.StaticText(self, label=note.replace("&", "&&"))
+            self.note.Wrap(420)
+            outer.Add(self.note, 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
         self.list = wx.ListBox(self, choices=model.rows(), style=wx.LB_SINGLE, size=(420, 280))
         _name(self.list, prompt)
         if len(model):
@@ -2780,6 +2801,11 @@ class ChecklistDialog(wx.Dialog):
         outer.Add(self.list, 1, wx.EXPAND | wx.ALL, 10)
         self.summary = wx.StaticText(self, label=model.summary())
         outer.Add(self.summary, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
+        self.new_button = None
+        if new_label:
+            self.new_button = wx.Button(self, label=new_label)
+            self.new_button.Bind(wx.EVT_BUTTON, lambda e: self.add_new())
+            outer.Add(self.new_button, 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
         buttons = wx.StdDialogButtonSizer()
         ok = wx.Button(self, wx.ID_OK, "&Save")
         ok.SetDefault()
@@ -2792,7 +2818,38 @@ class ChecklistDialog(wx.Dialog):
         self.list.Bind(wx.EVT_CHAR_HOOK, self._on_list_key)
         self.list.Bind(wx.EVT_LISTBOX_DCLICK, lambda e: self.toggle())
         self.CentreOnParent()
-        wx.CallAfter(self.list.SetFocus)
+        # An empty list reads as nothing at all; start where something can be done.
+        first = self.list if len(model) or self.new_button is None else self.new_button
+        wx.CallAfter(first.SetFocus)
+        if note:
+            # Focus lands on the button, and a screen reader may read only
+            # that; the reason the list is empty is said behind it.
+            wx.CallLater(400, announce.announce, note, announce.STATUS, False, True)
+
+    def add_new(self) -> None:
+        dlg = wx.TextEntryDialog(self, self._new_prompt, self.GetTitle())
+        try:
+            if dlg.ShowModal() != wx.ID_OK or not dlg.GetValue().strip():
+                return
+            name = dlg.GetValue()
+        finally:
+            dlg.Destroy()
+        same = self._same_as(name)
+        if len(same) > 1:
+            self._say(f"There are {len(same)} called {name.strip()}; check the one you want.")
+            self.list.SetFocus()
+            return
+        row, said = self.model.add(same[0] if same else name)
+        self.list.Set(self.model.rows())
+        self.list.SetSelection(row)
+        self.summary.SetLabel(self.model.summary())
+        if self.note is not None:
+            self.note.SetLabel("")  # no longer true
+        # Focus on the row reads it ("triage, checked, new"); said as well
+        # only when focus was there already and won't move.
+        if wx.Window.FindFocus() is self.list:
+            self._say(said)
+        self.list.SetFocus()
 
     def _on_list_key(self, event: wx.KeyEvent) -> None:
         if event.GetKeyCode() == wx.WXK_SPACE and not event.HasAnyModifiers():
@@ -2809,11 +2866,181 @@ class ChecklistDialog(wx.Dialog):
         self.list.SetString(row, self.model.row(row))
         self.list.SetSelection(row)
         self.summary.SetLabel(self.model.summary())
-        # The row's text changed under the screen reader, which may still
-        # hold the old one. Windows only: on a Mac it raises NotImplementedError.
-        if wx.Platform == "__WXMSW__":
-            wx.Accessible.NotifyEvent(wx.ACC_EVENT_OBJECT_NAMECHANGE, self.list,
-                                      wx.OBJID_CLIENT, row + 1)
+        # NVDA reads the changed row by itself, from SetString (an NVDA run
+        # heard it three times when a name-change event and this were added).
+        # JAWS ignores a change the app makes, and VoiceOver isn't told of
+        # it, so for those it is said, as the details panel does (PR #107).
+        if wx.Platform != "__WXMSW__" or speech.jaws_running():
+            self._say(said)
+
+
+# The Permission Needed box's buttons (#129). On a Mac, Escape only works on
+# a button called Cancel (NSAlert), so the third one keeps that name there.
+PERMISSION_COPY, PERMISSION_ALL = "&Copy Command", "&All Permissions…"
+PERMISSION_CLOSE = "Cancel" if sys.platform == "darwin" else "Close"
+
+
+def copy_text(text: str) -> bool:
+    """Put ``text`` on the clipboard, left there after GHManage quits."""
+    clip = wx.TheClipboard
+    if not clip.Open():
+        return False
+    try:
+        if not clip.SetData(wx.TextDataObject(text)):
+            return False
+        clip.Flush()
+        return True
+    finally:
+        clip.Close()
+
+
+def terminal_command(args: list[str]) -> str:
+    """The Windows command line that runs ``args`` in a console that stays
+    open: ``cmd /s /k "<command>"``, the whole command quoted once, so a
+    path with spaces or an & in it (a "R&D" profile folder) survives cmd's
+    own parsing."""
+    special = set(' &|<>^()%!,;="')
+    parts = [f'"{a}"' if i == 0 or special & set(a) else a for i, a in enumerate(args)]
+    return 'cmd.exe /s /k "' + " ".join(parts) + '"'
+
+
+def run_in_terminal(args: list[str]) -> bool:
+    """Open a terminal window running ``args`` (gh auth refresh, which
+    shows a one-time code and waits). True if one opened."""
+    try:
+        if sys.platform == "win32":
+            subprocess.Popen(terminal_command(args),
+                             creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
+            return True
+        if sys.platform == "darwin":
+            # A .command file opened with Terminal, not Apple events: a signed
+            # app without the Apple-events entitlement can't script Terminal.
+            import shlex
+            fd, path = tempfile.mkstemp(prefix="ghmanage-", suffix=".command")
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write("#!/bin/sh\n" + " ".join(shlex.quote(a) for a in args) + "\n")
+            os.chmod(path, 0o700)
+            return subprocess.run(["open", "-a", "Terminal", path], timeout=20).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return False
+
+
+class PermissionsDialog(wx.Dialog):
+    """Help ▸ GitHub Permissions (#129): every permission GHManage can use
+    beyond gh's sign-in, what each is for and whether gh has it, and one
+    command for the missing ones: copied, or run in a terminal. Deleting
+    repositories is left out unless checked; it isn't one to grant by the
+    way. The text is a read-only box, read a line at a time.
+
+    ``recheck`` runs off the UI thread (it asks GitHub); the box stays
+    usable meanwhile and says the result when it is in."""
+
+    def __init__(self, parent: wx.Window, state, say: Callable[[str], bool] | None = None,
+                 recheck: Callable[[], object] | None = None) -> None:
+        super().__init__(parent, title="GitHub Permissions",
+                         style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
+        self._state = state
+        self._say = say or (lambda text: False)
+        self._recheck = recheck
+        self._checking = False
+        outer = wx.BoxSizer(wx.VERTICAL)
+        label = "&Permissions GHManage can use"
+        outer.Add(wx.StaticText(self, label=label), 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
+        self.text = wx.TextCtrl(self, style=wx.TE_MULTILINE | wx.TE_READONLY, size=(560, 220))
+        _name(self.text, label.replace("&", ""))
+        outer.Add(self.text, 1, wx.EXPAND | wx.ALL, 10)
+        self.optional = wx.CheckBox(self, label="Include permission to &delete repositories")
+        outer.Add(self.optional, 0, wx.LEFT | wx.RIGHT, 10)
+        label = "Co&mmand to add the missing permissions"
+        outer.Add(wx.StaticText(self, label=label), 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
+        self.command = wx.TextCtrl(self, style=wx.TE_READONLY)
+        _name(self.command, label.replace("&", ""))
+        outer.Add(self.command, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
+        row = wx.BoxSizer(wx.HORIZONTAL)
+        self.buttons = {}
+        # Always enabled, so the Tab order never changes; each says why when
+        # there is nothing it can do.
+        for key, text, action in (("copy", "&Copy Command", self.copy),
+                                  ("run", "&Run in a Terminal", self.run),
+                                  ("check", "Check &Again", self.check_again)):
+            button = wx.Button(self, label=text)
+            button.Bind(wx.EVT_BUTTON, lambda e, act=action: act())
+            row.Add(button, 0, wx.RIGHT, 6)
+            self.buttons[key] = button
+        row.Add(wx.Button(self, wx.ID_CANCEL, "Close"), 0)
+        outer.Add(row, 0, wx.ALL, 10)
+        self.SetSizerAndFit(outer)
+        self.SetEscapeId(wx.ID_CANCEL)
+        self.optional.Bind(wx.EVT_CHECKBOX, lambda e: self._fill())
+        self._fill()
+        self.CentreOnParent()
+        wx.CallAfter(self.text.SetFocus)
+
+    def _command(self) -> str:
+        return permissions.refresh_command(self._state, self.optional.GetValue())
+
+    def _cant(self) -> str:
+        """Why there is no command, said by Copy and Run."""
+        if self._state.error:
+            return "gh can't be asked; the box says why."
+        if self._state.token_var:
+            return (f"gh uses the token in {self._state.token_var}; its permissions are "
+                    "changed on GitHub, not with a command.")
+        return "gh has every permission GHManage uses; there is nothing to add."
+
+    def _fill(self) -> None:
+        self.text.ChangeValue(permissions.summary(self._state, self.optional.GetValue()))
+        self.text.SetInsertionPoint(0)
+        self.command.ChangeValue(self._command() or "None needed.")
+
+    def copy(self) -> None:
+        cmd = self._command()
+        if not cmd:
+            self._say(self._cant())
+            return
+        self._say("Command copied." if copy_text(cmd) else "Couldn't copy to the clipboard.")
+
+    def run(self) -> None:
+        if not self._command():
+            self._say(self._cant())
+            return
+        scopes = [p.scope for p in permissions.missing(self._state.scopes,
+                                                       self.optional.GetValue())]
+        args = [gh_data._find_gh(), "auth", "refresh", "-h", "github.com", "-s", ",".join(scopes)]
+        if run_in_terminal(args):
+            self._say("A terminal is open running the command. There, press Enter, sign in "
+                      "on GitHub with the code it shows, then come back and choose Check Again.")
+        else:
+            self._say("Couldn't open a terminal. Copy the command and run it yourself.")
+
+    def check_again(self) -> None:
+        if self._recheck is None or self._checking:
+            return
+        self._checking = True
+        self._say("Checking…")
+
+        def worker() -> None:
+            state = self._recheck()
+            wx.CallAfter(self._checked, state)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _checked(self, state) -> None:
+        self._checking = False
+        if not self:  # closed meanwhile
+            return
+        self._state = state
+        self._fill()
+        need = permissions.missing(state.scopes, self.optional.GetValue())
+        if state.error:
+            said = f"Couldn't ask GitHub: {state.error}"
+        elif state.scopes is None or not need:
+            said = "gh has every permission GHManage uses." if not need else \
+                "GitHub doesn't say which permissions gh has."
+        else:
+            said = f"Still missing: {', '.join(p.scope for p in need)}."
+        # Focus stays on Check Again: moving it would read the box over this.
         self._say(said)
 
 
@@ -3500,7 +3727,7 @@ class GhViewerFrame(wx.Frame):
         # Check for updates in the background so startup is never blocked.
         # Must come after Show(): a modal raised against an unshown frame
         # returns immediately instead of waiting for the user.
-        if self.updater:
+        if self._should_check_at_startup():
             wx.CallLater(2000, self._start_update_check)
 
     # ── UI construction ─────────────────────────────────────────────────
@@ -3921,10 +4148,15 @@ class GhViewerFrame(wx.Frame):
         help_menu.Append(ID_SHORTCUTS, "Keyboard Shortcuts\tCtrl+F1")
         help_menu.Append(ID_COMMAND_PALETTE, "Command Palette…\tCtrl+Shift+P")
         help_menu.AppendSeparator()
+        help_menu.Append(ID_PERMISSIONS, "GitHub Permissions…")
         help_menu.Append(ID_REPORT_BUG, "Report a Bug…")
         help_menu.Append(ID_OPEN_LOG_FOLDER, "Open Log Folder")
         help_menu.AppendSeparator()
         help_menu.Append(ID_CHECK_UPDATES, "Check for Updates…")
+        # On by default. Off: no check at startup, and nothing downloaded
+        # earlier is installed when GHManage starts.
+        help_menu.AppendCheckItem(ID_AUTO_UPDATE, "Automatic Updates")
+        help_menu.Check(ID_AUTO_UPDATE, settings.load_auto_update())
         help_menu.Append(wx.ID_ABOUT, "About GHManage")
         menu_bar.Append(help_menu, "Help")
 
@@ -3934,6 +4166,7 @@ class GhViewerFrame(wx.Frame):
         self.Bind(wx.EVT_MENU, self.on_shortcuts, id=ID_SHORTCUTS)
         self.Bind(wx.EVT_MENU, self.on_command_palette, id=ID_COMMAND_PALETTE)
         self.Bind(wx.EVT_MENU, self.on_check_updates, id=ID_CHECK_UPDATES)
+        self.Bind(wx.EVT_MENU, lambda e: self._toggle_auto_update(), id=ID_AUTO_UPDATE)
         self.Bind(wx.EVT_MENU, lambda e: self.on_report_bug(), id=ID_REPORT_BUG)
         self.Bind(wx.EVT_MENU, lambda e: self.on_open_log_folder(), id=ID_OPEN_LOG_FOLDER)
         self.Bind(wx.EVT_MENU, self.on_about, id=wx.ID_ABOUT)
@@ -4074,31 +4307,57 @@ class GhViewerFrame(wx.Frame):
             msg = f"GHManage {APP_VERSION} is up to date."
         wx.MessageBox(msg, "Check for Updates", wx.OK | wx.ICON_INFORMATION, self)
 
+    def _toggle_auto_update(self) -> None:
+        """Help ▸ Automatic Updates."""
+        on = not settings.load_auto_update()
+        settings.save_auto_update(on)
+        self.GetMenuBar().Check(ID_AUTO_UPDATE, on)
+        # Said whatever Speak Results is, or turning this off would be silent.
+        self._tell("Automatic updates on." if on else
+                   "Automatic updates off. Updates are installed only when you choose.",
+                   force=True)
+
+    def _should_check_at_startup(self) -> bool:
+        """Look for an update once GHManage has started: only an installed
+        copy that can update itself, with Help ▸ Automatic Updates on."""
+        return bool(self.updater) and auto_update_setting()
+
     def _show_update_dialog(self, version: str, url: str) -> None:
+        auto = settings.load_auto_update()
         msg = (
             f"GHManage {version} is available. You are running {APP_VERSION}.\n\n"
             "It is downloading in the background. Choose Restart Now to "
             "install it immediately, or Later to install it the next time "
             "you start GHManage."
+        ) if auto else (
+            f"GHManage {version} is available. You are running {APP_VERSION}.\n\n"
+            "It is downloading in the background. Automatic updates are off, so it "
+            "won't be installed by itself when GHManage next starts. Choose Restart "
+            "Now to install it now."
         )
         dlg = wx.MessageDialog(
             self, msg, "Update Available", wx.YES_NO | wx.ICON_INFORMATION
         )
-        dlg.SetYesNoLabels("&Restart Now", "&Later")
+        dlg.SetYesNoLabels("&Restart Now", "&Later" if auto else "&Not Now")
         try:
             restart_now = dlg.ShowModal() == wx.ID_YES
         finally:
             dlg.Destroy()
 
         if not restart_now:
-            return  # already downloaded; bootstrap() applies it on next launch
+            # Downloaded; bootstrap() installs it on the next launch, unless
+            # Automatic Updates is off.
+            return
 
         bugreport.end_run()  # the update ends this run; it didn't crash
         if not self.updater.apply_update_and_restart(sys.argv[1:]):
             bugreport.begin_run()
+            retry = ("It will be retried the next time GHManage starts."
+                     if auto_update_setting() else
+                     "Automatic updates are off, so it won't be retried by itself; "
+                     "Check for Updates can try again.")
             wx.MessageBox(
-                "The update could not be applied. It will be retried the next "
-                f"time GHManage starts.\n\nRelease notes:\n{url}",
+                f"The update could not be applied. {retry}\n\nRelease notes:\n{url}",
                 "Update Failed",
                 wx.OK | wx.ICON_WARNING,
                 self,
@@ -4335,7 +4594,7 @@ class GhViewerFrame(wx.Frame):
         self._act_reopen.Enable(issues)
         for entry in (self._act_milestone, self._act_labels, self._act_assignees,
                       self._act_projects, self._act_edit_item):
-            entry.Enable(issues)
+            entry.Enable(self.view_mode in ITEM_VIEWS)
         self._act_comment.Enable(issues or self.view_mode == VIEW_DISCUSSIONS)
 
         in_repo = bool(self.repo) and self.view_mode not in REPOLESS_VIEWS
@@ -4562,6 +4821,7 @@ class GhViewerFrame(wx.Frame):
         self.Bind(wx.EVT_MENU, self.on_reopen, id=ID_REOPEN)
         self.Bind(wx.EVT_MENU, self.on_comment, id=ID_COMMENT)
         self.Bind(wx.EVT_MENU, lambda e: self._set_milestone_flow(), id=ID_SET_MILESTONE)
+        self.Bind(wx.EVT_MENU, lambda e: self._show_permissions(), id=ID_PERMISSIONS)
         self.Bind(wx.EVT_MENU, lambda e: self._set_labels_flow(), id=ID_SET_LABELS)
         self.Bind(wx.EVT_MENU, lambda e: self._set_assignees_flow(), id=ID_SET_ASSIGNEES)
         self.Bind(wx.EVT_MENU, lambda e: self._set_projects_flow(), id=ID_SET_PROJECTS)
@@ -5375,10 +5635,8 @@ class GhViewerFrame(wx.Frame):
         self._follow_pending.discard(person.login)
         verb = "follow" if follow else "unfollow"
         if isinstance(exc, MissingScope):
-            self._announce(f"Following people needs gh's \"{exc.scope}\" permission; "
-                           "see the message for how to add it.")
-            wx.MessageBox(str(exc), "Follow" if follow else "Unfollow",
-                          wx.OK | wx.ICON_INFORMATION, self)
+            self._permission_needed("Follow" if follow else "Unfollow",
+                                    f"Couldn't {verb} {person.login}", exc)
             return
         if exc is not None:
             self._tell(f"Couldn't {verb} {person.login}: {exc}")
@@ -6261,7 +6519,8 @@ class GhViewerFrame(wx.Frame):
         self._set_view_status(
             message,
             keys_hint(enter_hint(self.view_mode), ctrl_o_hint(self.view_mode),
-                      "G=go to repository  F=favorite  Ctrl+S=save search  "
+                      ("I=milestone  L=labels  A=assignees  P=projects  E=edit  " if self.view_mode == VIEW_SEARCH_ISSUES else "")
+                      + "G=go to repository  F=favorite  Ctrl+S=save search  "
                       "Ctrl+Shift+F=new search  Ctrl+F=filter"),
         )
         self._update_title()
@@ -6300,7 +6559,8 @@ class GhViewerFrame(wx.Frame):
         self._set_view_status(
             message,
             keys_hint(enter_hint(VIEW_MY_WORK), ctrl_o_hint(VIEW_MY_WORK),
-                      "G=go to repository  F=favorite  R=refresh  Ctrl+F=filter"),
+                      "I=milestone  L=labels  A=assignees  P=projects  E=edit  G=go to repository  F=favorite  R=refresh  "
+                      "Ctrl+F=filter"),
         )
         self._update_title()
         row = focus if isinstance(focus, int) else max(self._row_of(focus), 0)
@@ -7171,6 +7431,8 @@ class GhViewerFrame(wx.Frame):
             lines.append(f"Assignees: {', '.join(item.assignees)}")
         if item.milestone:
             lines.append(f"Milestone: {item.milestone}")
+        if item.projects:
+            lines.append(f"Projects: {', '.join(item.projects)}")
         if item.comments and not item.comment_list and item.repo:
             # Search and My Work don't fetch comments; the item's own view does.
             lines.append(f"Comments: {item.comments} (not read in this list)")
@@ -7604,16 +7866,7 @@ class GhViewerFrame(wx.Frame):
             self._announce("Couldn't open the clipboard. Try again.")
 
     def _set_clipboard(self, text: str) -> bool:
-        clip = wx.TheClipboard
-        if not clip.Open():
-            return False
-        try:
-            clip.SetData(wx.TextDataObject(text))
-            # Leave it on the clipboard after GHManage quits.
-            clip.Flush()
-        finally:
-            clip.Close()
-        return True
+        return copy_text(text)
 
     def _announce(self, msg: str) -> None:
         """Update status bar (screen reader accessible)."""
@@ -8331,6 +8584,14 @@ class GhViewerFrame(wx.Frame):
                 ord("K"): self._pr_checks,
                 ord("V"): self._pr_review,
                 ord("D"): self._pr_toggle_draft,
+            }.get(key)
+            if action:
+                action()
+                return
+        if self.view_mode in ITEM_VIEWS and not event.HasAnyModifiers():
+            # Changing the item (#120, #122), in every list of issues and pull
+            # requests: My Work and search results know each item's repository.
+            action = {
                 ord("I"): self._set_milestone_flow,
                 ord("L"): self._set_labels_flow,
                 ord("A"): self._set_assignees_flow,
@@ -9433,10 +9694,8 @@ class GhViewerFrame(wx.Frame):
         self._with_admin(repo, "delete", ask)
 
     def _on_delete_scope(self, exc: MissingScope) -> None:
-        self._announce(f"Deleting a repository needs gh's \"{exc.scope}\" permission; "
-                       "see the message for how to add it.")
-        wx.MessageBox(str(exc), "Delete Repository from GitHub",
-                      wx.OK | wx.ICON_INFORMATION, self)
+        self._permission_needed("Delete Repository from GitHub",
+                                "Couldn't delete the repository", exc)
 
     def _on_repo_deleted(self, repo: str, row: int) -> None:
         """Take every trace of it out of GHManage. The list isn't fetched from
@@ -10630,6 +10889,61 @@ class GhViewerFrame(wx.Frame):
 
         threading.Thread(target=worker, daemon=True).start()
 
+    # ── GitHub permissions (#129) ─────────────────────────────────────────
+
+    def _show_permissions(self) -> None:
+        """Help ▸ GitHub Permissions. Which permissions gh has is asked off
+        the UI thread; the box opens when the answer is in. Once at a time."""
+        if getattr(self, "_permissions_busy", False):
+            return
+        self._permissions_busy = True
+        self._tell("Checking gh's permissions…", announce.STATUS)
+
+        def worker() -> None:
+            state = permissions.fetch_state()
+            wx.CallAfter(self._open_permissions, state)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _open_permissions(self, state) -> None:
+        self._announce("")
+        dlg = PermissionsDialog(self, state, say=self._tell, recheck=permissions.fetch_state)
+        try:
+            dlg.ShowModal()
+        finally:
+            dlg.Destroy()
+            self._permissions_busy = False
+
+    def _permission_needed(self, title: str, doing: str, exc) -> None:
+        """A feature met a permission gh lacks: say which, and offer to copy
+        the command that adds it, or to see them all (Help ▸ GitHub
+        Permissions) so the rest needn't be met one box at a time. Where
+        GitHub's answer may not be the permission (a 404 on following
+        someone), what it said is shown instead of claiming it is."""
+        stock = str(gh_data.MissingScope(exc.scope))
+        detail = str(exc) if str(exc) != stock else ""
+        token_var = permissions.env_token()
+        self._announce(f"{doing}: it needs gh's \"{exc.scope}\" permission.")
+        text = permissions.needed_text(doing, exc.scope, detail, token_var)
+        if token_var:
+            # No command can help: the token's permissions are set on GitHub.
+            dlg = wx.MessageDialog(self, text, title, wx.YES_NO | wx.ICON_INFORMATION)
+            dlg.SetYesNoLabels(PERMISSION_ALL, PERMISSION_CLOSE)
+            yes, copy = wx.ID_YES, None
+        else:
+            dlg = wx.MessageDialog(self, text, title, wx.YES_NO | wx.CANCEL | wx.ICON_INFORMATION)
+            dlg.SetYesNoCancelLabels(PERMISSION_COPY, PERMISSION_ALL, PERMISSION_CLOSE)
+            yes, copy = wx.ID_NO, wx.ID_YES
+        try:
+            answer = dlg.ShowModal()
+        finally:
+            dlg.Destroy()
+        if copy is not None and answer == copy:
+            self._tell_after_box("Command copied." if copy_text(permissions.command([exc.scope]))
+                                 else "Couldn't copy to the clipboard.")
+        elif answer == yes:
+            self._show_permissions()
+
     # ── Changing an issue or pull request (#120, #122) ───────────────────
     #
     # Milestone, labels, assignees, projects, title and description share one
@@ -10642,13 +10956,18 @@ class GhViewerFrame(wx.Frame):
 
     NO_MILESTONE = "No milestone"
 
-    def _start_item_edit(self, what: str, load, then) -> None:
+    def _start_item_edit(self, what: str, load, then, needs_access: str = "") -> None:
         """``what``: "milestones", said as "Getting the milestones for #5…".
         ``load(item, repo)`` runs off the UI thread; ``then(item, repo, data)``
-        on it, with the box. ``load`` None: nothing to fetch."""
+        on it, with the box. ``load`` None: nothing to fetch.
+
+        ``needs_access`` ("the milestone"): the change is one GitHub drops without an error
+        when you can't triage the repository (milestone, labels, assignees),
+        so that is asked first, and said in a box instead of a box of
+        choices that would come to nothing."""
         item = self._focused_item()
-        if self.view_mode != VIEW_ISSUES or not isinstance(item, Item):
-            self._tell("Select an issue or pull request in Issues & PRs first.")
+        if self.view_mode not in ITEM_VIEWS or not isinstance(item, Item):
+            self._tell("Select an issue or pull request first.")
             return
         if getattr(self, "_item_edit_busy", False):
             self._tell("Still saving the last change.")
@@ -10658,12 +10977,21 @@ class GhViewerFrame(wx.Frame):
             self._tell("Select a repository first.")
             return
         self._item_edit_busy = True
+        self._item_edit_view = self.view_mode
         self._announce(f"Getting the {what} for #{item.number}…" if load
                        else f"Opening #{item.number}…")
 
         def worker() -> None:
             try:
-                where = resolve_issue_repo(repo) or repo
+                # An item from My Work or a search knows the very repository
+                # it is in. Only Issues & PRs, which lists a fork's upstream
+                # issues, needs the fork swapped for its upstream.
+                where = item.repo or resolve_issue_repo(repo) or repo
+                if needs_access and not can_change_items(where):
+                    wx.CallAfter(self._nothing_to_choose, "Can't Change It",
+                                 f"You can't change {needs_access} of #{item.number}: "
+                                 f"that needs write or triage access to {where}.")
+                    return
                 data = load(item, where) if load else None
             except Exception as exc:  # noqa: BLE001 - any failure must free the next change
                 wx.CallAfter(self._item_edit_failed, f"Couldn't get the {what} of {repo}", exc)
@@ -10674,9 +11002,10 @@ class GhViewerFrame(wx.Frame):
 
     def _item_edit_ask(self, then, item: Item, repo: str, data) -> None:
         """``then``, the box, on the UI thread. Dropped, freeing the next
-        change, if Issues & PRs is no longer showing; an unexpected error
-        is said rather than leaving every later change refused."""
-        if self.view_mode != VIEW_ISSUES:
+        change, if the list it was started from is no longer showing; an
+        unexpected error is said rather than leaving every later change
+        refused."""
+        if self.view_mode != getattr(self, "_item_edit_view", self.view_mode):
             self._item_edit_busy = False
             return
         try:
@@ -10686,30 +11015,46 @@ class GhViewerFrame(wx.Frame):
 
     def _item_edit_done(self, msg: str) -> None:
         self._item_edit_busy = False
-        self._tell(msg)
+        self._tell_after_box(msg)
+
+    # How long after a box closes its result is said. In an NVDA run a result
+    # said as the box closed ("Milestone unchanged.") was lost: the screen
+    # reader reads the row again as focus comes back, and that cancelled it.
+    # This was the silence on TheIdeaPlace/AIChat#575.
+    AFTER_BOX_MS = 300
+
+    def _tell_after_box(self, msg: str) -> None:
+        """The status bar now; said a moment later, behind the row the
+        screen reader reads as focus returns rather than over it."""
+        self._announce(msg)
+        wx.CallLater(self.AFTER_BOX_MS, announce.announce, msg, announce.RESULT, False, True)
 
     def _item_edit_failed(self, msg: str, exc: Exception) -> None:
+        """In a box as well as the status bar: it answers a key pressed or a
+        box closed a moment ago, and a passing announcement is easily talked
+        over by the screen reader reading the list again."""
         self._item_edit_busy = False
         if isinstance(exc, MissingScope):
-            self._tell(f"{msg}: it needs gh's \"{exc.scope}\" permission.")
-            wx.MessageBox(str(exc), "Permission Needed", wx.OK | wx.ICON_INFORMATION, self)
-        elif isinstance(exc, GhError):
-            self._tell(f"{msg}: {exc}")
-        else:
-            self._tell(f"{msg}: {type(exc).__name__}: {exc}")
+            self._permission_needed("Permission Needed", msg, exc)
+            return
+        detail = str(exc) if isinstance(exc, GhError) else f"{type(exc).__name__}: {exc}"
+        self._announce(f"{msg}: {detail}")
+        wx.MessageBox(f"{msg}.\n\n{detail}", "Couldn't Do It",
+                      wx.OK | wx.ICON_WARNING, self)
 
-    def _save_item_edit(self, item: Item, call, update, said: str) -> None:
+    def _save_item_edit(self, item: Item, call, update, said: str | None) -> None:
         """Run ``call`` off the UI thread; then ``update(item)``, show the
-        change where the item is and say ``said``."""
+        change where the item is and say ``said``, or, with ``said`` None,
+        what ``call`` returned (when only the change itself knows)."""
         self._announce(f"Saving #{item.number}…")
 
         def worker() -> None:
             try:
-                call()
+                result = call()
             except Exception as exc:  # noqa: BLE001 - any failure must free the next change
                 wx.CallAfter(self._item_edit_failed, f"Couldn't change #{item.number}", exc)
                 return
-            wx.CallAfter(self._item_edited, item, update, said)
+            wx.CallAfter(self._item_edited, item, update, said if said is not None else result)
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -10721,7 +11066,7 @@ class GhViewerFrame(wx.Frame):
         try:
             update(item)
             row = -1
-            if self.view_mode == VIEW_ISSUES:
+            if self.view_mode in ITEM_VIEWS:
                 row = next((i for i, it in enumerate(self._shown)
                             if isinstance(it, Item) and it.number == item.number
                             and it.repo == item.repo), -1)
@@ -10749,10 +11094,16 @@ class GhViewerFrame(wx.Frame):
         new = self.details_text.GetValue()
         self.details_text.SetInsertionPoint(_ctrl_pos(new, moved_caret(old, new, caret)))
 
-    def _ask_checklist(self, title: str, prompt: str, model: Checklist) -> bool:
+    def _ask_checklist(self, title: str, prompt: str, model: Checklist,
+                       new_label: str = "", new_prompt: str = "", note: str = "",
+                       same_as=None) -> bool:
         """The checklist box; True if saved with something changed. Says
-        "unchanged" otherwise, and lets the next change start."""
-        dlg = ChecklistDialog(self, title, prompt, model, say=self._tell)
+        "unchanged" otherwise, and lets the next change start. ``note``: why
+        the list is empty. ``same_as(typed)``: the rows a typed new name
+        means already."""
+        dlg = ChecklistDialog(self, title, prompt, model, say=self._tell,
+                              new_label=new_label, new_prompt=new_prompt, note=note,
+                              same_as=same_as)
         try:
             saved = dlg.ShowModal() == wx.ID_OK
         finally:
@@ -10770,7 +11121,7 @@ class GhViewerFrame(wx.Frame):
         self._start_item_edit(
             "milestones",
             lambda item, where: fetch_milestones(where, "open", resolved=True),
-            self._choose_milestone)
+            self._choose_milestone, needs_access="the milestone")
 
     @classmethod
     def milestone_choices(cls, current: str, milestones: list) -> tuple[list[str], int]:
@@ -10783,21 +11134,25 @@ class GhViewerFrame(wx.Frame):
             due = f", due {m.due_on[:10]}" if m.due_on else ""
             labels.append(f"{m.title}{due}")
         titles = [m.title for m in milestones]
-        if not current:
-            return labels, 0
+        selected = 0
         if current in titles:
-            return labels, titles.index(current) + 1
-        labels.append(f"{current}, closed")
-        return labels, len(labels) - 1
+            selected = titles.index(current) + 1
+        elif current:
+            labels.append(f"{current}, closed")
+            selected = len(labels) - 1
+        # Last, always: so a repository with no milestones yet still gets
+        # somewhere, rather than a box with nothing to choose.
+        labels.append(cls.NEW_MILESTONE)
+        return labels, selected
+
+    NEW_MILESTONE = "New milestone…"
 
     def _choose_milestone(self, item: Item, repo: str, milestones: list) -> None:
-        if not milestones and not item.milestone:
-            self._item_edit_done(f"{repo} has no open milestones.")
-            return
         labels, current = self.milestone_choices(item.milestone, milestones)
-        dlg = wx.SingleChoiceDialog(
-            self, f"Milestone for #{item.number} {item.title}:", "Set Milestone", labels,
-        )
+        prompt = f"Milestone for #{item.number} {item.title}:"
+        if not milestones:
+            prompt = f"{repo} has no open milestones.\n{prompt}"
+        dlg = wx.SingleChoiceDialog(self, prompt, "Set Milestone", labels)
         dlg.SetSelection(current)
         try:
             if dlg.ShowModal() != wx.ID_OK:
@@ -10806,6 +11161,9 @@ class GhViewerFrame(wx.Frame):
             choice = dlg.GetSelection()
         finally:
             dlg.Destroy()
+        if choice == len(labels) - 1:
+            self._new_milestone(item, repo)
+            return
         if choice == current:
             self._item_edit_done(f"#{item.number} is already in milestone {item.milestone}."
                                  if item.milestone
@@ -10820,6 +11178,45 @@ class GhViewerFrame(wx.Frame):
             f"#{item.number} is in milestone {target.title}." if target is not None
             else f"#{item.number} has no milestone.")
 
+    def _new_milestone(self, item: Item, repo: str) -> None:
+        """New milestone…: its title, then it is created in ``repo`` and the
+        item put in it."""
+        dlg = wx.TextEntryDialog(self, f"Title of the new milestone in {repo}:", "New Milestone")
+        try:
+            ok = dlg.ShowModal() == wx.ID_OK
+            title = dlg.GetValue().strip()
+        finally:
+            dlg.Destroy()
+        if not ok or not title:
+            self._item_edit_done("Milestone unchanged.")
+            return
+        found: list = []
+
+        def call() -> str:
+            # GitHub keeps milestone titles unique, closed ones included: one
+            # with this title is used rather than refused.
+            existing = next((m for m in fetch_milestones(repo, "all", 500, resolved=True)
+                             if m.title.lower() == title.lower()), None)
+            milestone = existing or create_milestone(repo, title)
+            found.append(milestone)
+            set_item_milestone(item, repo, milestone)
+            if existing is None:
+                return f"Created milestone {milestone.title}. #{item.number} is in it."
+            closed = ", which is closed" if existing.state == "closed" else ""
+            return (f"{existing.title} already exists{closed}. "
+                    f"#{item.number} is in milestone {existing.title}.")
+
+        self._save_item_edit(item, call,
+                             lambda it: setattr(it, "milestone", found[0].title), None)
+
+    def _nothing_to_choose(self, title: str, msg: str) -> None:
+        """Said in a box, not only announced: it answers the key pressed a
+        moment ago, and a passing announcement is easily talked over by the
+        screen reader reading the list again."""
+        self._item_edit_busy = False
+        self._announce(msg)
+        wx.MessageBox(msg, title, wx.OK | wx.ICON_INFORMATION, self)
+
     # Labels (#122). The box starts from the item as it is on GitHub now,
     # and only what was checked or unchecked is sent, so a label someone
     # added since the list loaded is neither hidden nor undone.
@@ -10828,23 +11225,31 @@ class GhViewerFrame(wx.Frame):
         """Actions ▸ Set Labels (L): check the labels the issue or pull
         request should have."""
         self._start_item_edit(
-            "labels", lambda item, where: (fetch_label_names(where), fetch_item_now(item, where)),
-            self._choose_labels)
+            "labels", lambda item, where: (fetch_label_names(where, 500),
+                                           fetch_item_now(item, where)),
+            self._choose_labels, needs_access="the labels")
 
     def _choose_labels(self, item: Item, repo: str, data) -> None:
         names, now = data
-        if not names and not now.labels:
-            self._item_edit_done(f"{repo} has no labels.")
-            return
+        # Opens with no labels too: New Label… makes the first.
         model = Checklist(names, now.labels)
-        if not self._ask_checklist("Set Labels", f"Labels for #{item.number} {item.title}",
-                                   model):
+        prompt = f"Labels for #{item.number} {item.title}"
+        note = f"{repo} has no labels yet." if not names else ""
+        if not self._ask_checklist("Set Labels", prompt, model, "&New Label…",
+                                   f"Name of the new label in {repo}:", note):
             return
         chosen, added, removed = model.chosen(), model.added(), model.removed()
-        self._save_item_edit(
-            item, lambda: change_item_labels(item, repo, added, removed),
-            lambda it: setattr(it, "labels", list(chosen)),
-            change_said(item.number, "Labels", added, removed, chosen))
+        create = model.to_create()
+
+        def call() -> None:
+            for name in create:
+                create_label_in(repo, name)
+            change_item_labels(item, repo, added, removed)
+
+        said = change_said(item.number, "Labels", added, removed, chosen)
+        if create:
+            said = f"Created {', '.join(create)}. {said}"
+        self._save_item_edit(item, call, lambda it: setattr(it, "labels", list(chosen)), said)
 
     # Assignees (#122), the same way.
 
@@ -10854,12 +11259,12 @@ class GhViewerFrame(wx.Frame):
         self._start_item_edit(
             "people who can be assigned",
             lambda item, where: (fetch_assignable_users(where), fetch_item_now(item, where)),
-            self._choose_assignees)
+            self._choose_assignees, needs_access="the assignees")
 
     def _choose_assignees(self, item: Item, repo: str, data) -> None:
         logins, now = data
         if not logins and not now.assignees:
-            self._item_edit_done(f"No one can be assigned in {repo}.")
+            self._nothing_to_choose("Set Assignees", f"No one can be assigned in {repo}.")
             return
         model = Checklist(logins, now.assignees)
         if not self._ask_checklist("Set Assignees",
@@ -10904,30 +11309,66 @@ class GhViewerFrame(wx.Frame):
         return rows
 
     def _choose_projects(self, item: Item, repo: str, data) -> None:
-        if not data.available and not data.current:
-            self._item_edit_done(f"{repo} and its owner have no open projects.")
-            return
+        # Opens with no projects too: New Project… makes the first, for the
+        # repository's owner and linked to the repository.
         rows = self.project_rows(data.available, data.current)
         by_name = dict(rows)
         entry = {p.id: p.item_id for p in data.current}
         model = Checklist([name for name, _ in rows],
                           [name for name, p in rows if p.id in entry])
-        if not self._ask_checklist("Set Projects", f"Projects for #{item.number} {item.title}",
-                                   model):
+        prompt = f"Projects for #{item.number} {item.title}"
+        note = (f"{repo} and {data.owner or 'its owner'} have no open projects."
+                if not rows else "")
+        owner = data.owner or "the repository's owner"
+        # A typed title that is an existing project's is that project, not a
+        # second one of the same name (GitHub allows those).
+        titles = {}
+        for name, proj in rows:
+            titles.setdefault(proj.title.lower(), []).append(name)
+        if not self._ask_checklist("Set Projects", prompt, model, "&New Project…",
+                                   f"Title of the new project, for {owner}:", note,
+                                   lambda typed: titles.get(typed.strip().lower(), [])):
             return
-        adds = [by_name[n].id for n in model.added()]
-        removes = [(by_name[n].id, entry[by_name[n].id]) for n in model.removed()]
+        create = model.to_create()
+        adds = [by_name[n].id for n in model.added() if n not in create]
+        removes = [(by_name[n].id, entry[by_name[n].id]) for n in model.removed()
+                   if n in by_name]
 
         def call() -> None:
-            for project_id in adds:
-                add_to_project(project_id, data.content_id)
-            for project_id, entry in removes:
-                remove_from_project(project_id, entry)
+            made: list[str] = []
+            try:
+                for title in create:
+                    project_id = create_project(data.owner_id, data.repo_id, title)
+                    made.append(title)
+                    add_to_project(project_id, data.content_id)
+                for project_id in adds:
+                    add_to_project(project_id, data.content_id)
+                for project_id, item_entry in removes:
+                    remove_from_project(project_id, item_entry)
+            except GhError as exc:
+                if not made:
+                    raise
+                # Say what did happen: the project exists now either way.
+                raise GhError(f"Created {', '.join(made)}, then: {exc}") from exc
 
-        self._save_item_edit(
-            item, call, lambda it: None,
-            change_said(item.number, "Projects", model.added(), model.removed(),
-                        model.chosen()))
+        said = change_said(item.number, "Projects", model.added(), model.removed(),
+                           model.chosen())
+        if create:
+            said = f"Created {', '.join(create)}. {said}"
+        # The row's Projects column and the details: the titles now, each
+        # keeping the status it had; a new one has none yet.
+        had = {}
+        for shown in item.projects:
+            title = shown.rsplit(" (", 1)[0] if shown.endswith(")") else shown
+            had[title] = shown
+        now = [had.get(by_name[n].title if n in by_name else n,
+                       by_name[n].title if n in by_name else n) for n in model.chosen()]
+
+        def update(it: Item) -> None:
+            it.projects = list(now)
+            it.projects_known = True
+
+        self._save_item_edit(item, call, update, said)
 
     # Title and description (#122)
 
@@ -13006,11 +13447,10 @@ class GhViewerFrame(wx.Frame):
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _on_watch_error(self, repo: str, exc: GhError) -> None:
+    def _on_watch_error(self, repo: str, exc: GhError, verb: str = "check") -> None:
         if isinstance(exc, MissingScope):
-            self._announce(f"Watch Settings needs gh's \"{exc.scope}\" permission; "
-                           "see the message for how to add it.")
-            wx.MessageBox(str(exc), "Watch Settings", wx.OK | wx.ICON_INFORMATION, self)
+            self._permission_needed("Watch Settings",
+                                    f"Couldn't {verb} how you watch {repo}", exc)
         else:
             self._announce(f"Couldn't check how you watch {repo}: {exc}")
 
@@ -13044,7 +13484,7 @@ class GhViewerFrame(wx.Frame):
             try:
                 set_watch_level(repo, new_level)
             except GhError as exc:
-                wx.CallAfter(self._on_watch_error, repo, exc)
+                wx.CallAfter(self._on_watch_error, repo, exc, "change")
                 return
             wx.CallAfter(self._on_watch_set, repo, name)
 
@@ -13344,10 +13784,20 @@ class GhViewerFrame(wx.Frame):
 # ── Entry point ────────────────────────────────────────────────────────
 
 
+def auto_update_setting() -> bool:
+    """Help > Automatic Updates, read before Velopack's hooks run. Anything
+    going wrong reading it (no settings folder yet, one that can't be
+    written) means on: the install and uninstall hooks must never fail here."""
+    try:
+        return settings.load_auto_update()
+    except Exception:  # noqa: BLE001
+        return True
+
+
 def main() -> None:
     # Must run before argparse: Velopack relaunches the app with its own hook
     # arguments during install/update/uninstall, and this handles and exits.
-    updater.bootstrap()
+    updater.bootstrap(auto_apply=auto_update_setting())
 
     parser = argparse.ArgumentParser(
         description="GUI viewer and manager for GitHub issues and pull requests."

@@ -114,6 +114,11 @@ class Item:
     assignees: list[str] = field(default_factory=list)
     # The milestone's title, or "" with none (#120).
     milestone: str = ""
+    # The projects it is in, each with its status: "The Chat Place (Needs
+    # retest)". ``projects_known`` False where the list couldn't say: GitHub's
+    # search doesn't give them, nor does gh without its "read:project" permission.
+    projects: list[str] = field(default_factory=list)
+    projects_known: bool = True
     comments: int = 0
     comment_list: list[dict] = field(default_factory=list)
     # PR-specific
@@ -158,6 +163,7 @@ class Item:
             "labels": ", ".join(self.labels),
             "assignees": ", ".join(self.assignees),
             "milestone": self.milestone,
+            "projects": ", ".join(self.projects),
             "comments": str(self.comments),
             "draft": "Yes" if self.is_draft else "No",
             "review": self.review_status,
@@ -177,7 +183,7 @@ class Item:
 
 ALL_COLUMNS = [
     "number", "type", "state", "title", "author", "created", "updated",
-    "labels", "assignees", "milestone", "comments", "draft", "review", "+/-", "files",
+    "labels", "assignees", "milestone", "projects", "comments", "draft", "review", "+/-", "files",
     "base", "head",
 ]
 
@@ -223,8 +229,8 @@ def sort_items(items: list[Item], sort_order: str) -> list[Item]:
 
 
 # JSON fields to request from gh for issues
-ISSUE_FIELDS = "number,title,state,url,author,createdAt,updatedAt,body,labels,assignees,milestone,comments"
-PR_FIELDS = "number,title,state,url,author,createdAt,updatedAt,body,labels,assignees,milestone,comments,isDraft,mergedAt,reviewDecision,additions,deletions,changedFiles,baseRefName,headRefName"
+ISSUE_FIELDS = "number,title,state,url,author,createdAt,updatedAt,body,labels,assignees,milestone,projectItems,comments"
+PR_FIELDS = "number,title,state,url,author,createdAt,updatedAt,body,labels,assignees,milestone,projectItems,comments,isDraft,mergedAt,reviewDecision,additions,deletions,changedFiles,baseRefName,headRefName"
 # The size of each change is what makes GitHub time out (HTTP 502) on a
 # page of very large pull requests (nvaccess/nvda's translation merges);
 # without it the same page comes back.
@@ -262,6 +268,46 @@ def _parse_comments(row: dict) -> tuple[int, list[dict]]:
     return 0, []
 
 
+def _project_names(row: dict) -> list[str]:
+    """The projects in an issue or PR row, each with its status where it has
+    one: "The Chat Place (Needs retest)"."""
+    names = []
+    for p in row.get("projectItems") or []:
+        if not isinstance(p, dict) or not p.get("title"):
+            continue
+        status = (p.get("status") or {}).get("name") if isinstance(p.get("status"), dict) else ""
+        names.append(f"{p['title']} ({status})" if status else p["title"])
+    return names
+
+
+def _without_projects(fields: str) -> str:
+    return ",".join(f for f in fields.split(",") if f != "projectItems")
+
+
+def _run_list(args: list[str], fields: str, parse) -> list:
+    """Run a gh list or view asking for ``fields``. Without gh's
+    "read:project" permission, asking for projects fails the whole call, so
+    it is asked again without them, and the items say their projects are
+    unknown rather than empty."""
+    try:
+        return parse(_run_gh(args))
+    except GhError as exc:
+        if "read:project" not in str(exc) or "projectItems" not in fields:
+            raise
+    return _without_projects_list(args, fields, parse)
+
+
+def _without_projects_list(args: list[str], fields: str, parse) -> list:
+    """``args`` run again without projects; the items say their projects
+    are unknown rather than empty."""
+    args = list(args)
+    args[args.index(fields)] = _without_projects(fields)
+    items = parse(_run_gh(args))
+    for it in items:
+        it.projects_known = False
+    return items
+
+
 def _milestone_title(row: dict) -> str:
     """The title of the milestone in an issue or PR row, or "" with none.
     gh gives ``{"number": 3, "title": "1.1", ...}`` or null."""
@@ -296,6 +342,7 @@ def _parse_issues(raw: str) -> list[Item]:
                 labels=[l["name"] if isinstance(l, dict) else str(l) for l in row.get("labels", [])],
                 assignees=[a["login"] if isinstance(a, dict) else str(a) for a in row.get("assignees", [])],
                 milestone=_milestone_title(row),
+                projects=_project_names(row),
                 comments=_parse_comments(row)[0],
                 comment_list=_parse_comments(row)[1],
             )
@@ -323,6 +370,7 @@ def _parse_prs(raw: str) -> list[Item]:
                 labels=[l["name"] if isinstance(l, dict) else str(l) for l in row.get("labels", [])],
                 assignees=[a["login"] if isinstance(a, dict) else str(a) for a in row.get("assignees", [])],
                 milestone=_milestone_title(row),
+                projects=_project_names(row),
                 comments=_parse_comments(row)[0],
                 comment_list=_parse_comments(row)[1],
                 is_draft=row.get("isDraft", False),
@@ -420,7 +468,14 @@ def fetch_issues(
             args += ["--search", " ".join(item_filter.search_terms())]
     if effective:
         args += ["--repo", effective]
-    return _parse_issues(_run_gh(args))
+    try:
+        return _run_list(args, ISSUE_FIELDS, _parse_issues)
+    except GhError as exc:
+        if not _is_timeout(exc):
+            raise
+    # Projects are what can make a big page too slow for GitHub; the list
+    # without them is worth having.
+    return _without_projects_list(args, ISSUE_FIELDS, _parse_issues)
 
 
 def fetch_prs(
@@ -454,14 +509,20 @@ def fetch_prs(
     if effective:
         args += ["--repo", effective]
     try:
-        return _parse_prs(_run_gh(args))
+        return _run_list(args, PR_FIELDS, _parse_prs)
     except GhError as exc:
         if not _is_timeout(exc):
             raise
     # Again without each change's size, which is what GitHub couldn't
     # work out in time; the list is still worth having.
     args[args.index(PR_FIELDS)] = PR_LIGHT_FIELDS
-    return _parse_prs(_run_gh(args))
+    try:
+        return _run_list(args, PR_LIGHT_FIELDS, _parse_prs)
+    except GhError as exc:
+        if not _is_timeout(exc):
+            raise
+    # And without their projects, which on nvaccess/nvda still timed out.
+    return _without_projects_list(args, PR_LIGHT_FIELDS, _parse_prs)
 
 
 def _is_timeout(exc: GhError) -> bool:
@@ -502,14 +563,11 @@ def fetch_item_by_number(number: int, repo: Optional[str]) -> Optional[Item]:
         if effective:
             args += ["--repo", effective]
         try:
-            raw = _run_gh(args)
+            items = _run_list(args, fields, lambda raw: parser(raw) if raw.strip() else [])
         except GhError as exc:
             if _is_no_such_number(exc):
                 continue
             raise
-        if not raw.strip():
-            continue
-        items = parser(raw)
         if items:
             return items[0]
     return None
@@ -653,19 +711,56 @@ def set_item_milestone(item: Item, repo: str,
     if not repo:
         raise GhError("No repository for #%d" % item.number)
     value = "null" if milestone is None else str(milestone.number)
-    _run_gh(["api", "-X", "PATCH", f"repos/{repo}/issues/{item.number}",
-             "-F", f"milestone={value}", "--silent"])
+    raw = _run_gh(["api", "-X", "PATCH", f"repos/{repo}/issues/{item.number}",
+                   "-F", f"milestone={value}"])
+    # Without write access GitHub drops a milestone change and still answers
+    # 200 with the issue as it was; what it sends back says whether it took.
+    reply = json.loads(raw) if raw.strip() else {}
+    now = (reply.get("milestone") or {}).get("number") if isinstance(reply, dict) else None
+    if (isinstance(reply, dict) and "number" in reply
+            and now != (milestone.number if milestone else None)):
+        raise NotChanged(repo)
 
 
-def _patch_item(item: Item, repo: str, body: dict, endpoint: str = "", method: str = "PATCH") -> None:
+class NotChanged(GhError):
+    """GitHub answered as if all was well but left the item as it was: it
+    does that, without an error, when you can't write to the repository."""
+
+    def __init__(self, repo: str) -> None:
+        super().__init__(f"GitHub didn't make the change. Changing this needs write "
+                         f"access to {repo}.")
+        self.repo = repo
+
+
+def _patch_item(item: Item, repo: str, body: dict, endpoint: str = "",
+                method: str = "PATCH"):
     """Send ``body`` as JSON to the issue (or PR, which is an issue too) in
     ``repo``, used as given: the caller resolved it once, for the choices
     too. On stdin, so a title or description is never a command-line
-    argument."""
+    argument. GitHub's reply, parsed, or None."""
     if not repo:
         raise GhError("No repository for #%d" % item.number)
-    _run_gh(["api", "-X", method, f"repos/{repo}/issues/{item.number}{endpoint}",
-             "--input", "-", "--silent"], stdin=json.dumps(body))
+    raw = _run_gh(["api", "-X", method, f"repos/{repo}/issues/{item.number}{endpoint}",
+                   "--input", "-"], stdin=json.dumps(body))
+    try:
+        return json.loads(raw) if raw.strip() else None
+    except ValueError:
+        return None
+
+
+def can_change_items(repo: str) -> bool:
+    """Whether you may set milestones, labels and assignees in ``repo``:
+    triage access or more. Asked first because GitHub drops some of those
+    changes without an error when you can't. True when GitHub doesn't say
+    (signed out of nothing, an old server): then the change itself tells."""
+    try:
+        raw = _run_gh(["api", f"repos/{repo}", "--jq", ".permissions"])
+        perms = json.loads(raw) if raw.strip() else None
+    except (GhError, ValueError):
+        return True
+    if not isinstance(perms, dict):
+        return True
+    return any(perms.get(k) for k in ("admin", "maintain", "push", "triage"))
 
 
 def change_item_labels(item: Item, repo: str, add: list[str], remove: list[str]) -> None:
@@ -687,10 +782,23 @@ def change_item_labels(item: Item, repo: str, add: list[str], remove: list[str])
 def change_item_assignees(item: Item, repo: str, add: list[str], remove: list[str]) -> None:
     """Assign and unassign people on the issue or PR (#122), sending only
     the change, as labels do."""
+    def logins(reply) -> Optional[set]:
+        if not isinstance(reply, dict) or "assignees" not in reply:
+            return None
+        return {a.get("login", "").lower() for a in reply.get("assignees") or []
+                if isinstance(a, dict)}
+
+    # GitHub ignores assignees it won't take (no access, or someone who
+    # can't be assigned) and still answers 201, so the reply is checked.
     if add:
-        _patch_item(item, repo, {"assignees": list(add)}, "/assignees", "POST")
+        now = logins(_patch_item(item, repo, {"assignees": list(add)}, "/assignees", "POST"))
+        if now is not None and not all(a.lower() in now for a in add):
+            raise NotChanged(repo)
     if remove:
-        _patch_item(item, repo, {"assignees": list(remove)}, "/assignees", "DELETE")
+        now = logins(_patch_item(item, repo, {"assignees": list(remove)}, "/assignees",
+                                 "DELETE"))
+        if now is not None and any(r.lower() in now for r in remove):
+            raise NotChanged(repo)
 
 
 def edit_item(item: Item, repo: str, title: Optional[str] = None,
@@ -764,6 +872,10 @@ class ItemProjects:
     content_id: str                 # the issue's or PR's node id
     available: list = field(default_factory=list)   # Project, open ones, A to Z
     current: list = field(default_factory=list)     # Project with item_id set
+    # For New Project…: it is made for the repository's owner, linked to it.
+    repo_id: str = ""
+    owner_id: str = ""
+    owner: str = ""
 
 
 _PROJECT_FIELDS = ("id title number closed "
@@ -771,8 +883,9 @@ _PROJECT_FIELDS = ("id title number closed "
 _ITEM_PROJECTS_QUERY = """
 query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
+    id
     projectsV2(first: 100) { nodes { %(f)s } }
-    owner { ... on ProjectV2Owner { projectsV2(first: 100) { nodes { %(f)s } } } }
+    owner { id login ... on ProjectV2Owner { projectsV2(first: 100) { nodes { %(f)s } } } }
     issueOrPullRequest(number: $number) {
       ... on Issue { id projectItems(first: 50) { nodes { id project { %(f)s } } } }
       ... on PullRequest { id projectItems(first: 50) { nodes { id project { %(f)s } } } }
@@ -823,7 +936,9 @@ def fetch_item_projects(item: Item, repo: str) -> ItemProjects:
                for n in (content.get("projectItems") or {}).get("nodes") or []
                if isinstance(n, dict) and isinstance(n.get("project"), dict)]
     available = sorted(seen.values(), key=lambda p: p.title.lower())
-    return ItemProjects(content["id"], available, current)
+    owner_node = node.get("owner") or {}
+    return ItemProjects(content["id"], available, current, repo_id=node.get("id") or "",
+                        owner_id=owner_node.get("id") or "", owner=owner_node.get("login") or "")
 
 
 def add_to_project(project_id: str, content_id: str) -> None:
@@ -833,6 +948,43 @@ def add_to_project(project_id: str, content_id: str) -> None:
     err = _project_error(reply)
     if err:
         raise err
+
+
+def create_project(owner_id: str, repo_id: str, title: str) -> str:
+    """A new project called ``title`` for the owner, linked to the
+    repository so it is listed there too; its id."""
+    reply = _graphql(
+        "mutation($o: ID!, $r: ID!, $t: String!) { createProjectV2(input: {ownerId: $o, "
+        "repositoryId: $r, title: $t}) { projectV2 { id } } }",
+        {"o": owner_id, "r": repo_id, "t": title})
+    err = _project_error(reply)
+    if err:
+        raise err
+    data = reply.get("data") if isinstance(reply.get("data"), dict) else {}
+    project = ((data or {}).get("createProjectV2") or {}).get("projectV2") or {}
+    if not project.get("id"):
+        raise GhError(f"GitHub didn't create the project {title}")
+    return project["id"]
+
+
+def create_label_in(repo: str, name: str) -> None:
+    """A new label called ``name`` in ``repo`` (as given, already resolved),
+    from Set Labels' New Label…, in GitHub's light grey. One that already
+    exists is no error. GitHub answers that with a bare "Validation Failed
+    (HTTP 422)", the reason left out, so on a 422 the label is looked up:
+    there, all is well; not there, the 422 meant something else."""
+    if not repo:
+        raise GhError("No repository for the label")
+    try:
+        _run_gh(["api", "-X", "POST", f"repos/{repo}/labels", "--input", "-", "--silent"],
+                stdin=json.dumps({"name": name, "color": "ededed"}))
+    except GhError as exc:
+        if "422" not in str(exc):
+            raise
+        try:
+            _run_gh(["api", f"repos/{repo}/labels/{quote(name, safe='')}", "--silent"])
+        except GhError:
+            raise exc from None
 
 
 def remove_from_project(project_id: str, item_id: str) -> None:
@@ -4116,10 +4268,12 @@ def set_watch_level(repo: str, level: str) -> None:
 SEARCH_MAX = 1000
 
 SEARCH_ITEM_COLUMNS = [
-    "type", "number", "state", "title", "repo", "updated", "author", "labels", "comments",
+    "type", "number", "state", "title", "repo", "updated", "author", "labels", "assignees",
+    "milestone", "comments",
 ]
 SEARCH_ITEM_DEFAULT_COLUMNS = ["type", "number", "state", "title", "repo", "updated"]
-MY_WORK_COLUMNS = ["why", "type", "number", "title", "repo", "updated", "author", "labels"]
+MY_WORK_COLUMNS = ["why", "type", "number", "title", "repo", "updated", "author", "labels",
+                   "assignees", "milestone"]
 MY_WORK_DEFAULT_COLUMNS = ["why", "type", "number", "title", "repo", "updated"]
 
 
@@ -4181,6 +4335,7 @@ def parse_search_item(raw: dict) -> Item:
         labels=labels,
         assignees=assignees,
         milestone=_milestone_title(raw),
+        projects_known=False,   # search results don't carry projects
         comments=int(raw.get("comments") or 0),
         is_draft=bool(raw.get("draft")),
         is_merged=bool(is_pr and pr.get("merged_at")),
@@ -5385,6 +5540,20 @@ def fetch_milestones(repo: Optional[str], state: str = "open",
         state = "open"
     rows = _api_pages(f"repos/{effective}/milestones?state={state}", limit)
     return [_parse_milestone(r, effective) for r in rows]
+
+
+def create_milestone(repo: str, title: str) -> Milestone:
+    """Create an open milestone called ``title`` in ``repo`` (as given,
+    already resolved), from Set Milestone's New milestone…. The title goes
+    on stdin, never the command line."""
+    if not repo:
+        raise GhError("No repository for the milestone")
+    raw = _run_gh(["api", "-X", "POST", f"repos/{repo}/milestones", "--input", "-"],
+                  stdin=json.dumps({"title": title}))
+    row = json.loads(raw) if raw.strip() else {}
+    if not isinstance(row, dict) or not row.get("number"):
+        raise GhError(f"GitHub didn't create the milestone {title}")
+    return _parse_milestone(row, repo)
 
 
 # ── Insights: traffic and contributors (#89) ───────────────────────────

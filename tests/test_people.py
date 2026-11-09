@@ -630,12 +630,13 @@ def test_following_updates_the_row_and_the_count():
     assert not bob.you_follow and bob.followers == 10 and f.told[-1] == "Unfollowed bob."
 
 
-def test_missing_permission_is_shown_with_the_command(monkeypatch):
-    shown = []
-    monkeypatch.setattr(V.wx, "MessageBox", lambda text, *a, **k: shown.append(text))
+def test_missing_permission_is_shown_with_the_command(message_dialog):
     f = _trail_frame()
+    f._permission_needed = lambda *a: Frame._permission_needed(f, *a)
     Frame._on_follow_done(f, Person("bob"), True, MissingScope("user:follow"))
-    assert "gh auth refresh -h github.com -s user:follow" in shown[0]
+    (box,) = message_dialog.shown
+    assert "gh auth refresh -h github.com -s user:follow" in box.message
+    assert box.labels == (V.PERMISSION_COPY, V.PERMISSION_ALL, V.PERMISSION_CLOSE)
     assert 'needs gh\'s "user:follow" permission' in f.events[-1]
 
 

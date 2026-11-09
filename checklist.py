@@ -26,13 +26,32 @@ class Checklist:
                 self.names.append(name)
         self._start = {n for n in checked}
         self.on = set(self._start)
+        self.new: list[str] = []   # added in the box, to be created on save
+
+    def add(self, name: str) -> tuple[int, str]:
+        """A new one (New Label…, New Project…), checked: its row and what to
+        say. One already listed is checked instead of added twice."""
+        name = name.strip()
+        match = next((i for i, n in enumerate(self.names) if n.lower() == name.lower()), None)
+        if match is not None:
+            self.on.add(self.names[match])
+            return match, f"{self.names[match]} is already listed, now {CHECKED}"
+        self.names.append(name)
+        self.new.append(name)
+        self.on.add(name)
+        return len(self.names) - 1, f"{name} added, {CHECKED}"
 
     def __len__(self) -> int:
         return len(self.names)
 
     def row(self, i: int) -> str:
         name = self.names[i]
-        return f"{name}, {CHECKED if name in self.on else UNCHECKED}"
+        state = CHECKED if name in self.on else UNCHECKED
+        return f"{name}, {state}, new" if name in self.new else f"{name}, {state}"
+
+    def to_create(self) -> list[str]:
+        """The new ones still checked: those to create on save."""
+        return [n for n in self.new if n in self.on]
 
     def rows(self) -> list[str]:
         return [self.row(i) for i in range(len(self.names))]

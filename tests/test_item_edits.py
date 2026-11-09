@@ -19,7 +19,7 @@ else:
     pytest.importorskip("wx")
 
 import ghviewer  # noqa: E402
-from test_set_milestone import fake_frame, run_now  # noqa: E402
+from test_set_milestone import BOXES, fake_frame, run_now  # noqa: E402
 from test_consistent_keys import Key, _hook_frame  # noqa: E402
 
 Frame = ghviewer.GhViewerFrame
@@ -52,6 +52,20 @@ def test_toggling_back_is_no_change():
 def test_something_checked_but_not_offered_is_kept_at_the_end():
     c = Checklist(["alice"], ["zed", "alice"])
     assert c.names == ["alice", "zed"] and c.chosen() == ["alice", "zed"]
+
+
+def test_adding_a_new_one_checks_it_and_marks_it_new():
+    c = Checklist(["bug"], [])
+    assert c.add(" triage ") == (1, "triage added, checked")
+    assert c.row(1) == "triage, checked, new" and c.to_create() == ["triage"]
+    c.toggle(1)
+    assert c.row(1) == "triage, not checked, new" and c.to_create() == []
+
+
+def test_adding_one_already_listed_checks_it_instead():
+    c = Checklist(["Bug"], [])
+    assert c.add("bug") == (0, "Bug is already listed, now checked")
+    assert c.names == ["Bug"] and c.chosen() == ["Bug"] and c.to_create() == []
 
 
 def test_duplicates_in_the_options_are_listed_once():
@@ -123,6 +137,50 @@ def test_a_title_alone_leaves_the_description(fake_gh):
     fake_gh.route("PATCH", "")
     gh_data.edit_item(ISSUE, "o/r", title="Only this")
     assert json.loads(fake_gh.stdin[0]) == {"title": "Only this"}
+
+
+def test_a_new_label_is_posted_light_grey(fake_gh):
+    fake_gh.route("labels", "")
+    gh_data.create_label_in("o/r", "needs info")
+    assert fake_gh.calls[0][:4] == ["api", "-X", "POST", "repos/o/r/labels"]
+    assert json.loads(fake_gh.stdin[0]) == {"name": "needs info", "color": "ededed"}
+
+
+def test_a_label_that_already_exists_is_no_error(fake_gh):
+    # GitHub's 422 doesn't say why; the label being there says it.
+    fake_gh.route("-X POST", GhError("gh: Validation Failed (HTTP 422)"))
+    fake_gh.route("repos/o/r/labels/needs%20info", {"name": "needs info"})
+    gh_data.create_label_in("o/r", "needs info")
+
+
+def test_a_422_for_another_reason_is_an_error(fake_gh):
+    fake_gh.route("-X POST", GhError("gh: Validation Failed (HTTP 422)"))
+    fake_gh.route("repos/o/r/labels/bad", GhError("HTTP 404"))
+    with pytest.raises(GhError, match="422"):
+        gh_data.create_label_in("o/r", "bad")
+
+
+def test_a_new_milestone_is_posted_and_read_back(fake_gh):
+    fake_gh.route("milestones", {"number": 3, "title": "0.6", "state": "open",
+                                 "html_url": "https://github.com/o/r/milestone/3"})
+    m = gh_data.create_milestone("o/r", "0.6")
+    assert (m.number, m.title, m.repo) == (3, "0.6", "o/r")
+    assert json.loads(fake_gh.stdin[0]) == {"title": "0.6"}
+    assert "0.6" not in " ".join(fake_gh.calls[0])
+
+
+def test_a_milestone_github_didnt_make_is_an_error(fake_gh):
+    fake_gh.route("milestones", {})
+    with pytest.raises(GhError, match="didn't create"):
+        gh_data.create_milestone("o/r", "0.6")
+
+
+def test_a_new_project_is_made_for_the_owner_linked_to_the_repository(monkeypatch):
+    seen = []
+    monkeypatch.setattr(gh_data, "_graphql", lambda q, v=None: seen.append((q, v)) or {
+        "data": {"createProjectV2": {"projectV2": {"id": "PVT_new"}}}})
+    assert gh_data.create_project("O_1", "R_1", "Board") == "PVT_new"
+    assert "createProjectV2" in seen[0][0] and seen[0][1] == {"o": "O_1", "r": "R_1", "t": "Board"}
 
 
 def test_the_item_is_read_afresh_with_text_box_line_endings(fake_gh):
@@ -354,10 +412,19 @@ def test_a_filter_set_elsewhere_says_it_waits_for_issues():
 class FakeChecklistDialog:
     """Checks or unchecks the rows named in ``toggle``, then OK or Cancel."""
     toggle: list = []
+    add: list = []   # names New Label/Project adds before the toggles
     answer = None
     shown: list = []
 
-    def __init__(self, parent, title, prompt, model, say=None):
+    def __init__(self, parent, title, prompt, model, say=None, new_label="", new_prompt="",
+                 note="", same_as=None):
+        FakeChecklistDialog.note = note
+        same_as = same_as or (lambda typed: [])
+        FakeChecklistDialog.new = (new_label, new_prompt)
+        for name in FakeChecklistDialog.add:   # as ChecklistDialog.add_new does
+            same = same_as(name)
+            if len(same) <= 1:
+                model.add(same[0] if same else name)
         self.model = model
         FakeChecklistDialog.shown.append((title, prompt, model.rows()))
     def ShowModal(self):
@@ -372,9 +439,10 @@ def edits(monkeypatch):
     run_now(monkeypatch)
     monkeypatch.setattr(ghviewer, "ChecklistDialog", FakeChecklistDialog)
     FakeChecklistDialog.shown, FakeChecklistDialog.toggle = [], []
+    FakeChecklistDialog.add = []
     FakeChecklistDialog.answer = ghviewer.wx.ID_OK
     sent = []
-    monkeypatch.setattr(ghviewer, "fetch_label_names", lambda repo: ["bug", "docs", "ui"])
+    monkeypatch.setattr(ghviewer, "fetch_label_names", lambda repo, limit=100: ["bug", "docs", "ui"])
     monkeypatch.setattr(ghviewer, "fetch_assignable_users", lambda repo: ["alice", "bob"])
     monkeypatch.setattr(ghviewer, "change_item_labels",
                         lambda item, repo, add, rem: sent.append(("labels", repo, add, rem)))
@@ -423,11 +491,48 @@ def test_labels_cancelled_or_unchanged_send_nothing(edits):
     assert edits == []
 
 
-def test_a_repository_with_no_labels_says_so(edits, monkeypatch):
-    monkeypatch.setattr(ghviewer, "fetch_label_names", lambda repo: [])
+def test_a_repository_with_no_labels_still_opens_the_box(edits, monkeypatch):
+    monkeypatch.setattr(ghviewer, "fetch_label_names", lambda repo, limit=100: [])
     f = fake_frame(_item())
+    FakeChecklistDialog.answer = ghviewer.wx.ID_CANCEL
     Frame._set_labels_flow(f)
-    assert FakeChecklistDialog.shown == [] and f.said == ["o/r has no labels."]
+    title, prompt, rows = FakeChecklistDialog.shown[0]
+    assert prompt == "Labels for #5 Bug" and rows == []
+    assert FakeChecklistDialog.note == "o/r has no labels yet."
+    assert FakeChecklistDialog.new == ("&New Label…", "Name of the new label in o/r:")
+
+
+def test_a_new_label_is_created_then_added(edits, monkeypatch):
+    created = []
+    monkeypatch.setattr(ghviewer, "create_label_in",
+                        lambda repo, name: created.append((repo, name)))
+    item = _item()
+    f = fake_frame(item)
+    FakeChecklistDialog.add = ["triage"]
+    Frame._set_labels_flow(f)
+    assert created == [("o/r", "triage")]
+    assert edits == [("labels", "o/r", ["triage"], [])]
+    assert item.labels == ["triage"]
+    assert f.said == ["Created triage. #5: added triage. Labels now: triage."]
+
+
+def test_a_new_label_unchecked_again_is_not_created(edits, monkeypatch):
+    monkeypatch.setattr(ghviewer, "create_label_in", lambda repo, name: pytest.fail("created"))
+    f = fake_frame(_item())
+    FakeChecklistDialog.add = ["triage"]
+    FakeChecklistDialog.toggle = ["triage"]
+    Frame._set_labels_flow(f)
+    assert edits == [] and f.said == ["Labels unchanged."]
+
+
+
+
+def test_no_one_to_assign_is_shown_in_a_box(edits, monkeypatch):
+    monkeypatch.setattr(ghviewer, "fetch_assignable_users", lambda repo: [])
+    f = fake_frame(_item())
+    Frame._set_assignees_flow(f)
+    assert BOXES == [("Set Assignees", "No one can be assigned in o/r.")]
+    assert FakeChecklistDialog.shown == [] and f._item_edit_busy is False
 
 
 def test_labels_on_a_fork_go_upstream(edits):
@@ -457,7 +562,7 @@ def test_a_failed_save_is_said_and_changes_nothing(edits, monkeypatch):
     FakeChecklistDialog.toggle = ["alice"]
     Frame._set_assignees_flow(f)
     assert item.assignees == [] and f.redrawn == []
-    assert f.said == ["Couldn't change #5: HTTP 422: too many assignees"]
+    assert BOXES == [("Couldn't Do It", "Couldn't change #5.\n\nHTTP 422: too many assignees")]
     assert f._item_edit_busy is False
 
 
@@ -479,25 +584,54 @@ def test_projects_add_and_remove(edits, monkeypatch):
     assert f.said == ["#5: added Roadmap, removed Bugs (#2), Old (closed). Projects now: Roadmap."]
 
 
-def test_projects_without_permission_explain_it(edits, monkeypatch):
+def test_projects_without_permission_explain_it(edits, monkeypatch, message_dialog):
     def boom(item, repo):
         raise MissingScope("project")
     monkeypatch.setattr(ghviewer, "fetch_item_projects", boom)
-    boxes = []
-    monkeypatch.setattr(ghviewer.wx, "MessageBox", lambda msg, *a, **k: boxes.append(msg))
     f = fake_frame(_item())
     Frame._set_projects_flow(f)
-    assert f.said == ["Couldn't get the projects of o/r: it needs gh's \"project\" permission."]
-    assert "gh auth refresh -h github.com -s project" in boxes[0]
+    assert f.announced[-1] == ("Couldn't get the projects of o/r: it needs gh's "
+                               "\"project\" permission.")
+    (box,) = message_dialog.shown
+    assert box.caption == "Permission Needed"
+    assert box.message.startswith("Couldn't get the projects of o/r. That needs gh's "
+                                  "\"project\" permission")
+    assert "gh auth refresh -h github.com -s project" in box.message
     assert f._item_edit_busy is False
 
 
-def test_no_projects_says_so(edits, monkeypatch):
+def test_no_projects_still_opens_the_box(edits, monkeypatch):
     monkeypatch.setattr(ghviewer, "fetch_item_projects",
-                        lambda item, repo: ItemProjects("I_5", [], []))
+                        lambda item, repo: ItemProjects("I_5", [], [], owner="org"))
     f = fake_frame(_item())
+    FakeChecklistDialog.answer = ghviewer.wx.ID_CANCEL
     Frame._set_projects_flow(f)
-    assert f.said == ["o/r and its owner have no open projects."]
+    assert FakeChecklistDialog.note == "o/r and org have no open projects."
+    assert FakeChecklistDialog.new == ("&New Project…", "Title of the new project, for org:")
+
+
+def test_a_new_project_is_created_for_the_owner_and_the_item_added(edits, monkeypatch):
+    made = []
+    monkeypatch.setattr(ghviewer, "create_project",
+                        lambda owner, repo_id, title: made.append((owner, repo_id, title)) or "NEW")
+    monkeypatch.setattr(ghviewer, "fetch_item_projects", lambda item, repo: ItemProjects(
+        "I_5", [Project("P1", "Roadmap", 1)], [], repo_id="R_1", owner_id="O_1", owner="org"))
+    f = fake_frame(_item())
+    FakeChecklistDialog.add = ["Triage board"]
+    Frame._set_projects_flow(f)
+    assert made == [("O_1", "R_1", "Triage board")]
+    assert edits == [("add", "NEW", "I_5")]
+    assert f.said == ["Created Triage board. #5: added Triage board. Projects now: Triage board."]
+
+
+def test_adding_a_name_already_listed_checks_it_instead(edits, monkeypatch):
+    monkeypatch.setattr(ghviewer, "create_project", lambda *a: pytest.fail("created"))
+    monkeypatch.setattr(ghviewer, "fetch_item_projects", lambda item, repo: ItemProjects(
+        "I_5", [Project("P1", "Roadmap", 1)], []))
+    f = fake_frame(_item())
+    FakeChecklistDialog.add = ["roadmap"]
+    Frame._set_projects_flow(f)
+    assert edits == [("add", "P1", "I_5")]
 
 
 class FakeEditDialog:
@@ -576,13 +710,13 @@ def test_project_rows_are_unique_even_for_twins():
 
 
 def test_an_unexpected_error_frees_the_next_change(edits, monkeypatch):
-    def broken(repo):
+    def broken(repo, limit=100):
         raise ValueError("bad JSON")
     monkeypatch.setattr(ghviewer, "fetch_label_names", broken)
     f = fake_frame(_item())
     Frame._set_labels_flow(f)
     assert f._item_edit_busy is False
-    assert f.said == ["Couldn't get the labels of o/r: ValueError: bad JSON"]
+    assert BOXES[0][1] == "Couldn't get the labels of o/r.\n\nValueError: bad JSON"
 
 
 def test_a_box_due_after_leaving_issues_is_dropped(edits, monkeypatch):
@@ -631,6 +765,23 @@ def test_keys_in_issues_and_prs(key, action, focus):
     assert f.calls == [action]
 
 
+@pytest.mark.parametrize("view", [ghviewer.VIEW_MY_WORK, ghviewer.VIEW_SEARCH_ISSUES])
+@pytest.mark.parametrize("key, action", [
+    ("I", "_set_milestone_flow"), ("L", "_set_labels_flow"), ("E", "_edit_item_flow"),
+])
+def test_keys_in_my_work_and_search_results(view, key, action):
+    f = _hook_frame(view, item=_item())
+    f._go_to_event_repo = lambda: f.calls.append("_go_to_event_repo")
+    Frame.on_char_hook(f, Key(ord(key)))
+    assert f.calls == [action]
+
+
+def test_g_in_my_work_still_goes_to_the_repository():
+    f = _hook_frame(ghviewer.VIEW_MY_WORK, item=_item())
+    Frame.on_char_hook(f, Key(ord("G")))
+    assert f.calls == ["_go_to_event_repo"]
+
+
 def test_e_in_workflow_runs_is_still_rerun():
     f = _hook_frame(ghviewer.VIEW_WORKFLOW)
     Frame.on_char_hook(f, Key(ord("E")))
@@ -641,4 +792,276 @@ def test_keys_are_listed_in_keyboard_shortcuts():
     import commands
     keys = {(c.keys, c.where) for c in commands.LIST_KEYS}
     for k in "ILAPE":
-        assert (k, commands.ISSUES) in keys
+        assert (k, commands.ITEM_LISTS) in keys
+
+
+# ── Second review ───────────────────────────────────────────────────────
+
+from test_set_milestone import ACCESS  # noqa: E402
+
+
+@pytest.mark.parametrize("view", [ghviewer.VIEW_MY_WORK, ghviewer.VIEW_SEARCH_ISSUES])
+def test_an_item_in_a_fork_is_changed_in_the_fork_itself(edits, view):
+    # From My Work or a search, the item's repository is exact; swapping a
+    # fork for its upstream would change a different issue with that number.
+    f = fake_frame(_item(repo="me/fork"), view=view)
+    FakeChecklistDialog.toggle = ["bug"]
+    Frame._set_labels_flow(f)
+    assert edits == [("labels", "me/fork", ["bug"], [])]
+
+
+def test_in_issues_and_prs_a_fork_still_means_its_upstream(edits):
+    f = fake_frame(_item(), repo="me/fork")
+    FakeChecklistDialog.toggle = ["bug"]
+    Frame._set_labels_flow(f)
+    assert edits == [("labels", "up/r", ["bug"], [])]
+
+
+@pytest.mark.parametrize("flow, what", [
+    (Frame._set_labels_flow, "the labels"), (Frame._set_assignees_flow, "the assignees"),
+    (Frame._set_milestone_flow, "the milestone"),
+])
+def test_without_access_a_box_says_so_before_any_choices(edits, monkeypatch, flow, what):
+    monkeypatch.setattr(ghviewer, "fetch_milestones", lambda *a, **k: [])
+    monkeypatch.setattr(ghviewer.wx, "SingleChoiceDialog",
+                        lambda *a, **k: pytest.fail("no choices without access"))
+    ACCESS.add("o/r")
+    f = fake_frame(_item())
+    flow(f)
+    assert BOXES == [("Can't Change It", f"You can't change {what} of #5: that needs "
+                      "write or triage access to o/r.")]
+    assert FakeChecklistDialog.shown == [] and edits == [] and f._item_edit_busy is False
+
+
+def test_projects_and_edit_dont_ask_for_repository_access(edits, monkeypatch):
+    # Projects have their own permissions, and an author may edit their own issue.
+    monkeypatch.setattr(ghviewer, "fetch_item_projects",
+                        lambda item, repo: ItemProjects("I_5", [Project("P1", "R", 1)], []))
+    ACCESS.add("o/r")
+    f = fake_frame(_item())
+    FakeChecklistDialog.answer = ghviewer.wx.ID_CANCEL
+    Frame._set_projects_flow(f)
+    assert FakeChecklistDialog.shown and BOXES == []
+
+
+def test_typing_an_existing_project_title_checks_it(edits, monkeypatch):
+    monkeypatch.setattr(ghviewer, "create_project", lambda *a: pytest.fail("duplicate made"))
+    data = ItemProjects("I_5", [Project("A", "Roadmap", 1, owner="org"),
+                                Project("B", "Board", 2, owner="org")], [])
+    monkeypatch.setattr(ghviewer, "fetch_item_projects", lambda item, repo: data)
+    f = fake_frame(_item())
+    FakeChecklistDialog.add = ["ROADMAP"]
+    Frame._set_projects_flow(f)
+    assert edits == [("add", "A", "I_5")]
+
+
+def test_typing_a_title_two_projects_share_adds_nothing(edits, monkeypatch):
+    monkeypatch.setattr(ghviewer, "create_project", lambda *a: pytest.fail("duplicate made"))
+    data = ItemProjects("I_5", [Project("A", "Roadmap", 1, owner="org"),
+                                Project("B", "Roadmap", 2, owner="me")], [])
+    monkeypatch.setattr(ghviewer, "fetch_item_projects", lambda item, repo: data)
+    f = fake_frame(_item())
+    FakeChecklistDialog.add = ["Roadmap"]
+    Frame._set_projects_flow(f)
+    assert edits == [] and f.said == ["Projects unchanged."]
+
+
+def test_a_failure_after_making_a_project_says_it_was_made(edits, monkeypatch):
+    monkeypatch.setattr(ghviewer, "create_project", lambda *a: "NEW")
+
+    def refuse(pid, cid):
+        raise GhError("Resource not accessible")
+    monkeypatch.setattr(ghviewer, "add_to_project", refuse)
+    monkeypatch.setattr(ghviewer, "fetch_item_projects", lambda item, repo: ItemProjects(
+        "I_5", [], [], repo_id="R", owner_id="O", owner="org"))
+    f = fake_frame(_item())
+    FakeChecklistDialog.add = ["Board"]
+    Frame._set_projects_flow(f)
+    assert BOXES[0][1] == ("Couldn't change #5.\n\nCreated Board, then: "
+                           "Resource not accessible")
+
+
+def test_a_dropped_milestone_change_is_an_error(fake_gh):
+    # No write access: GitHub answers 200 with the issue unchanged.
+    fake_gh.route("PATCH", {"number": 7, "milestone": None})
+    with pytest.raises(gh_data.NotChanged, match="write access to o/r"):
+        gh_data.set_item_milestone(ISSUE, "o/r", gh_data.Milestone(2, "1.0"))
+
+
+def test_a_milestone_change_github_made_is_fine(fake_gh):
+    fake_gh.route("PATCH", {"number": 7, "milestone": {"number": 2}})
+    gh_data.set_item_milestone(ISSUE, "o/r", gh_data.Milestone(2, "1.0"))
+    fake_gh.routes.clear()
+    fake_gh.route("PATCH", {"number": 7, "milestone": None})
+    gh_data.set_item_milestone(ISSUE, "o/r", None)
+
+
+def test_assignees_github_ignored_are_an_error(fake_gh):
+    fake_gh.route("assignees", {"number": 7, "assignees": [{"login": "bob"}]})
+    with pytest.raises(gh_data.NotChanged):
+        gh_data.change_item_assignees(ISSUE, "o/r", ["alice"], [])
+    with pytest.raises(gh_data.NotChanged):
+        gh_data.change_item_assignees(ISSUE, "o/r", [], ["bob"])
+
+
+def test_assignees_github_took_are_fine(fake_gh):
+    fake_gh.route("POST", {"number": 7, "assignees": [{"login": "Alice"}]})
+    fake_gh.route("DELETE", {"number": 7, "assignees": [{"login": "Alice"}]})
+    gh_data.change_item_assignees(ISSUE, "o/r", ["alice"], ["bob"])
+
+
+@pytest.mark.parametrize("perms, ok", [
+    ({"admin": False, "maintain": False, "push": False, "triage": True, "pull": True}, True),
+    ({"admin": False, "maintain": False, "push": False, "triage": False, "pull": True}, False),
+    (None, True),
+])
+def test_who_can_change_items(fake_gh, perms, ok):
+    fake_gh.route("repos/o/r", perms if perms is not None else "")
+    assert gh_data.can_change_items("o/r") is ok
+
+
+def test_access_unknown_when_github_wont_say(fake_gh):
+    fake_gh.route("repos/o/r", GhError("HTTP 500"))
+    assert gh_data.can_change_items("o/r") is True
+
+
+# ── Speech, from the NVDA run (nvda-edit-results-2026-11-08) ────────────
+
+
+def test_a_result_is_said_after_the_box_queued_behind_the_row(monkeypatch):
+    # Said as the box closed, "Milestone unchanged." was cancelled by NVDA
+    # reading the row again as focus came back.
+    later = []
+    monkeypatch.setattr(ghviewer.wx, "CallLater", lambda ms, fn, *a: later.append((ms, fn, a)))
+    f = SimpleNamespace(announced=[], _item_edit_busy=True, AFTER_BOX_MS=Frame.AFTER_BOX_MS)
+    f._announce = f.announced.append
+    f._tell_after_box = lambda m: Frame._tell_after_box(f, m)
+    Frame._item_edit_done(f, "Milestone unchanged.")
+    assert f.announced == ["Milestone unchanged."] and f._item_edit_busy is False
+    ((ms, fn, args),) = later
+    assert ms >= 250 and fn is ghviewer.announce.announce
+    assert args == ("Milestone unchanged.", ghviewer.announce.RESULT, False, True)  # queued
+
+
+class FakeListBox:
+    def __init__(self):
+        self.strings = {}
+    def GetSelection(self): return 0
+    def SetString(self, i, s): self.strings[i] = s
+    def SetSelection(self, i): pass
+
+
+@pytest.mark.parametrize("platform, jaws, spoken", [
+    ("__WXMSW__", False, False),   # NVDA reads the changed row itself
+    ("__WXMSW__", True, True),     # JAWS doesn't
+    ("__WXMAC__", False, True),    # VoiceOver isn't told
+])
+def test_space_speaks_once_whatever_the_screen_reader(monkeypatch, platform, jaws, spoken):
+    monkeypatch.setattr(ghviewer.wx, "Platform", platform)
+    monkeypatch.setattr(ghviewer.speech, "jaws_running", lambda: jaws)
+    monkeypatch.setattr(ghviewer.wx.Accessible, "NotifyEvent",
+                        lambda *a: pytest.fail("no name-change event: NVDA spoke it twice"),
+                        raising=False)
+    said = []
+    dlg = SimpleNamespace(model=Checklist(["bug"], []), list=FakeListBox(),
+                          summary=SimpleNamespace(SetLabel=lambda s: None), _say=said.append)
+    ghviewer.ChecklistDialog.toggle(dlg)
+    assert dlg.list.strings[0] == "bug, checked"
+    assert said == (["bug checked"] if spoken else [])
+
+
+# ── A column for everything that can be set ────────────────────────────
+
+
+ROW = {"number": 24, "title": "T", "state": "OPEN", "url": "u",
+       "projectItems": [{"title": "The Chat Place", "status": {"name": "Needs retest"}},
+                        {"title": "Roadmap", "status": None}]}
+
+
+def test_projects_are_read_with_their_status(fake_gh):
+    fake_gh.route("issue list", [ROW])
+    (item,) = gh_data.fetch_issues("o/r")
+    assert item.projects == ["The Chat Place (Needs retest)", "Roadmap"]
+    assert item.projects_known
+    assert item.to_row(["projects"]) == {"projects": "The Chat Place (Needs retest), Roadmap"}
+    assert "projectItems" in gh_data.ISSUE_FIELDS and "projectItems" in gh_data.PR_LIGHT_FIELDS
+
+
+def test_without_the_project_permission_the_list_still_loads(fake_gh):
+    def answer(args):
+        if "projectItems" in " ".join(args):
+            raise GhError("error: your authentication token is missing required scopes "
+                          "[read:project]")
+        return [dict(ROW, projectItems=None)]
+    fake_gh.route("issue list", answer)
+    (item,) = gh_data.fetch_issues("o/r")
+    assert item.projects == [] and item.projects_known is False
+
+
+def test_a_timeout_drops_projects_before_giving_up(fake_gh):
+    seen = []
+
+    def answer(args):
+        fields = args[args.index("--json") + 1]
+        seen.append(fields)
+        if "projectItems" in fields:
+            raise GhError("HTTP 502: 502 Bad Gateway (https://api.github.com/graphql)")
+        return [dict(ROW, projectItems=None)]
+    fake_gh.route("pr list", answer)
+    (pr,) = gh_data.fetch_prs("o/r")
+    assert seen == [gh_data.PR_FIELDS, gh_data.PR_LIGHT_FIELDS,
+                    gh_data._without_projects(gh_data.PR_LIGHT_FIELDS)]
+    assert pr.projects_known is False and not pr.has_stats
+
+
+def test_issues_too_drop_projects_on_a_timeout(fake_gh):
+    calls = []
+
+    def answer(args):
+        calls.append(args)
+        if len(calls) == 1:
+            raise GhError("HTTP 504: Gateway Timeout")
+        return [ROW]
+    fake_gh.route("issue list", answer)
+    gh_data.fetch_issues("o/r")
+    assert "projectItems" not in calls[1][calls[1].index("--json") + 1]
+
+
+def test_other_failures_are_not_retried(fake_gh):
+    fake_gh.route("issue list", GhError("HTTP 404: Not Found"))
+    with pytest.raises(GhError, match="404"):
+        gh_data.fetch_issues("o/r")
+    assert len(fake_gh.called_with("issue list")) == 1
+
+
+def test_search_results_say_their_projects_are_unknown():
+    assert gh_data.parse_search_item({"number": 1}).projects_known is False
+
+
+def test_every_settable_thing_has_a_column():
+    from gh_columns import CATALOG
+    for col in ("title", "labels", "assignees", "milestone", "projects"):
+        assert col in gh_data.ALL_COLUMNS and col in CATALOG
+    for cols in (gh_data.MY_WORK_COLUMNS, gh_data.SEARCH_ITEM_COLUMNS):
+        for col in ("title", "labels", "assignees", "milestone"):
+            assert col in cols   # projects: GitHub's search doesn't give them
+
+
+def test_details_name_the_projects():
+    item = Item(5, "Bug", "OPEN", "u", False, projects=["The Chat Place (Needs retest)"])
+    text = SimpleNamespace(value="")
+    f = SimpleNamespace(items=[item], details_text=SimpleNamespace(
+        SetValue=lambda v: setattr(text, "value", v), Clear=lambda: None))
+    Frame._show_issue_details(f, 0)
+    assert "Projects: The Chat Place (Needs retest)" in text.value.splitlines()
+
+
+def test_after_set_projects_the_row_shows_them_keeping_status(edits, monkeypatch):
+    monkeypatch.setattr(ghviewer, "fetch_item_projects", lambda item, repo: ItemProjects(
+        "I_5", [Project("P1", "Roadmap", 1), Project("P2", "The Chat Place", 2)],
+        [Project("P2", "The Chat Place", 2, item_id="E2")]))
+    item = _item(projects=["The Chat Place (Needs retest)"])
+    f = fake_frame(item)
+    FakeChecklistDialog.toggle = ["Roadmap"]
+    Frame._set_projects_flow(f)
+    assert item.projects == ["Roadmap", "The Chat Place (Needs retest)"]

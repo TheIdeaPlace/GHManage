@@ -94,6 +94,10 @@ That message is replaced by the next thing GHManage tells you, so the update als
 
 To check by hand, choose **Help → Check for Updates…**. It always answers: either "GHManage 1.2.3 is up to date", or the **Update Available** dialog.
 
+### Turning automatic updates off
+
+**Help → Automatic Updates** is checked until you turn it off. Turned off, GHManage doesn't look for updates when it starts, and it doesn't install an update it downloaded earlier either, so the version you have stays until you choose otherwise. **Help → Check for Updates…** still works. If it finds an update, the **Update Available** dialog offers **Restart Now** to install it, and **Not Now** to leave it uninstalled. Choose **Automatic Updates** again to turn updating back on. GHManage says which way it is now each time.
+
 An update never touches your favorites, the repositories you opened by address, or anything else you have set up.
 
 ### The portable versions
@@ -176,13 +180,36 @@ Switching changes the account `gh` uses in your terminal too, exactly as `gh aut
 
 ### Permissions gh does not ask for
 
-When you sign in, `gh` asks GitHub for the permissions most commands need. A few GHManage features need one more, and say so when you use them, with the command that adds it. For example, **Watch Settings** needs the "notifications" permission:
+When you sign in, `gh` asks GitHub for the permissions most commands need. A few GHManage features need more:
+
+| Permission | What it's for |
+|------------|---------------|
+| project | Setting an issue's or pull request's projects, and showing them in the list |
+| notifications | Watch Settings |
+| user:follow | Following and unfollowing people |
+| security_events | Security alerts. The "repo" permission gh asks for at sign-in already includes it. |
+| delete_repo | Deleting a repository. It's optional, so it isn't added unless you ask for it. |
+
+The easiest way is to add them all at once, before you need them. **Help → GitHub Permissions…** lists each one, what it's for and whether `gh` has it, with one command that adds every one it's missing. In the box:
+
+- **Copy Command** puts the command on the clipboard, to paste into a terminal.
+- **Run in a Terminal** opens a terminal running the command for you.
+- **Check Again** reads the permissions again when it's done.
+- **Include permission to delete repositories** adds delete_repo to the command.
+
+For example:
 
 ```
-gh auth refresh -h github.com -s notifications
+gh auth refresh -h github.com -s project,notifications,user:follow
 ```
 
-`gh` opens your browser to approve it, once.
+In the terminal, `gh` shows a one-time code and asks you to press `Enter`. Your browser then opens on GitHub, where you type the code and approve. When the terminal says it's done, close it and choose **Check Again**. The permissions `gh` already has are kept.
+
+The command changes the account `gh` is using now, which the box names at the top. If you use more than one GitHub account, switch to each and do it again (see [More than one account](#more-than-one-account)).
+
+If `gh` uses a token from the `GH_TOKEN` or `GITHUB_TOKEN` environment variable, `gh` can't change its permissions. The box says so, and doesn't offer the command: change the token's permissions on GitHub instead, at https://github.com/settings/tokens. If `gh` isn't installed or isn't signed in, the box says that instead.
+
+If you haven't added a permission, the feature that needs it says so in a message box when you use it. The box has the command for that permission, a **Copy Command** button, and an **All Permissions…** button that opens the same list as the Help menu.
 
 ### When GHManage cannot find gh
 
@@ -262,7 +289,7 @@ Lists load 100 items to begin with. `Ctrl++` (**File → View More**) loads the 
 | **File** | Open Repository or Address, Remove from List, Hidden Repositories, Archive or Unarchive Repository, Delete Repository from GitHub, Switch GitHub Account, Refresh, Back, View More, Search GitHub, Go To Issue, Quick Filter, Clear Quick Filter, Next and Previous Comment, Quit |
 | **Actions** | Everything that acts on the item you are on, starting with what `Enter` does. See [The Actions Menu](#the-actions-menu). |
 | **View** | View Mode, List Mode, Sort Order, Columns, State, Filter, Mark Changed Lines With, Next Pane, Previous Pane, Include Read Notifications, Speak Results |
-| **Help** | User Guide, Keyboard Shortcuts, Command Palette, Report a Bug, Open Log Folder, Check for Updates, About GHManage |
+| **Help** | User Guide, Keyboard Shortcuts, Command Palette, GitHub Permissions, Report a Bug, Open Log Folder, Check for Updates, Automatic Updates, About GHManage |
 
 **Help → User Guide** (`F1`, or `fn+F1` on a Mac) opens this guide in your web browser.
 
@@ -437,19 +464,25 @@ Closing and reopening ask first, naming the item: "Close issue #12?" with its ti
 
 ### Setting the milestone
 
-`I`, or **Actions → Set Milestone…**, puts the selected issue or pull request in one of the repository's open milestones, or takes it out of the one it is in. It works from the details panel too. The **Set Milestone** box lists "No milestone" first, then the open milestones with their due dates, such as "2027.1, due 2026-12-01", with the item's current milestone selected. If it is in a milestone that has been closed, that one is listed last, marked "closed", so you can see where it is. Choose one and press `Enter`; GHManage says, for example, "#12 is in milestone 2027.1.", and the row and the details panel change where you are, without reloading the list. `Escape` leaves it as it was. Changing a milestone needs write access to the repository.
+`I`, or **Actions → Set Milestone…**, puts the selected issue or pull request in one of the repository's open milestones, or takes it out of the one it is in. It works from the details panel too. The **Set Milestone** box lists "No milestone" first, then the open milestones with their due dates, such as "2027.1, due 2026-12-01", with the item's current milestone selected. If it is in a milestone that has been closed, that one is listed after the open ones, marked "closed", so you can see where it is. Choose one and press `Enter`; GHManage says, for example, "#12 is in milestone 2027.1.", and the row and the details panel change where you are, without reloading the list. `Escape` leaves it as it was. Changing a milestone needs write access to the repository.
 
-The details panel names an item's milestone on a "Milestone:" line, and the **Milestone** column can be added under **View → Columns…**.
+**New milestone…** is always last in the list. It asks for a title, creates the milestone and puts the item in it: "Created milestone 0.6. #12 is in it." A repository with no milestones yet still gets the box, which says so at the top, so this is how its first one is made. If a milestone with that title already exists, even a closed one, GHManage uses it rather than making a second, and says so.
+
+The details panel names an item's milestone on a "Milestone:" line and its projects on a "Projects:" line, each project with its status, such as "The Chat Place (Needs retest)". **View → Columns…** has a column for each thing you can set: Labels, Assignees, Milestone and Projects, in Issues & PRs. My Work and search results have all of them except Projects, because GitHub's search doesn't say which projects an item is in. If gh doesn't have its "read:project" permission, or GitHub is too slow with a big list, the list loads without projects rather than not at all.
 
 ### Labels, assignees and projects
 
 `L`, `A` and `P`, or **Actions → Set Labels…**, **Set Assignees…** and **Set Projects…**, each open a list where every row says whether it is checked, for example "bug, checked" or "docs, not checked". Press `Space` to check or uncheck the selected row. GHManage says what it is now, such as "bug checked", and the line under the list sums up what is checked. Press `Enter` to save, or `Escape` to leave everything as it was. Typing a letter moves to the next row that starts with it.
 
-- **Set Labels** lists the repository's labels, A to Z.
+- **Set Labels** lists the repository's labels, A to Z. The **New Label…** button asks for a name and adds it to the list, checked and marked "new". It is created in light grey when you save, if it is still checked. A name already in the list is checked instead of added twice.
 - **Set Assignees** lists everyone who can be assigned in the repository. Anyone assigned who can no longer be assigned is listed at the end, checked, so you can see them and take them off.
-- **Set Projects** lists the open projects of the repository and of its owner, the user or organization. Where two have the same title, each is followed by its number, such as "Bugs (#2)". A closed project the item is still in is listed at the end, marked "(closed)". Projects need gh's "project" permission. If gh doesn't have it, GHManage says so and shows the command that adds it.
+- **Set Projects** lists the open projects of the repository and of its owner, the user or organization. Where two have the same title, each is followed by its owner and number, such as "Bugs (TheIdeaPlace, #2)". A closed project the item is still in is listed at the end, marked "(closed)". The **New Project…** button adds a new project in the same way. It is made for the repository's owner and linked to the repository, so it needs permission to create projects for that owner: yours, or an organization's that lets you. Typing the title of a project already listed checks that project rather than making another of the same name. Projects need gh's "project" permission. If gh doesn't have it, GHManage says so and shows the command that adds it.
 
-Once saved, GHManage says what changed, for example "#12: added bug, removed docs. Labels now: bug, ui.", and the row and the details panel change where you are. All of these, `I` included, work from the details panel too, and need write access to the repository.
+Set Labels and Set Projects open even when the repository has none yet. The box says so, and focus starts on the New button. When there is no one to assign, or something goes wrong, such as GitHub not answering, GHManage says so in a message box, as well as on the status bar.
+
+Once saved, GHManage says what changed, for example "#12: added bug, removed docs. Labels now: bug, ui.", and the row and the details panel change where you are. All of these, `I` included, work from the details panel too, and in **My Work** and search results as well as Issues & PRs. There, an item in a fork is changed in that fork, the repository it is in.
+
+Milestones, labels and assignees need write or triage access to the repository. Without it, GitHub ignores those changes without saying so. GHManage therefore checks first, and if you can't make the change it tells you in a message box instead of opening the list. After a save, it also checks that GitHub really made the change, and says so if it didn't.
 
 ### Editing the title and description
 
@@ -549,7 +582,7 @@ Selecting a milestone shows it in the details panel: its title, state, due date,
 
 **View → State** is shared: choose **All** in a milestone's issues to see the closed ones as well, and the milestones list shows all of its milestones too when you go back.
 
-On a fork, milestones come from the upstream repository, the same one the issues come from.
+On a fork, the Milestones view lists the upstream repository's milestones, the same one Issues & PRs takes the issues from.
 
 To put an issue or pull request in a milestone, see [Setting the milestone](#setting-the-milestone).
 
@@ -1360,7 +1393,7 @@ A screen reader reads a row's columns from left to right, so the order of the co
 
 | View | Shown by default | Also available |
 |------|------------------|----------------|
-| Issues & PRs | Number, Type, State, Title | Author, Created, Updated, Labels, Assignees, Milestone, Comments, Draft, Review, Changes, Files, Base branch, Head branch |
+| Issues & PRs | Number, Type, State, Title | Author, Created, Updated, Labels, Assignees, Milestone, Projects, Comments, Draft, Review, Changes, Files, Base branch, Head branch |
 | Branches | Branch, Last commit, Author, Date | Protected, Ahead, Behind |
 | Commits | Commit, Message, Author, Date | Branches, Files, Changes |
 | Tags | Tag, Commit | |
@@ -1375,8 +1408,8 @@ A screen reader reads a row's columns from left to right, so the order of the co
 | Published Pages | Page, Address | Size |
 | Favorites | Type, Repository, Title, Subtitle | |
 | Notifications | Reason, Type, Title, Repository, Updated, Status | |
-| My Work | Why, Type, Number, Title, Repository, Updated | Author, Labels |
-| Search results: issues and pull requests | Type, Number, State, Title, Repository, Updated | Author, Labels, Comments |
+| My Work | Why, Type, Number, Title, Repository, Updated | Author, Labels, Assignees, Milestone |
+| Search results: issues and pull requests | Type, Number, State, Title, Repository, Updated | Author, Labels, Assignees, Milestone, Comments |
 | My Organizations | Organization, Role, Repositories | |
 | Activity | Actor, Action, Repository, Title, Date | |
 | Changed Files | File, Status, Added, Removed, Comments | |
@@ -1433,7 +1466,7 @@ Everything that acts on what the list is showing is on the **Actions** menu, whi
 | Close Issue/PR | `Ctrl+W` | Issues & PRs |
 | Reopen Issue/PR | `Ctrl+Shift+W` | Issues & PRs |
 | Add Comment… | `Ctrl+M`, or `M` in the list | Issues & PRs; Discussions |
-| Set Milestone…, Set Labels…, Set Assignees…, Set Projects…, Edit Title and Description… | `I`, `L`, `A`, `P`, `E` in the list | Issues & PRs |
+| Set Milestone…, Set Labels…, Set Assignees…, Set Projects…, Edit Title and Description… | `I`, `L`, `A`, `P`, `E` in the list | Issues & PRs, My Work, search results |
 | New Issue… | `Ctrl+N` | Everywhere, for the repository in front of you; shows the new issue in its Issues & PRs |
 | Search This Repository… | `Ctrl+Shift+S` | Everywhere, for the repository in front of you: a search starting `repo:owner/name` |
 | Read README | `Ctrl+Shift+R` | Everywhere, for the repository in front of you: its README, in Files |
@@ -1645,6 +1678,8 @@ On a Mac, use `Cmd` in place of `Ctrl` for every shortcut that has one, `Option`
 |-----|--------|
 | `Enter` | Open the issue, pull request or repository here; `Backspace` comes back |
 | `G` or `Ctrl+Shift+G` | Open its repository here |
+| `I` / `L` / `A` / `P` | On an issue or pull request: set the milestone / labels / assignees / projects |
+| `E` | On an issue or pull request: edit the title and description |
 | `Ctrl+S` | Save the search (search results) |
 | `Ctrl+Shift+F` | A new search |
 

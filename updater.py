@@ -70,8 +70,12 @@ def configure_logging(debug: bool = False) -> None:
         pass
 
 
-def bootstrap() -> None:
-    """Run the Velopack app hooks. Call first thing in main()."""
+def bootstrap(auto_apply: bool = True) -> None:
+    """Run the Velopack app hooks. Call first thing in main().
+
+    ``auto_apply`` False (Help > Automatic Updates off): an update downloaded
+    earlier is left uninstalled at startup; Help > Check for Updates can
+    still install one when asked."""
     # Only a packaged build is ever launched by Update.exe. Running the hooks
     # from a source checkout does nothing except print a confusing
     # "NotInstalled" error from the native layer.
@@ -90,7 +94,7 @@ def bootstrap() -> None:
         # is installed here, before any window appears, and the app relaunches
         # on the new version. This is what makes updates automatic — the user
         # never has to act. Set explicitly rather than relying on the default.
-        velopack.App().set_auto_apply_on_startup(True).run()
+        velopack.App().set_auto_apply_on_startup(bool(auto_apply)).run()
     except Exception as exc:
         logger.error("Velopack bootstrap failed: %s", exc)
 

@@ -176,13 +176,32 @@ Switching changes the account `gh` uses in your terminal too, exactly as `gh aut
 
 ### Permissions gh does not ask for
 
-When you sign in, `gh` asks GitHub for the permissions most commands need. A few GHManage features need one more, and say so when you use them, with the command that adds it. For example, **Watch Settings** needs the "notifications" permission:
+When you sign in, `gh` asks GitHub for the permissions most commands need. A few GHManage features need more:
+
+| Permission | What it's for |
+|------------|---------------|
+| project | Setting an issue's or pull request's projects, and showing them in the list |
+| notifications | Watch Settings |
+| user:follow | Following and unfollowing people |
+| security_events | Security alerts. The "repo" permission gh asks for at sign-in already includes it. |
+| delete_repo | Deleting a repository. It's optional, so it isn't added unless you ask for it. |
+
+The easiest way is to add them all at once, before you need them. **Help → GitHub Permissions…** lists each one, what it's for and whether `gh` has it, with one command that adds every one it's missing. In the box:
+
+- **Copy Command** puts the command on the clipboard, to paste into a terminal.
+- **Run in a Terminal** opens a terminal running the command for you.
+- **Check Again** reads the permissions again when it's done.
+- **Include permission to delete repositories** adds delete_repo to the command.
+
+For example:
 
 ```
-gh auth refresh -h github.com -s notifications
+gh auth refresh -h github.com -s project,notifications,user:follow
 ```
 
-`gh` opens your browser to approve it, once.
+`gh` shows a one-time code and opens your browser on GitHub, where you approve it, once for each GitHub account. The permissions `gh` already has are kept.
+
+If you haven't added a permission, the feature that needs it says so in a message box when you use it. The box has the command for that permission, a **Copy Command** button, and an **All Permissions…** button that opens the same list as the Help menu.
 
 ### When GHManage cannot find gh
 

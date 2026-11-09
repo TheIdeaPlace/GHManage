@@ -584,7 +584,7 @@ def test_projects_add_and_remove(edits, monkeypatch):
     assert f.said == ["#5: added Roadmap, removed Bugs (#2), Old (closed). Projects now: Roadmap."]
 
 
-def test_projects_without_permission_explain_it(edits, monkeypatch):
+def test_projects_without_permission_explain_it(edits, monkeypatch, message_dialog):
     def boom(item, repo):
         raise MissingScope("project")
     monkeypatch.setattr(ghviewer, "fetch_item_projects", boom)
@@ -592,9 +592,11 @@ def test_projects_without_permission_explain_it(edits, monkeypatch):
     Frame._set_projects_flow(f)
     assert f.announced[-1] == ("Couldn't get the projects of o/r: it needs gh's "
                                "\"project\" permission.")
-    title, message = BOXES[0]
-    assert title == "Permission Needed"
-    assert "gh auth refresh -h github.com -s project" in message
+    (box,) = message_dialog.shown
+    assert box.caption == "Permission Needed"
+    assert box.message.startswith("Couldn't get the projects of o/r. That needs gh's "
+                                  "\"project\" permission")
+    assert "gh auth refresh -h github.com -s project" in box.message
     assert f._item_edit_busy is False
 
 

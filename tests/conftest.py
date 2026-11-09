@@ -128,3 +128,35 @@ def app_data(monkeypatch, tmp_path) -> Path:
     monkeypatch.setattr(favorites, "_app_data_dir", lambda: tmp_path)
     monkeypatch.setattr(pinned_repos, "_app_data_dir", lambda: tmp_path)
     return tmp_path
+
+
+class FakeMessageDialog:
+    """Stands in for wx.MessageDialog (the Permission Needed box, #129):
+    keeps what it showed and answers ``answer`` (wx.ID_CANCEL, Close, unless
+    a test says otherwise)."""
+    shown: list = []
+    answer = None
+
+    def __init__(self, parent, message, caption="", style=0):
+        self.message, self.caption, self.labels = message, caption, ()
+        FakeMessageDialog.shown.append(self)
+
+    def SetYesNoCancelLabels(self, yes, no, cancel):
+        self.labels = (yes, no, cancel)
+        return True
+
+    def ShowModal(self):
+        return FakeMessageDialog.answer
+
+    def Destroy(self):
+        pass
+
+
+@pytest.fixture
+def message_dialog(monkeypatch):
+    import wx
+    import ghviewer
+    FakeMessageDialog.shown = []
+    FakeMessageDialog.answer = wx.ID_CANCEL
+    monkeypatch.setattr(ghviewer.wx, "MessageDialog", FakeMessageDialog)
+    return FakeMessageDialog

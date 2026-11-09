@@ -149,7 +149,7 @@ FRAME_HELPERS = (
     "_start_item_edit", "_item_edit_ask", "_item_edit_done", "_item_edit_failed", "_save_item_edit",
     "_item_edited", "_refresh_details_keeping_caret", "_ask_checklist",
     "_choose_labels", "_choose_assignees", "_choose_projects", "_edit_item",
-    "_new_milestone", "_nothing_to_choose",
+    "_new_milestone", "_nothing_to_choose", "_permission_needed",
 )
 
 

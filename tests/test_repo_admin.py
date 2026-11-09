@@ -271,15 +271,15 @@ def test_cancelling_deletes_nothing(fake_gh, now, monkeypatch):
     assert f.said[-1] == "me/old was not deleted." and f._all_repos
 
 
-def test_delete_without_the_permission_shows_the_command(fake_gh, now, monkeypatch):
+def test_delete_without_the_permission_shows_the_command(fake_gh, now, monkeypatch,
+                                                         message_dialog):
     fake_gh.route("repo view me/old", {"viewerPermission": "ADMIN"})
     fake_gh.route("repo delete", GhError(NO_DELETE_SCOPE))
     monkeypatch.setattr(ghviewer, "DeleteRepoDialog", _Dialog)
-    boxes = []
-    monkeypatch.setattr(ghviewer.wx, "MessageBox", lambda msg, *a, **k: boxes.append(msg))
     f = _frame(["me/old"], 0, repos=[{"nameWithOwner": "me/old"}])
+    f._permission_needed = lambda *a: Frame._permission_needed(f, *a)
     Frame.on_delete_repo(f)
-    assert "gh auth refresh -h github.com -s delete_repo" in boxes[0]
+    assert "gh auth refresh -h github.com -s delete_repo" in message_dialog.shown[0].message
     assert f._all_repos  # still there
     assert "delete_repo" in f.said[-1]
 

@@ -51,6 +51,32 @@ milestone and its projects, each with its status, and **View → Columns…** ha
 column for each: Labels, Assignees, Milestone and Projects. My Work and search
 results gain Assignees and Milestone columns too.
 
+## Give gh the permissions these need, all at once
+
+Some of these features, and a few older ones, need GitHub permissions that `gh`
+doesn't ask for when you sign in:
+- **project:** projects.
+- **notifications:** Watch Settings.
+- **user:follow:** following people.
+- **delete_repo:** deleting a repository. It's optional.
+
+Until now you found out one feature at a time, from a message saying which permission
+was missing (#129).
+
+**Help → GitHub Permissions…** now lists them all, what each is for and whether
+`gh` has it. It gives one command that adds every one that's missing, for example:
+
+```
+gh auth refresh -h github.com -s project,notifications,user:follow
+```
+
+**Copy Command** puts it on the clipboard. **Run in a Terminal** runs it for you:
+`gh` opens your browser on GitHub to approve, once. The permissions `gh` already
+has are kept. **Check Again** shows what has changed.
+
+If you meet a missing permission anyway, the message now has a **Copy Command**
+button, and an **All Permissions…** button that opens the same list.
+
 ## Narrow the list by the same things
 
 **View → Filter** now has **Assigned to Me**, **Assigned To…**, **Opened by

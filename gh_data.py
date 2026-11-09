@@ -114,6 +114,11 @@ class Item:
     assignees: list[str] = field(default_factory=list)
     # The milestone's title, or "" with none (#120).
     milestone: str = ""
+    # The projects it is in, each with its status: "The Chat Place (Needs
+    # retest)". ``projects_known`` False where the list couldn't say: GitHub's
+    # search doesn't give them, nor does gh without its "read:project" permission.
+    projects: list[str] = field(default_factory=list)
+    projects_known: bool = True
     comments: int = 0
     comment_list: list[dict] = field(default_factory=list)
     # PR-specific
@@ -158,6 +163,7 @@ class Item:
             "labels": ", ".join(self.labels),
             "assignees": ", ".join(self.assignees),
             "milestone": self.milestone,
+            "projects": ", ".join(self.projects),
             "comments": str(self.comments),
             "draft": "Yes" if self.is_draft else "No",
             "review": self.review_status,
@@ -177,7 +183,7 @@ class Item:
 
 ALL_COLUMNS = [
     "number", "type", "state", "title", "author", "created", "updated",
-    "labels", "assignees", "milestone", "comments", "draft", "review", "+/-", "files",
+    "labels", "assignees", "milestone", "projects", "comments", "draft", "review", "+/-", "files",
     "base", "head",
 ]
 
@@ -223,8 +229,8 @@ def sort_items(items: list[Item], sort_order: str) -> list[Item]:
 
 
 # JSON fields to request from gh for issues
-ISSUE_FIELDS = "number,title,state,url,author,createdAt,updatedAt,body,labels,assignees,milestone,comments"
-PR_FIELDS = "number,title,state,url,author,createdAt,updatedAt,body,labels,assignees,milestone,comments,isDraft,mergedAt,reviewDecision,additions,deletions,changedFiles,baseRefName,headRefName"
+ISSUE_FIELDS = "number,title,state,url,author,createdAt,updatedAt,body,labels,assignees,milestone,projectItems,comments"
+PR_FIELDS = "number,title,state,url,author,createdAt,updatedAt,body,labels,assignees,milestone,projectItems,comments,isDraft,mergedAt,reviewDecision,additions,deletions,changedFiles,baseRefName,headRefName"
 # The size of each change is what makes GitHub time out (HTTP 502) on a
 # page of very large pull requests (nvaccess/nvda's translation merges);
 # without it the same page comes back.
@@ -262,6 +268,46 @@ def _parse_comments(row: dict) -> tuple[int, list[dict]]:
     return 0, []
 
 
+def _project_names(row: dict) -> list[str]:
+    """The projects in an issue or PR row, each with its status where it has
+    one: "The Chat Place (Needs retest)"."""
+    names = []
+    for p in row.get("projectItems") or []:
+        if not isinstance(p, dict) or not p.get("title"):
+            continue
+        status = (p.get("status") or {}).get("name") if isinstance(p.get("status"), dict) else ""
+        names.append(f"{p['title']} ({status})" if status else p["title"])
+    return names
+
+
+def _without_projects(fields: str) -> str:
+    return ",".join(f for f in fields.split(",") if f != "projectItems")
+
+
+def _run_list(args: list[str], fields: str, parse) -> list:
+    """Run a gh list or view asking for ``fields``. Without gh's
+    "read:project" permission, asking for projects fails the whole call, so
+    it is asked again without them, and the items say their projects are
+    unknown rather than empty."""
+    try:
+        return parse(_run_gh(args))
+    except GhError as exc:
+        if "read:project" not in str(exc) or "projectItems" not in fields:
+            raise
+    return _without_projects_list(args, fields, parse)
+
+
+def _without_projects_list(args: list[str], fields: str, parse) -> list:
+    """``args`` run again without projects; the items say their projects
+    are unknown rather than empty."""
+    args = list(args)
+    args[args.index(fields)] = _without_projects(fields)
+    items = parse(_run_gh(args))
+    for it in items:
+        it.projects_known = False
+    return items
+
+
 def _milestone_title(row: dict) -> str:
     """The title of the milestone in an issue or PR row, or "" with none.
     gh gives ``{"number": 3, "title": "1.1", ...}`` or null."""
@@ -296,6 +342,7 @@ def _parse_issues(raw: str) -> list[Item]:
                 labels=[l["name"] if isinstance(l, dict) else str(l) for l in row.get("labels", [])],
                 assignees=[a["login"] if isinstance(a, dict) else str(a) for a in row.get("assignees", [])],
                 milestone=_milestone_title(row),
+                projects=_project_names(row),
                 comments=_parse_comments(row)[0],
                 comment_list=_parse_comments(row)[1],
             )
@@ -323,6 +370,7 @@ def _parse_prs(raw: str) -> list[Item]:
                 labels=[l["name"] if isinstance(l, dict) else str(l) for l in row.get("labels", [])],
                 assignees=[a["login"] if isinstance(a, dict) else str(a) for a in row.get("assignees", [])],
                 milestone=_milestone_title(row),
+                projects=_project_names(row),
                 comments=_parse_comments(row)[0],
                 comment_list=_parse_comments(row)[1],
                 is_draft=row.get("isDraft", False),
@@ -420,7 +468,14 @@ def fetch_issues(
             args += ["--search", " ".join(item_filter.search_terms())]
     if effective:
         args += ["--repo", effective]
-    return _parse_issues(_run_gh(args))
+    try:
+        return _run_list(args, ISSUE_FIELDS, _parse_issues)
+    except GhError as exc:
+        if not _is_timeout(exc):
+            raise
+    # Projects are what can make a big page too slow for GitHub; the list
+    # without them is worth having.
+    return _without_projects_list(args, ISSUE_FIELDS, _parse_issues)
 
 
 def fetch_prs(
@@ -454,14 +509,20 @@ def fetch_prs(
     if effective:
         args += ["--repo", effective]
     try:
-        return _parse_prs(_run_gh(args))
+        return _run_list(args, PR_FIELDS, _parse_prs)
     except GhError as exc:
         if not _is_timeout(exc):
             raise
     # Again without each change's size, which is what GitHub couldn't
     # work out in time; the list is still worth having.
     args[args.index(PR_FIELDS)] = PR_LIGHT_FIELDS
-    return _parse_prs(_run_gh(args))
+    try:
+        return _run_list(args, PR_LIGHT_FIELDS, _parse_prs)
+    except GhError as exc:
+        if not _is_timeout(exc):
+            raise
+    # And without their projects, which on nvaccess/nvda still timed out.
+    return _without_projects_list(args, PR_LIGHT_FIELDS, _parse_prs)
 
 
 def _is_timeout(exc: GhError) -> bool:
@@ -502,14 +563,11 @@ def fetch_item_by_number(number: int, repo: Optional[str]) -> Optional[Item]:
         if effective:
             args += ["--repo", effective]
         try:
-            raw = _run_gh(args)
+            items = _run_list(args, fields, lambda raw: parser(raw) if raw.strip() else [])
         except GhError as exc:
             if _is_no_such_number(exc):
                 continue
             raise
-        if not raw.strip():
-            continue
-        items = parser(raw)
         if items:
             return items[0]
     return None
@@ -4210,10 +4268,12 @@ def set_watch_level(repo: str, level: str) -> None:
 SEARCH_MAX = 1000
 
 SEARCH_ITEM_COLUMNS = [
-    "type", "number", "state", "title", "repo", "updated", "author", "labels", "comments",
+    "type", "number", "state", "title", "repo", "updated", "author", "labels", "assignees",
+    "milestone", "comments",
 ]
 SEARCH_ITEM_DEFAULT_COLUMNS = ["type", "number", "state", "title", "repo", "updated"]
-MY_WORK_COLUMNS = ["why", "type", "number", "title", "repo", "updated", "author", "labels"]
+MY_WORK_COLUMNS = ["why", "type", "number", "title", "repo", "updated", "author", "labels",
+                   "assignees", "milestone"]
 MY_WORK_DEFAULT_COLUMNS = ["why", "type", "number", "title", "repo", "updated"]
 
 
@@ -4275,6 +4335,7 @@ def parse_search_item(raw: dict) -> Item:
         labels=labels,
         assignees=assignees,
         milestone=_milestone_title(raw),
+        projects_known=False,   # search results don't carry projects
         comments=int(raw.get("comments") or 0),
         is_draft=bool(raw.get("draft")),
         is_merged=bool(is_pr and pr.get("merged_at")),

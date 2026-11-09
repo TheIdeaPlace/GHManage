@@ -966,3 +966,100 @@ def test_space_speaks_once_whatever_the_screen_reader(monkeypatch, platform, jaw
     ghviewer.ChecklistDialog.toggle(dlg)
     assert dlg.list.strings[0] == "bug, checked"
     assert said == (["bug checked"] if spoken else [])
+
+
+# ── A column for everything that can be set ────────────────────────────
+
+
+ROW = {"number": 24, "title": "T", "state": "OPEN", "url": "u",
+       "projectItems": [{"title": "The Chat Place", "status": {"name": "Needs retest"}},
+                        {"title": "Roadmap", "status": None}]}
+
+
+def test_projects_are_read_with_their_status(fake_gh):
+    fake_gh.route("issue list", [ROW])
+    (item,) = gh_data.fetch_issues("o/r")
+    assert item.projects == ["The Chat Place (Needs retest)", "Roadmap"]
+    assert item.projects_known
+    assert item.to_row(["projects"]) == {"projects": "The Chat Place (Needs retest), Roadmap"}
+    assert "projectItems" in gh_data.ISSUE_FIELDS and "projectItems" in gh_data.PR_LIGHT_FIELDS
+
+
+def test_without_the_project_permission_the_list_still_loads(fake_gh):
+    def answer(args):
+        if "projectItems" in " ".join(args):
+            raise GhError("error: your authentication token is missing required scopes "
+                          "[read:project]")
+        return [dict(ROW, projectItems=None)]
+    fake_gh.route("issue list", answer)
+    (item,) = gh_data.fetch_issues("o/r")
+    assert item.projects == [] and item.projects_known is False
+
+
+def test_a_timeout_drops_projects_before_giving_up(fake_gh):
+    seen = []
+
+    def answer(args):
+        fields = args[args.index("--json") + 1]
+        seen.append(fields)
+        if "projectItems" in fields:
+            raise GhError("HTTP 502: 502 Bad Gateway (https://api.github.com/graphql)")
+        return [dict(ROW, projectItems=None)]
+    fake_gh.route("pr list", answer)
+    (pr,) = gh_data.fetch_prs("o/r")
+    assert seen == [gh_data.PR_FIELDS, gh_data.PR_LIGHT_FIELDS,
+                    gh_data._without_projects(gh_data.PR_LIGHT_FIELDS)]
+    assert pr.projects_known is False and not pr.has_stats
+
+
+def test_issues_too_drop_projects_on_a_timeout(fake_gh):
+    calls = []
+
+    def answer(args):
+        calls.append(args)
+        if len(calls) == 1:
+            raise GhError("HTTP 504: Gateway Timeout")
+        return [ROW]
+    fake_gh.route("issue list", answer)
+    gh_data.fetch_issues("o/r")
+    assert "projectItems" not in calls[1][calls[1].index("--json") + 1]
+
+
+def test_other_failures_are_not_retried(fake_gh):
+    fake_gh.route("issue list", GhError("HTTP 404: Not Found"))
+    with pytest.raises(GhError, match="404"):
+        gh_data.fetch_issues("o/r")
+    assert len(fake_gh.called_with("issue list")) == 1
+
+
+def test_search_results_say_their_projects_are_unknown():
+    assert gh_data.parse_search_item({"number": 1}).projects_known is False
+
+
+def test_every_settable_thing_has_a_column():
+    from gh_columns import CATALOG
+    for col in ("title", "labels", "assignees", "milestone", "projects"):
+        assert col in gh_data.ALL_COLUMNS and col in CATALOG
+    for cols in (gh_data.MY_WORK_COLUMNS, gh_data.SEARCH_ITEM_COLUMNS):
+        for col in ("title", "labels", "assignees", "milestone"):
+            assert col in cols   # projects: GitHub's search doesn't give them
+
+
+def test_details_name_the_projects():
+    item = Item(5, "Bug", "OPEN", "u", False, projects=["The Chat Place (Needs retest)"])
+    text = SimpleNamespace(value="")
+    f = SimpleNamespace(items=[item], details_text=SimpleNamespace(
+        SetValue=lambda v: setattr(text, "value", v), Clear=lambda: None))
+    Frame._show_issue_details(f, 0)
+    assert "Projects: The Chat Place (Needs retest)" in text.value.splitlines()
+
+
+def test_after_set_projects_the_row_shows_them_keeping_status(edits, monkeypatch):
+    monkeypatch.setattr(ghviewer, "fetch_item_projects", lambda item, repo: ItemProjects(
+        "I_5", [Project("P1", "Roadmap", 1), Project("P2", "The Chat Place", 2)],
+        [Project("P2", "The Chat Place", 2, item_id="E2")]))
+    item = _item(projects=["The Chat Place (Needs retest)"])
+    f = fake_frame(item)
+    FakeChecklistDialog.toggle = ["Roadmap"]
+    Frame._set_projects_flow(f)
+    assert item.projects == ["Roadmap", "The Chat Place (Needs retest)"]

@@ -46,8 +46,10 @@ They all work the same way:
   If you can't make the change, or something goes wrong, a message box says so.
   Someone else's change made since your list loaded is kept, not undone.
 
-An item's milestone is now shown in the details panel, and there is a
-**Milestone** column to add under **View → Columns…**.
+Whatever you can set, you can also see. The details panel now shows an item's
+milestone and its projects, each with its status, and **View → Columns…** has a
+column for each: Labels, Assignees, Milestone and Projects. My Work and search
+results gain Assignees and Milestone columns too.
 
 ## Narrow the list by the same things
 

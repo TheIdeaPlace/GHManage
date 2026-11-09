@@ -441,7 +441,7 @@ Closing and reopening ask first, naming the item: "Close issue #12?" with its ti
 
 **New milestone…** is always last in the list. It asks for a title, creates the milestone and puts the item in it: "Created milestone 0.6. #12 is in it." A repository with no milestones yet still gets the box, which says so at the top, so this is how its first one is made. If a milestone with that title already exists, even a closed one, GHManage uses it rather than making a second, and says so.
 
-The details panel names an item's milestone on a "Milestone:" line, and the **Milestone** column can be added under **View → Columns…**.
+The details panel names an item's milestone on a "Milestone:" line and its projects on a "Projects:" line, each project with its status, such as "The Chat Place (Needs retest)". **View → Columns…** has a column for each thing you can set: Labels, Assignees, Milestone and Projects, in Issues & PRs. My Work and search results have all of them except Projects, because GitHub's search doesn't say which projects an item is in. If gh doesn't have its "read:project" permission, or GitHub is too slow with a big list, the list loads without projects rather than not at all.
 
 ### Labels, assignees and projects
 
@@ -1366,7 +1366,7 @@ A screen reader reads a row's columns from left to right, so the order of the co
 
 | View | Shown by default | Also available |
 |------|------------------|----------------|
-| Issues & PRs | Number, Type, State, Title | Author, Created, Updated, Labels, Assignees, Milestone, Comments, Draft, Review, Changes, Files, Base branch, Head branch |
+| Issues & PRs | Number, Type, State, Title | Author, Created, Updated, Labels, Assignees, Milestone, Projects, Comments, Draft, Review, Changes, Files, Base branch, Head branch |
 | Branches | Branch, Last commit, Author, Date | Protected, Ahead, Behind |
 | Commits | Commit, Message, Author, Date | Branches, Files, Changes |
 | Tags | Tag, Commit | |
@@ -1381,8 +1381,8 @@ A screen reader reads a row's columns from left to right, so the order of the co
 | Published Pages | Page, Address | Size |
 | Favorites | Type, Repository, Title, Subtitle | |
 | Notifications | Reason, Type, Title, Repository, Updated, Status | |
-| My Work | Why, Type, Number, Title, Repository, Updated | Author, Labels |
-| Search results: issues and pull requests | Type, Number, State, Title, Repository, Updated | Author, Labels, Comments |
+| My Work | Why, Type, Number, Title, Repository, Updated | Author, Labels, Assignees, Milestone |
+| Search results: issues and pull requests | Type, Number, State, Title, Repository, Updated | Author, Labels, Assignees, Milestone, Comments |
 | My Organizations | Organization, Role, Repositories | |
 | Activity | Actor, Action, Repository, Title, Date | |
 | Changed Files | File, Status, Added, Removed, Comments | |

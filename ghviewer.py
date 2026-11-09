@@ -7227,6 +7227,8 @@ class GhViewerFrame(wx.Frame):
             lines.append(f"Assignees: {', '.join(item.assignees)}")
         if item.milestone:
             lines.append(f"Milestone: {item.milestone}")
+        if item.projects:
+            lines.append(f"Projects: {', '.join(item.projects)}")
         if item.comments and not item.comment_list and item.repo:
             # Search and My Work don't fetch comments; the item's own view does.
             lines.append(f"Comments: {item.comments} (not read in this list)")
@@ -11107,7 +11109,20 @@ class GhViewerFrame(wx.Frame):
                            model.chosen())
         if create:
             said = f"Created {', '.join(create)}. {said}"
-        self._save_item_edit(item, call, lambda it: None, said)
+        # The row's Projects column and the details: the titles now, each
+        # keeping the status it had; a new one has none yet.
+        had = {}
+        for shown in item.projects:
+            title = shown.rsplit(" (", 1)[0] if shown.endswith(")") else shown
+            had[title] = shown
+        now = [had.get(by_name[n].title if n in by_name else n,
+                       by_name[n].title if n in by_name else n) for n in model.chosen()]
+
+        def update(it: Item) -> None:
+            it.projects = list(now)
+            it.projects_known = True
+
+        self._save_item_edit(item, call, update, said)
 
     # Title and description (#122)
 

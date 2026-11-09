@@ -155,6 +155,18 @@ def save_columns(column_set: ColumnSet, columns: list[str]) -> None:
     _save()
 
 
+def load_auto_update() -> bool:
+    """Help > Automatic Updates: whether GHManage looks for updates when it
+    starts and installs them by itself. On until turned off."""
+    saved = load_settings().get("auto_update")
+    return saved if isinstance(saved, bool) else True
+
+
+def save_auto_update(on: bool) -> None:
+    _session["auto_update"] = bool(on)
+    _save()
+
+
 def load_announcements() -> tuple[bool, dict[str, bool]]:
     """Whether GHManage speaks at all, and which kinds of message
     (``announce.CATEGORIES``). Everything is on until turned off."""

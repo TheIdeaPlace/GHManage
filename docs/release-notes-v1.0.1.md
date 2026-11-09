@@ -89,6 +89,13 @@ Assigned to Me and No Milestone together list your work that isn't planned yet.
 **Clear These Filters** turns them off, and the status bar and window title say
 which filters are on.
 
+## Choose whether GHManage updates itself
+
+**Help → Automatic Updates** is on unless you turn it off. Turned off, GHManage
+doesn't look for updates when it starts, and doesn't install one it downloaded
+earlier, so you keep the version you have. **Help → Check for Updates…** still
+works whenever you want it.
+
 ## Before you start
 
 GHManage drives the [GitHub CLI](https://cli.github.com/), so install it and sign

@@ -902,6 +902,7 @@ ID_HIDDEN_REPOS = wx.NewIdRef()
 ID_ARCHIVE_REPO = wx.NewIdRef()
 ID_DELETE_REPO = wx.NewIdRef()
 ID_CHECK_UPDATES = wx.NewIdRef()
+ID_AUTO_UPDATE = wx.NewIdRef()
 ID_REPORT_BUG = wx.NewIdRef()
 ID_OPEN_LOG_FOLDER = wx.NewIdRef()
 ID_NEW_ISSUE = wx.NewIdRef()
@@ -3726,7 +3727,7 @@ class GhViewerFrame(wx.Frame):
         # Check for updates in the background so startup is never blocked.
         # Must come after Show(): a modal raised against an unshown frame
         # returns immediately instead of waiting for the user.
-        if self.updater:
+        if self.updater and settings.load_auto_update():
             wx.CallLater(2000, self._start_update_check)
 
     # ── UI construction ─────────────────────────────────────────────────
@@ -4152,6 +4153,10 @@ class GhViewerFrame(wx.Frame):
         help_menu.Append(ID_OPEN_LOG_FOLDER, "Open Log Folder")
         help_menu.AppendSeparator()
         help_menu.Append(ID_CHECK_UPDATES, "Check for Updates…")
+        # On by default. Off: no check at startup, and nothing downloaded
+        # earlier is installed when GHManage starts.
+        help_menu.AppendCheckItem(ID_AUTO_UPDATE, "Automatic Updates")
+        help_menu.Check(ID_AUTO_UPDATE, settings.load_auto_update())
         help_menu.Append(wx.ID_ABOUT, "About GHManage")
         menu_bar.Append(help_menu, "Help")
 
@@ -4161,6 +4166,7 @@ class GhViewerFrame(wx.Frame):
         self.Bind(wx.EVT_MENU, self.on_shortcuts, id=ID_SHORTCUTS)
         self.Bind(wx.EVT_MENU, self.on_command_palette, id=ID_COMMAND_PALETTE)
         self.Bind(wx.EVT_MENU, self.on_check_updates, id=ID_CHECK_UPDATES)
+        self.Bind(wx.EVT_MENU, lambda e: self._toggle_auto_update(), id=ID_AUTO_UPDATE)
         self.Bind(wx.EVT_MENU, lambda e: self.on_report_bug(), id=ID_REPORT_BUG)
         self.Bind(wx.EVT_MENU, lambda e: self.on_open_log_folder(), id=ID_OPEN_LOG_FOLDER)
         self.Bind(wx.EVT_MENU, self.on_about, id=wx.ID_ABOUT)
@@ -4301,24 +4307,42 @@ class GhViewerFrame(wx.Frame):
             msg = f"GHManage {APP_VERSION} is up to date."
         wx.MessageBox(msg, "Check for Updates", wx.OK | wx.ICON_INFORMATION, self)
 
+    def _toggle_auto_update(self) -> None:
+        """Help ▸ Automatic Updates."""
+        on = not settings.load_auto_update()
+        settings.save_auto_update(on)
+        self.GetMenuBar().Check(ID_AUTO_UPDATE, on)
+        self._tell("Automatic updates on. GHManage looks for updates when it starts and "
+                   "installs them by itself." if on else
+                   "Automatic updates off. GHManage won't look for updates or install them "
+                   "by itself; Check for Updates still can.")
+
     def _show_update_dialog(self, version: str, url: str) -> None:
+        auto = settings.load_auto_update()
         msg = (
             f"GHManage {version} is available. You are running {APP_VERSION}.\n\n"
             "It is downloading in the background. Choose Restart Now to "
             "install it immediately, or Later to install it the next time "
             "you start GHManage."
+        ) if auto else (
+            f"GHManage {version} is available. You are running {APP_VERSION}.\n\n"
+            "It is downloading in the background. Automatic updates are off, so it "
+            "won't be installed by itself when GHManage next starts. Choose Restart "
+            "Now to install it now."
         )
         dlg = wx.MessageDialog(
             self, msg, "Update Available", wx.YES_NO | wx.ICON_INFORMATION
         )
-        dlg.SetYesNoLabels("&Restart Now", "&Later")
+        dlg.SetYesNoLabels("&Restart Now", "&Later" if auto else "&Not Now")
         try:
             restart_now = dlg.ShowModal() == wx.ID_YES
         finally:
             dlg.Destroy()
 
         if not restart_now:
-            return  # already downloaded; bootstrap() applies it on next launch
+            # Downloaded; bootstrap() installs it on the next launch, unless
+            # Automatic Updates is off.
+            return
 
         bugreport.end_run()  # the update ends this run; it didn't crash
         if not self.updater.apply_update_and_restart(sys.argv[1:]):
@@ -13755,7 +13779,7 @@ class GhViewerFrame(wx.Frame):
 def main() -> None:
     # Must run before argparse: Velopack relaunches the app with its own hook
     # arguments during install/update/uninstall, and this handles and exits.
-    updater.bootstrap()
+    updater.bootstrap(auto_apply=settings.load_auto_update())
 
     parser = argparse.ArgumentParser(
         description="GUI viewer and manager for GitHub issues and pull requests."

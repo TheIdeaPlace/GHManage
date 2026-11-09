@@ -94,6 +94,10 @@ That message is replaced by the next thing GHManage tells you, so the update als
 
 To check by hand, choose **Help → Check for Updates…**. It always answers: either "GHManage 1.2.3 is up to date", or the **Update Available** dialog.
 
+### Turning automatic updates off
+
+**Help → Automatic Updates** is checked until you turn it off. Turned off, GHManage doesn't look for updates when it starts, and it doesn't install an update it downloaded earlier either, so the version you have stays until you choose otherwise. **Help → Check for Updates…** still works. If it finds an update, the **Update Available** dialog offers **Restart Now** to install it, and **Not Now** to leave it uninstalled. Choose **Automatic Updates** again to turn updating back on. GHManage says which way it is now each time.
+
 An update never touches your favorites, the repositories you opened by address, or anything else you have set up.
 
 ### The portable versions
@@ -285,7 +289,7 @@ Lists load 100 items to begin with. `Ctrl++` (**File → View More**) loads the 
 | **File** | Open Repository or Address, Remove from List, Hidden Repositories, Archive or Unarchive Repository, Delete Repository from GitHub, Switch GitHub Account, Refresh, Back, View More, Search GitHub, Go To Issue, Quick Filter, Clear Quick Filter, Next and Previous Comment, Quit |
 | **Actions** | Everything that acts on the item you are on, starting with what `Enter` does. See [The Actions Menu](#the-actions-menu). |
 | **View** | View Mode, List Mode, Sort Order, Columns, State, Filter, Mark Changed Lines With, Next Pane, Previous Pane, Include Read Notifications, Speak Results |
-| **Help** | User Guide, Keyboard Shortcuts, Command Palette, Report a Bug, Open Log Folder, Check for Updates, About GHManage |
+| **Help** | User Guide, Keyboard Shortcuts, Command Palette, GitHub Permissions, Report a Bug, Open Log Folder, Check for Updates, Automatic Updates, About GHManage |
 
 **Help → User Guide** (`F1`, or `fn+F1` on a Mac) opens this guide in your web browser.
 

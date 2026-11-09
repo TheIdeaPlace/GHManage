@@ -1,4 +1,4 @@
-# GHManage 1.0.1
+# GHManage 1.1.0
 
 GHManage is a desktop app for reading and managing your GitHub repositories from
 a fast, keyboard-driven list.

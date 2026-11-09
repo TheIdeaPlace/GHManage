@@ -636,7 +636,7 @@ def test_missing_permission_is_shown_with_the_command(message_dialog):
     Frame._on_follow_done(f, Person("bob"), True, MissingScope("user:follow"))
     (box,) = message_dialog.shown
     assert "gh auth refresh -h github.com -s user:follow" in box.message
-    assert box.labels == ("&Copy Command", "&All Permissions…", "Close")
+    assert box.labels == (V.PERMISSION_COPY, V.PERMISSION_ALL, V.PERMISSION_CLOSE)
     assert 'needs gh\'s "user:follow" permission' in f.events[-1]
 
 

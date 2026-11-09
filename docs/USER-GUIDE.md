@@ -437,7 +437,9 @@ Closing and reopening ask first, naming the item: "Close issue #12?" with its ti
 
 ### Setting the milestone
 
-`I`, or **Actions → Set Milestone…**, puts the selected issue or pull request in one of the repository's open milestones, or takes it out of the one it is in. It works from the details panel too. The **Set Milestone** box lists "No milestone" first, then the open milestones with their due dates, such as "2027.1, due 2026-12-01", with the item's current milestone selected. If it is in a milestone that has been closed, that one is listed last, marked "closed", so you can see where it is. Choose one and press `Enter`; GHManage says, for example, "#12 is in milestone 2027.1.", and the row and the details panel change where you are, without reloading the list. `Escape` leaves it as it was. Changing a milestone needs write access to the repository.
+`I`, or **Actions → Set Milestone…**, puts the selected issue or pull request in one of the repository's open milestones, or takes it out of the one it is in. It works from the details panel too. The **Set Milestone** box lists "No milestone" first, then the open milestones with their due dates, such as "2027.1, due 2026-12-01", with the item's current milestone selected. If it is in a milestone that has been closed, that one is listed after the open ones, marked "closed", so you can see where it is. Choose one and press `Enter`; GHManage says, for example, "#12 is in milestone 2027.1.", and the row and the details panel change where you are, without reloading the list. `Escape` leaves it as it was. Changing a milestone needs write access to the repository.
+
+**New milestone…** is always last in the list. It asks for a title, creates the milestone and puts the item in it: "Created milestone 0.6. #12 is in it." A repository with no milestones yet still gets the box, which says so at the top, so this is how its first one is made. If a milestone with that title already exists, even a closed one, GHManage uses it rather than making a second, and says so.
 
 The details panel names an item's milestone on a "Milestone:" line, and the **Milestone** column can be added under **View → Columns…**.
 
@@ -445,11 +447,15 @@ The details panel names an item's milestone on a "Milestone:" line, and the **Mi
 
 `L`, `A` and `P`, or **Actions → Set Labels…**, **Set Assignees…** and **Set Projects…**, each open a list where every row says whether it is checked, for example "bug, checked" or "docs, not checked". Press `Space` to check or uncheck the selected row. GHManage says what it is now, such as "bug checked", and the line under the list sums up what is checked. Press `Enter` to save, or `Escape` to leave everything as it was. Typing a letter moves to the next row that starts with it.
 
-- **Set Labels** lists the repository's labels, A to Z.
+- **Set Labels** lists the repository's labels, A to Z. The **New Label…** button asks for a name and adds it to the list, checked and marked "new". It is created in light grey when you save, if it is still checked. A name already in the list is checked instead of added twice.
 - **Set Assignees** lists everyone who can be assigned in the repository. Anyone assigned who can no longer be assigned is listed at the end, checked, so you can see them and take them off.
-- **Set Projects** lists the open projects of the repository and of its owner, the user or organization. Where two have the same title, each is followed by its number, such as "Bugs (#2)". A closed project the item is still in is listed at the end, marked "(closed)". Projects need gh's "project" permission. If gh doesn't have it, GHManage says so and shows the command that adds it.
+- **Set Projects** lists the open projects of the repository and of its owner, the user or organization. Where two have the same title, each is followed by its owner and number, such as "Bugs (TheIdeaPlace, #2)". A closed project the item is still in is listed at the end, marked "(closed)". The **New Project…** button adds a new project in the same way. It is made for the repository's owner and linked to the repository, so it needs permission to create projects for that owner: yours, or an organization's that lets you. Typing the title of a project already listed checks that project rather than making another of the same name. Projects need gh's "project" permission. If gh doesn't have it, GHManage says so and shows the command that adds it.
 
-Once saved, GHManage says what changed, for example "#12: added bug, removed docs. Labels now: bug, ui.", and the row and the details panel change where you are. All of these, `I` included, work from the details panel too, and need write access to the repository.
+Set Labels and Set Projects open even when the repository has none yet. The box says so, and focus starts on the New button. When there is no one to assign, or something goes wrong, such as GitHub not answering, GHManage says so in a message box, as well as on the status bar.
+
+Once saved, GHManage says what changed, for example "#12: added bug, removed docs. Labels now: bug, ui.", and the row and the details panel change where you are. All of these, `I` included, work from the details panel too, and in **My Work** and search results as well as Issues & PRs. There, an item in a fork is changed in that fork, the repository it is in.
+
+Milestones, labels and assignees need write or triage access to the repository. Without it, GitHub ignores those changes without saying so. GHManage therefore checks first, and if you can't make the change it tells you in a message box instead of opening the list. After a save, it also checks that GitHub really made the change, and says so if it didn't.
 
 ### Editing the title and description
 
@@ -549,7 +555,7 @@ Selecting a milestone shows it in the details panel: its title, state, due date,
 
 **View → State** is shared: choose **All** in a milestone's issues to see the closed ones as well, and the milestones list shows all of its milestones too when you go back.
 
-On a fork, milestones come from the upstream repository, the same one the issues come from.
+On a fork, the Milestones view lists the upstream repository's milestones, the same one Issues & PRs takes the issues from.
 
 To put an issue or pull request in a milestone, see [Setting the milestone](#setting-the-milestone).
 
@@ -1433,7 +1439,7 @@ Everything that acts on what the list is showing is on the **Actions** menu, whi
 | Close Issue/PR | `Ctrl+W` | Issues & PRs |
 | Reopen Issue/PR | `Ctrl+Shift+W` | Issues & PRs |
 | Add Comment… | `Ctrl+M`, or `M` in the list | Issues & PRs; Discussions |
-| Set Milestone…, Set Labels…, Set Assignees…, Set Projects…, Edit Title and Description… | `I`, `L`, `A`, `P`, `E` in the list | Issues & PRs |
+| Set Milestone…, Set Labels…, Set Assignees…, Set Projects…, Edit Title and Description… | `I`, `L`, `A`, `P`, `E` in the list | Issues & PRs, My Work, search results |
 | New Issue… | `Ctrl+N` | Everywhere, for the repository in front of you; shows the new issue in its Issues & PRs |
 | Search This Repository… | `Ctrl+Shift+S` | Everywhere, for the repository in front of you: a search starting `repo:owner/name` |
 | Read README | `Ctrl+Shift+R` | Everywhere, for the repository in front of you: its README, in Files |
@@ -1645,6 +1651,8 @@ On a Mac, use `Cmd` in place of `Ctrl` for every shortcut that has one, `Option`
 |-----|--------|
 | `Enter` | Open the issue, pull request or repository here; `Backspace` comes back |
 | `G` or `Ctrl+Shift+G` | Open its repository here |
+| `I` / `L` / `A` / `P` | On an issue or pull request: set the milestone / labels / assignees / projects |
+| `E` | On an issue or pull request: edit the title and description |
 | `Ctrl+S` | Save the search (search results) |
 | `Ctrl+Shift+F` | A new search |
 

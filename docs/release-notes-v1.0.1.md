@@ -28,7 +28,14 @@ The rest of an issue or pull request can be changed from the list as well (#122)
   says what changed: "#12: added bug, removed docs. Labels now: bug, ui."
 - `E` edits the title and description, in the same form as New Issue.
 
-These are also on the **Actions** menu, and they work from the details panel too.
+These are also on the **Actions** menu, and they work from the details panel and in
+**My Work** and search results too.
+
+Nothing you need has to exist first. **New milestone…** at the end of the milestone
+list creates a milestone and puts the item in it, which is how a repository gets its
+first one. Set Labels and Set Projects have **New Label…** and **New Project…**
+buttons. When something can't be done, such as having no permission, GHManage says so
+in a message box rather than only on the status bar.
 
 ## Filtering by people and milestone
 

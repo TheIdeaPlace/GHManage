@@ -653,19 +653,56 @@ def set_item_milestone(item: Item, repo: str,
     if not repo:
         raise GhError("No repository for #%d" % item.number)
     value = "null" if milestone is None else str(milestone.number)
-    _run_gh(["api", "-X", "PATCH", f"repos/{repo}/issues/{item.number}",
-             "-F", f"milestone={value}", "--silent"])
+    raw = _run_gh(["api", "-X", "PATCH", f"repos/{repo}/issues/{item.number}",
+                   "-F", f"milestone={value}"])
+    # Without write access GitHub drops a milestone change and still answers
+    # 200 with the issue as it was; what it sends back says whether it took.
+    reply = json.loads(raw) if raw.strip() else {}
+    now = (reply.get("milestone") or {}).get("number") if isinstance(reply, dict) else None
+    if (isinstance(reply, dict) and "number" in reply
+            and now != (milestone.number if milestone else None)):
+        raise NotChanged(repo)
 
 
-def _patch_item(item: Item, repo: str, body: dict, endpoint: str = "", method: str = "PATCH") -> None:
+class NotChanged(GhError):
+    """GitHub answered as if all was well but left the item as it was: it
+    does that, without an error, when you can't write to the repository."""
+
+    def __init__(self, repo: str) -> None:
+        super().__init__(f"GitHub didn't make the change. Changing this needs write "
+                         f"access to {repo}.")
+        self.repo = repo
+
+
+def _patch_item(item: Item, repo: str, body: dict, endpoint: str = "",
+                method: str = "PATCH"):
     """Send ``body`` as JSON to the issue (or PR, which is an issue too) in
     ``repo``, used as given: the caller resolved it once, for the choices
     too. On stdin, so a title or description is never a command-line
-    argument."""
+    argument. GitHub's reply, parsed, or None."""
     if not repo:
         raise GhError("No repository for #%d" % item.number)
-    _run_gh(["api", "-X", method, f"repos/{repo}/issues/{item.number}{endpoint}",
-             "--input", "-", "--silent"], stdin=json.dumps(body))
+    raw = _run_gh(["api", "-X", method, f"repos/{repo}/issues/{item.number}{endpoint}",
+                   "--input", "-"], stdin=json.dumps(body))
+    try:
+        return json.loads(raw) if raw.strip() else None
+    except ValueError:
+        return None
+
+
+def can_change_items(repo: str) -> bool:
+    """Whether you may set milestones, labels and assignees in ``repo``:
+    triage access or more. Asked first because GitHub drops some of those
+    changes without an error when you can't. True when GitHub doesn't say
+    (signed out of nothing, an old server): then the change itself tells."""
+    try:
+        raw = _run_gh(["api", f"repos/{repo}", "--jq", ".permissions"])
+        perms = json.loads(raw) if raw.strip() else None
+    except (GhError, ValueError):
+        return True
+    if not isinstance(perms, dict):
+        return True
+    return any(perms.get(k) for k in ("admin", "maintain", "push", "triage"))
 
 
 def change_item_labels(item: Item, repo: str, add: list[str], remove: list[str]) -> None:
@@ -687,10 +724,23 @@ def change_item_labels(item: Item, repo: str, add: list[str], remove: list[str])
 def change_item_assignees(item: Item, repo: str, add: list[str], remove: list[str]) -> None:
     """Assign and unassign people on the issue or PR (#122), sending only
     the change, as labels do."""
+    def logins(reply) -> Optional[set]:
+        if not isinstance(reply, dict) or "assignees" not in reply:
+            return None
+        return {a.get("login", "").lower() for a in reply.get("assignees") or []
+                if isinstance(a, dict)}
+
+    # GitHub ignores assignees it won't take (no access, or someone who
+    # can't be assigned) and still answers 201, so the reply is checked.
     if add:
-        _patch_item(item, repo, {"assignees": list(add)}, "/assignees", "POST")
+        now = logins(_patch_item(item, repo, {"assignees": list(add)}, "/assignees", "POST"))
+        if now is not None and not all(a.lower() in now for a in add):
+            raise NotChanged(repo)
     if remove:
-        _patch_item(item, repo, {"assignees": list(remove)}, "/assignees", "DELETE")
+        now = logins(_patch_item(item, repo, {"assignees": list(remove)}, "/assignees",
+                                 "DELETE"))
+        if now is not None and any(r.lower() in now for r in remove):
+            raise NotChanged(repo)
 
 
 def edit_item(item: Item, repo: str, title: Optional[str] = None,
@@ -764,6 +814,10 @@ class ItemProjects:
     content_id: str                 # the issue's or PR's node id
     available: list = field(default_factory=list)   # Project, open ones, A to Z
     current: list = field(default_factory=list)     # Project with item_id set
+    # For New Project…: it is made for the repository's owner, linked to it.
+    repo_id: str = ""
+    owner_id: str = ""
+    owner: str = ""
 
 
 _PROJECT_FIELDS = ("id title number closed "
@@ -771,8 +825,9 @@ _PROJECT_FIELDS = ("id title number closed "
 _ITEM_PROJECTS_QUERY = """
 query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
+    id
     projectsV2(first: 100) { nodes { %(f)s } }
-    owner { ... on ProjectV2Owner { projectsV2(first: 100) { nodes { %(f)s } } } }
+    owner { id login ... on ProjectV2Owner { projectsV2(first: 100) { nodes { %(f)s } } } }
     issueOrPullRequest(number: $number) {
       ... on Issue { id projectItems(first: 50) { nodes { id project { %(f)s } } } }
       ... on PullRequest { id projectItems(first: 50) { nodes { id project { %(f)s } } } }
@@ -823,7 +878,9 @@ def fetch_item_projects(item: Item, repo: str) -> ItemProjects:
                for n in (content.get("projectItems") or {}).get("nodes") or []
                if isinstance(n, dict) and isinstance(n.get("project"), dict)]
     available = sorted(seen.values(), key=lambda p: p.title.lower())
-    return ItemProjects(content["id"], available, current)
+    owner_node = node.get("owner") or {}
+    return ItemProjects(content["id"], available, current, repo_id=node.get("id") or "",
+                        owner_id=owner_node.get("id") or "", owner=owner_node.get("login") or "")
 
 
 def add_to_project(project_id: str, content_id: str) -> None:
@@ -833,6 +890,43 @@ def add_to_project(project_id: str, content_id: str) -> None:
     err = _project_error(reply)
     if err:
         raise err
+
+
+def create_project(owner_id: str, repo_id: str, title: str) -> str:
+    """A new project called ``title`` for the owner, linked to the
+    repository so it is listed there too; its id."""
+    reply = _graphql(
+        "mutation($o: ID!, $r: ID!, $t: String!) { createProjectV2(input: {ownerId: $o, "
+        "repositoryId: $r, title: $t}) { projectV2 { id } } }",
+        {"o": owner_id, "r": repo_id, "t": title})
+    err = _project_error(reply)
+    if err:
+        raise err
+    data = reply.get("data") if isinstance(reply.get("data"), dict) else {}
+    project = ((data or {}).get("createProjectV2") or {}).get("projectV2") or {}
+    if not project.get("id"):
+        raise GhError(f"GitHub didn't create the project {title}")
+    return project["id"]
+
+
+def create_label_in(repo: str, name: str) -> None:
+    """A new label called ``name`` in ``repo`` (as given, already resolved),
+    from Set Labels' New Label…, in GitHub's light grey. One that already
+    exists is no error. GitHub answers that with a bare "Validation Failed
+    (HTTP 422)", the reason left out, so on a 422 the label is looked up:
+    there, all is well; not there, the 422 meant something else."""
+    if not repo:
+        raise GhError("No repository for the label")
+    try:
+        _run_gh(["api", "-X", "POST", f"repos/{repo}/labels", "--input", "-", "--silent"],
+                stdin=json.dumps({"name": name, "color": "ededed"}))
+    except GhError as exc:
+        if "422" not in str(exc):
+            raise
+        try:
+            _run_gh(["api", f"repos/{repo}/labels/{quote(name, safe='')}", "--silent"])
+        except GhError:
+            raise exc from None
 
 
 def remove_from_project(project_id: str, item_id: str) -> None:
@@ -5385,6 +5479,20 @@ def fetch_milestones(repo: Optional[str], state: str = "open",
         state = "open"
     rows = _api_pages(f"repos/{effective}/milestones?state={state}", limit)
     return [_parse_milestone(r, effective) for r in rows]
+
+
+def create_milestone(repo: str, title: str) -> Milestone:
+    """Create an open milestone called ``title`` in ``repo`` (as given,
+    already resolved), from Set Milestone's New milestone…. The title goes
+    on stdin, never the command line."""
+    if not repo:
+        raise GhError("No repository for the milestone")
+    raw = _run_gh(["api", "-X", "POST", f"repos/{repo}/milestones", "--input", "-"],
+                  stdin=json.dumps({"title": title}))
+    row = json.loads(raw) if raw.strip() else {}
+    if not isinstance(row, dict) or not row.get("number"):
+        raise GhError(f"GitHub didn't create the milestone {title}")
+    return _parse_milestone(row, repo)
 
 
 # ── Insights: traffic and contributors (#89) ───────────────────────────

@@ -127,6 +127,10 @@ from gh_data import (
     request_reviewers,
     review_pr,
     set_item_milestone,
+    create_milestone,
+    create_label_in,
+    create_project,
+    can_change_items,
     change_item_labels,
     change_item_assignees,
     fetch_item_now,
@@ -2764,15 +2768,29 @@ class ChecklistDialog(wx.Dialog):
     checked."""
 
     def __init__(self, parent: wx.Window, title: str, prompt: str, model: Checklist,
-                 say: Callable[[str], bool] | None = None) -> None:
+                 say: Callable[[str], bool] | None = None, new_label: str = "",
+                 new_prompt: str = "", note: str = "", same_as=None) -> None:
+        """``new_label`` ("&New Label…") adds a button that asks for a name
+        (``new_prompt``) and adds it checked, to be created on save; without
+        it, nothing can be added. With nothing listed, focus starts on it,
+        and ``note`` (why there is nothing) is shown under the prompt and
+        said as the box opens. ``same_as(typed)`` names the rows a typed
+        name already means, when they read differently from it."""
         super().__init__(parent, title=title, style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
         self.model = model
         self._say = say or (lambda text: False)
+        self._new_prompt = new_prompt
+        self._same_as = same_as or (lambda typed: [])
         outer = wx.BoxSizer(wx.VERTICAL)
         label = "&" + prompt.replace("&", "&&")
         text = wx.StaticText(self, label=label)
         text.Wrap(420)
         outer.Add(text, 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
+        self.note = None
+        if note:
+            self.note = wx.StaticText(self, label=note.replace("&", "&&"))
+            self.note.Wrap(420)
+            outer.Add(self.note, 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
         self.list = wx.ListBox(self, choices=model.rows(), style=wx.LB_SINGLE, size=(420, 280))
         _name(self.list, prompt)
         if len(model):
@@ -2780,6 +2798,11 @@ class ChecklistDialog(wx.Dialog):
         outer.Add(self.list, 1, wx.EXPAND | wx.ALL, 10)
         self.summary = wx.StaticText(self, label=model.summary())
         outer.Add(self.summary, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
+        self.new_button = None
+        if new_label:
+            self.new_button = wx.Button(self, label=new_label)
+            self.new_button.Bind(wx.EVT_BUTTON, lambda e: self.add_new())
+            outer.Add(self.new_button, 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
         buttons = wx.StdDialogButtonSizer()
         ok = wx.Button(self, wx.ID_OK, "&Save")
         ok.SetDefault()
@@ -2792,7 +2815,38 @@ class ChecklistDialog(wx.Dialog):
         self.list.Bind(wx.EVT_CHAR_HOOK, self._on_list_key)
         self.list.Bind(wx.EVT_LISTBOX_DCLICK, lambda e: self.toggle())
         self.CentreOnParent()
-        wx.CallAfter(self.list.SetFocus)
+        # An empty list reads as nothing at all; start where something can be done.
+        first = self.list if len(model) or self.new_button is None else self.new_button
+        wx.CallAfter(first.SetFocus)
+        if note:
+            # Focus lands on the button, and a screen reader may read only
+            # that; the reason the list is empty is said behind it.
+            wx.CallLater(400, announce.announce, note, announce.STATUS, False, True)
+
+    def add_new(self) -> None:
+        dlg = wx.TextEntryDialog(self, self._new_prompt, self.GetTitle())
+        try:
+            if dlg.ShowModal() != wx.ID_OK or not dlg.GetValue().strip():
+                return
+            name = dlg.GetValue()
+        finally:
+            dlg.Destroy()
+        same = self._same_as(name)
+        if len(same) > 1:
+            self._say(f"There are {len(same)} called {name.strip()}; check the one you want.")
+            self.list.SetFocus()
+            return
+        row, said = self.model.add(same[0] if same else name)
+        self.list.Set(self.model.rows())
+        self.list.SetSelection(row)
+        self.summary.SetLabel(self.model.summary())
+        if self.note is not None:
+            self.note.SetLabel("")  # no longer true
+        # Focus on the row reads it ("triage, checked, new"); said as well
+        # only when focus was there already and won't move.
+        if wx.Window.FindFocus() is self.list:
+            self._say(said)
+        self.list.SetFocus()
 
     def _on_list_key(self, event: wx.KeyEvent) -> None:
         if event.GetKeyCode() == wx.WXK_SPACE and not event.HasAnyModifiers():
@@ -4335,7 +4389,7 @@ class GhViewerFrame(wx.Frame):
         self._act_reopen.Enable(issues)
         for entry in (self._act_milestone, self._act_labels, self._act_assignees,
                       self._act_projects, self._act_edit_item):
-            entry.Enable(issues)
+            entry.Enable(self.view_mode in ITEM_VIEWS)
         self._act_comment.Enable(issues or self.view_mode == VIEW_DISCUSSIONS)
 
         in_repo = bool(self.repo) and self.view_mode not in REPOLESS_VIEWS
@@ -6261,7 +6315,8 @@ class GhViewerFrame(wx.Frame):
         self._set_view_status(
             message,
             keys_hint(enter_hint(self.view_mode), ctrl_o_hint(self.view_mode),
-                      "G=go to repository  F=favorite  Ctrl+S=save search  "
+                      ("I=milestone  L=labels  A=assignees  P=projects  E=edit  " if self.view_mode == VIEW_SEARCH_ISSUES else "")
+                      + "G=go to repository  F=favorite  Ctrl+S=save search  "
                       "Ctrl+Shift+F=new search  Ctrl+F=filter"),
         )
         self._update_title()
@@ -6300,7 +6355,8 @@ class GhViewerFrame(wx.Frame):
         self._set_view_status(
             message,
             keys_hint(enter_hint(VIEW_MY_WORK), ctrl_o_hint(VIEW_MY_WORK),
-                      "G=go to repository  F=favorite  R=refresh  Ctrl+F=filter"),
+                      "I=milestone  L=labels  A=assignees  P=projects  E=edit  G=go to repository  F=favorite  R=refresh  "
+                      "Ctrl+F=filter"),
         )
         self._update_title()
         row = focus if isinstance(focus, int) else max(self._row_of(focus), 0)
@@ -8331,6 +8387,14 @@ class GhViewerFrame(wx.Frame):
                 ord("K"): self._pr_checks,
                 ord("V"): self._pr_review,
                 ord("D"): self._pr_toggle_draft,
+            }.get(key)
+            if action:
+                action()
+                return
+        if self.view_mode in ITEM_VIEWS and not event.HasAnyModifiers():
+            # Changing the item (#120, #122), in every list of issues and pull
+            # requests: My Work and search results know each item's repository.
+            action = {
                 ord("I"): self._set_milestone_flow,
                 ord("L"): self._set_labels_flow,
                 ord("A"): self._set_assignees_flow,
@@ -10642,13 +10706,18 @@ class GhViewerFrame(wx.Frame):
 
     NO_MILESTONE = "No milestone"
 
-    def _start_item_edit(self, what: str, load, then) -> None:
+    def _start_item_edit(self, what: str, load, then, needs_access: str = "") -> None:
         """``what``: "milestones", said as "Getting the milestones for #5…".
         ``load(item, repo)`` runs off the UI thread; ``then(item, repo, data)``
-        on it, with the box. ``load`` None: nothing to fetch."""
+        on it, with the box. ``load`` None: nothing to fetch.
+
+        ``needs_access`` ("the milestone"): the change is one GitHub drops without an error
+        when you can't triage the repository (milestone, labels, assignees),
+        so that is asked first, and said in a box instead of a box of
+        choices that would come to nothing."""
         item = self._focused_item()
-        if self.view_mode != VIEW_ISSUES or not isinstance(item, Item):
-            self._tell("Select an issue or pull request in Issues & PRs first.")
+        if self.view_mode not in ITEM_VIEWS or not isinstance(item, Item):
+            self._tell("Select an issue or pull request first.")
             return
         if getattr(self, "_item_edit_busy", False):
             self._tell("Still saving the last change.")
@@ -10658,12 +10727,21 @@ class GhViewerFrame(wx.Frame):
             self._tell("Select a repository first.")
             return
         self._item_edit_busy = True
+        self._item_edit_view = self.view_mode
         self._announce(f"Getting the {what} for #{item.number}…" if load
                        else f"Opening #{item.number}…")
 
         def worker() -> None:
             try:
-                where = resolve_issue_repo(repo) or repo
+                # An item from My Work or a search knows the very repository
+                # it is in. Only Issues & PRs, which lists a fork's upstream
+                # issues, needs the fork swapped for its upstream.
+                where = item.repo or resolve_issue_repo(repo) or repo
+                if needs_access and not can_change_items(where):
+                    wx.CallAfter(self._nothing_to_choose, "Can't Change It",
+                                 f"You can't change {needs_access} of #{item.number}: "
+                                 f"that needs write or triage access to {where}.")
+                    return
                 data = load(item, where) if load else None
             except Exception as exc:  # noqa: BLE001 - any failure must free the next change
                 wx.CallAfter(self._item_edit_failed, f"Couldn't get the {what} of {repo}", exc)
@@ -10674,9 +10752,10 @@ class GhViewerFrame(wx.Frame):
 
     def _item_edit_ask(self, then, item: Item, repo: str, data) -> None:
         """``then``, the box, on the UI thread. Dropped, freeing the next
-        change, if Issues & PRs is no longer showing; an unexpected error
-        is said rather than leaving every later change refused."""
-        if self.view_mode != VIEW_ISSUES:
+        change, if the list it was started from is no longer showing; an
+        unexpected error is said rather than leaving every later change
+        refused."""
+        if self.view_mode != getattr(self, "_item_edit_view", self.view_mode):
             self._item_edit_busy = False
             return
         try:
@@ -10689,27 +10768,33 @@ class GhViewerFrame(wx.Frame):
         self._tell(msg)
 
     def _item_edit_failed(self, msg: str, exc: Exception) -> None:
+        """In a box as well as the status bar: it answers a key pressed or a
+        box closed a moment ago, and a passing announcement is easily talked
+        over by the screen reader reading the list again."""
         self._item_edit_busy = False
         if isinstance(exc, MissingScope):
-            self._tell(f"{msg}: it needs gh's \"{exc.scope}\" permission.")
-            wx.MessageBox(str(exc), "Permission Needed", wx.OK | wx.ICON_INFORMATION, self)
-        elif isinstance(exc, GhError):
-            self._tell(f"{msg}: {exc}")
-        else:
-            self._tell(f"{msg}: {type(exc).__name__}: {exc}")
+            self._announce(f"{msg}: it needs gh's \"{exc.scope}\" permission.")
+            wx.MessageBox(f"{msg}.\n\n{exc}", "Permission Needed",
+                          wx.OK | wx.ICON_INFORMATION, self)
+            return
+        detail = str(exc) if isinstance(exc, GhError) else f"{type(exc).__name__}: {exc}"
+        self._announce(f"{msg}: {detail}")
+        wx.MessageBox(f"{msg}.\n\n{detail}", "Couldn't Do It",
+                      wx.OK | wx.ICON_WARNING, self)
 
-    def _save_item_edit(self, item: Item, call, update, said: str) -> None:
+    def _save_item_edit(self, item: Item, call, update, said: str | None) -> None:
         """Run ``call`` off the UI thread; then ``update(item)``, show the
-        change where the item is and say ``said``."""
+        change where the item is and say ``said``, or, with ``said`` None,
+        what ``call`` returned (when only the change itself knows)."""
         self._announce(f"Saving #{item.number}…")
 
         def worker() -> None:
             try:
-                call()
+                result = call()
             except Exception as exc:  # noqa: BLE001 - any failure must free the next change
                 wx.CallAfter(self._item_edit_failed, f"Couldn't change #{item.number}", exc)
                 return
-            wx.CallAfter(self._item_edited, item, update, said)
+            wx.CallAfter(self._item_edited, item, update, said if said is not None else result)
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -10721,7 +10806,7 @@ class GhViewerFrame(wx.Frame):
         try:
             update(item)
             row = -1
-            if self.view_mode == VIEW_ISSUES:
+            if self.view_mode in ITEM_VIEWS:
                 row = next((i for i, it in enumerate(self._shown)
                             if isinstance(it, Item) and it.number == item.number
                             and it.repo == item.repo), -1)
@@ -10749,10 +10834,16 @@ class GhViewerFrame(wx.Frame):
         new = self.details_text.GetValue()
         self.details_text.SetInsertionPoint(_ctrl_pos(new, moved_caret(old, new, caret)))
 
-    def _ask_checklist(self, title: str, prompt: str, model: Checklist) -> bool:
+    def _ask_checklist(self, title: str, prompt: str, model: Checklist,
+                       new_label: str = "", new_prompt: str = "", note: str = "",
+                       same_as=None) -> bool:
         """The checklist box; True if saved with something changed. Says
-        "unchanged" otherwise, and lets the next change start."""
-        dlg = ChecklistDialog(self, title, prompt, model, say=self._tell)
+        "unchanged" otherwise, and lets the next change start. ``note``: why
+        the list is empty. ``same_as(typed)``: the rows a typed new name
+        means already."""
+        dlg = ChecklistDialog(self, title, prompt, model, say=self._tell,
+                              new_label=new_label, new_prompt=new_prompt, note=note,
+                              same_as=same_as)
         try:
             saved = dlg.ShowModal() == wx.ID_OK
         finally:
@@ -10770,7 +10861,7 @@ class GhViewerFrame(wx.Frame):
         self._start_item_edit(
             "milestones",
             lambda item, where: fetch_milestones(where, "open", resolved=True),
-            self._choose_milestone)
+            self._choose_milestone, needs_access="the milestone")
 
     @classmethod
     def milestone_choices(cls, current: str, milestones: list) -> tuple[list[str], int]:
@@ -10783,21 +10874,25 @@ class GhViewerFrame(wx.Frame):
             due = f", due {m.due_on[:10]}" if m.due_on else ""
             labels.append(f"{m.title}{due}")
         titles = [m.title for m in milestones]
-        if not current:
-            return labels, 0
+        selected = 0
         if current in titles:
-            return labels, titles.index(current) + 1
-        labels.append(f"{current}, closed")
-        return labels, len(labels) - 1
+            selected = titles.index(current) + 1
+        elif current:
+            labels.append(f"{current}, closed")
+            selected = len(labels) - 1
+        # Last, always: so a repository with no milestones yet still gets
+        # somewhere, rather than a box with nothing to choose.
+        labels.append(cls.NEW_MILESTONE)
+        return labels, selected
+
+    NEW_MILESTONE = "New milestone…"
 
     def _choose_milestone(self, item: Item, repo: str, milestones: list) -> None:
-        if not milestones and not item.milestone:
-            self._item_edit_done(f"{repo} has no open milestones.")
-            return
         labels, current = self.milestone_choices(item.milestone, milestones)
-        dlg = wx.SingleChoiceDialog(
-            self, f"Milestone for #{item.number} {item.title}:", "Set Milestone", labels,
-        )
+        prompt = f"Milestone for #{item.number} {item.title}:"
+        if not milestones:
+            prompt = f"{repo} has no open milestones.\n{prompt}"
+        dlg = wx.SingleChoiceDialog(self, prompt, "Set Milestone", labels)
         dlg.SetSelection(current)
         try:
             if dlg.ShowModal() != wx.ID_OK:
@@ -10806,6 +10901,9 @@ class GhViewerFrame(wx.Frame):
             choice = dlg.GetSelection()
         finally:
             dlg.Destroy()
+        if choice == len(labels) - 1:
+            self._new_milestone(item, repo)
+            return
         if choice == current:
             self._item_edit_done(f"#{item.number} is already in milestone {item.milestone}."
                                  if item.milestone
@@ -10820,6 +10918,45 @@ class GhViewerFrame(wx.Frame):
             f"#{item.number} is in milestone {target.title}." if target is not None
             else f"#{item.number} has no milestone.")
 
+    def _new_milestone(self, item: Item, repo: str) -> None:
+        """New milestone…: its title, then it is created in ``repo`` and the
+        item put in it."""
+        dlg = wx.TextEntryDialog(self, f"Title of the new milestone in {repo}:", "New Milestone")
+        try:
+            ok = dlg.ShowModal() == wx.ID_OK
+            title = dlg.GetValue().strip()
+        finally:
+            dlg.Destroy()
+        if not ok or not title:
+            self._item_edit_done("Milestone unchanged.")
+            return
+        found: list = []
+
+        def call() -> str:
+            # GitHub keeps milestone titles unique, closed ones included: one
+            # with this title is used rather than refused.
+            existing = next((m for m in fetch_milestones(repo, "all", 500, resolved=True)
+                             if m.title.lower() == title.lower()), None)
+            milestone = existing or create_milestone(repo, title)
+            found.append(milestone)
+            set_item_milestone(item, repo, milestone)
+            if existing is None:
+                return f"Created milestone {milestone.title}. #{item.number} is in it."
+            closed = ", which is closed" if existing.state == "closed" else ""
+            return (f"{existing.title} already exists{closed}. "
+                    f"#{item.number} is in milestone {existing.title}.")
+
+        self._save_item_edit(item, call,
+                             lambda it: setattr(it, "milestone", found[0].title), None)
+
+    def _nothing_to_choose(self, title: str, msg: str) -> None:
+        """Said in a box, not only announced: it answers the key pressed a
+        moment ago, and a passing announcement is easily talked over by the
+        screen reader reading the list again."""
+        self._item_edit_busy = False
+        self._announce(msg)
+        wx.MessageBox(msg, title, wx.OK | wx.ICON_INFORMATION, self)
+
     # Labels (#122). The box starts from the item as it is on GitHub now,
     # and only what was checked or unchecked is sent, so a label someone
     # added since the list loaded is neither hidden nor undone.
@@ -10828,23 +10965,31 @@ class GhViewerFrame(wx.Frame):
         """Actions ▸ Set Labels (L): check the labels the issue or pull
         request should have."""
         self._start_item_edit(
-            "labels", lambda item, where: (fetch_label_names(where), fetch_item_now(item, where)),
-            self._choose_labels)
+            "labels", lambda item, where: (fetch_label_names(where, 500),
+                                           fetch_item_now(item, where)),
+            self._choose_labels, needs_access="the labels")
 
     def _choose_labels(self, item: Item, repo: str, data) -> None:
         names, now = data
-        if not names and not now.labels:
-            self._item_edit_done(f"{repo} has no labels.")
-            return
+        # Opens with no labels too: New Label… makes the first.
         model = Checklist(names, now.labels)
-        if not self._ask_checklist("Set Labels", f"Labels for #{item.number} {item.title}",
-                                   model):
+        prompt = f"Labels for #{item.number} {item.title}"
+        note = f"{repo} has no labels yet." if not names else ""
+        if not self._ask_checklist("Set Labels", prompt, model, "&New Label…",
+                                   f"Name of the new label in {repo}:", note):
             return
         chosen, added, removed = model.chosen(), model.added(), model.removed()
-        self._save_item_edit(
-            item, lambda: change_item_labels(item, repo, added, removed),
-            lambda it: setattr(it, "labels", list(chosen)),
-            change_said(item.number, "Labels", added, removed, chosen))
+        create = model.to_create()
+
+        def call() -> None:
+            for name in create:
+                create_label_in(repo, name)
+            change_item_labels(item, repo, added, removed)
+
+        said = change_said(item.number, "Labels", added, removed, chosen)
+        if create:
+            said = f"Created {', '.join(create)}. {said}"
+        self._save_item_edit(item, call, lambda it: setattr(it, "labels", list(chosen)), said)
 
     # Assignees (#122), the same way.
 
@@ -10854,12 +10999,12 @@ class GhViewerFrame(wx.Frame):
         self._start_item_edit(
             "people who can be assigned",
             lambda item, where: (fetch_assignable_users(where), fetch_item_now(item, where)),
-            self._choose_assignees)
+            self._choose_assignees, needs_access="the assignees")
 
     def _choose_assignees(self, item: Item, repo: str, data) -> None:
         logins, now = data
         if not logins and not now.assignees:
-            self._item_edit_done(f"No one can be assigned in {repo}.")
+            self._nothing_to_choose("Set Assignees", f"No one can be assigned in {repo}.")
             return
         model = Checklist(logins, now.assignees)
         if not self._ask_checklist("Set Assignees",
@@ -10904,30 +11049,53 @@ class GhViewerFrame(wx.Frame):
         return rows
 
     def _choose_projects(self, item: Item, repo: str, data) -> None:
-        if not data.available and not data.current:
-            self._item_edit_done(f"{repo} and its owner have no open projects.")
-            return
+        # Opens with no projects too: New Project… makes the first, for the
+        # repository's owner and linked to the repository.
         rows = self.project_rows(data.available, data.current)
         by_name = dict(rows)
         entry = {p.id: p.item_id for p in data.current}
         model = Checklist([name for name, _ in rows],
                           [name for name, p in rows if p.id in entry])
-        if not self._ask_checklist("Set Projects", f"Projects for #{item.number} {item.title}",
-                                   model):
+        prompt = f"Projects for #{item.number} {item.title}"
+        note = (f"{repo} and {data.owner or 'its owner'} have no open projects."
+                if not rows else "")
+        owner = data.owner or "the repository's owner"
+        # A typed title that is an existing project's is that project, not a
+        # second one of the same name (GitHub allows those).
+        titles = {}
+        for name, proj in rows:
+            titles.setdefault(proj.title.lower(), []).append(name)
+        if not self._ask_checklist("Set Projects", prompt, model, "&New Project…",
+                                   f"Title of the new project, for {owner}:", note,
+                                   lambda typed: titles.get(typed.strip().lower(), [])):
             return
-        adds = [by_name[n].id for n in model.added()]
-        removes = [(by_name[n].id, entry[by_name[n].id]) for n in model.removed()]
+        create = model.to_create()
+        adds = [by_name[n].id for n in model.added() if n not in create]
+        removes = [(by_name[n].id, entry[by_name[n].id]) for n in model.removed()
+                   if n in by_name]
 
         def call() -> None:
-            for project_id in adds:
-                add_to_project(project_id, data.content_id)
-            for project_id, entry in removes:
-                remove_from_project(project_id, entry)
+            made: list[str] = []
+            try:
+                for title in create:
+                    project_id = create_project(data.owner_id, data.repo_id, title)
+                    made.append(title)
+                    add_to_project(project_id, data.content_id)
+                for project_id in adds:
+                    add_to_project(project_id, data.content_id)
+                for project_id, item_entry in removes:
+                    remove_from_project(project_id, item_entry)
+            except GhError as exc:
+                if not made:
+                    raise
+                # Say what did happen: the project exists now either way.
+                raise GhError(f"Created {', '.join(made)}, then: {exc}") from exc
 
-        self._save_item_edit(
-            item, call, lambda it: None,
-            change_said(item.number, "Projects", model.added(), model.removed(),
-                        model.chosen()))
+        said = change_said(item.number, "Projects", model.added(), model.removed(),
+                           model.chosen())
+        if create:
+            said = f"Created {', '.join(create)}. {said}"
+        self._save_item_edit(item, call, lambda it: None, said)
 
     # Title and description (#122)
 

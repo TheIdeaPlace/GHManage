@@ -63,6 +63,7 @@ def hint_words(label: str) -> str:
 REPO_LIST = "Repository list"
 ANY_LIST = "Any list"
 ISSUES = "Issues & PRs list"
+ITEM_LISTS = "Issues & PRs, My Work and issue search results"
 LABELS = "Labels list"
 RUNS = "Workflow runs and jobs"
 NOTIFICATIONS = "Notifications list"
@@ -111,11 +112,11 @@ LIST_KEYS: list[Command] = [
     Command("Pull request checks", "K", ISSUES),
     Command("Review the pull request", "V", ISSUES),
     Command("Ready for review, or back to draft", "D", ISSUES),
-    Command("Set the milestone", "I", ISSUES),
-    Command("Set the labels", "L", ISSUES),
-    Command("Set the assignees", "A", ISSUES),
-    Command("Set the projects", "P", ISSUES),
-    Command("Edit the title and description", "E", ISSUES),
+    Command("Set the milestone", "I", ITEM_LISTS),
+    Command("Set the labels", "L", ITEM_LISTS),
+    Command("Set the assignees", "A", ITEM_LISTS),
+    Command("Set the projects", "P", ITEM_LISTS),
+    Command("Edit the title and description", "E", ITEM_LISTS),
     Command("The pull request's or commit's changed files", "H", CHANGES),
     Command("Compare the branch with the default branch, the tag or release with the "
             "previous one, or the commit with the latest", "C", COMPARE),

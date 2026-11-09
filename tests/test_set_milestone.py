@@ -100,7 +100,7 @@ MS = [Milestone(3, "1.1", due_on="2026-12-01T08:00:00Z"), Milestone(4, "Later")]
 
 def test_choices_start_with_none_and_show_due_dates():
     labels, sel = Frame.milestone_choices("", MS)
-    assert labels == ["No milestone", "1.1, due 2026-12-01", "Later"]
+    assert labels == ["No milestone", "1.1, due 2026-12-01", "Later", "New milestone…"]
     assert sel == 0
 
 
@@ -110,7 +110,11 @@ def test_the_current_milestone_is_selected():
 
 def test_a_closed_current_milestone_is_listed_and_selected():
     labels, sel = Frame.milestone_choices("0.9", MS)
-    assert labels[-1] == "0.9, closed" and sel == len(labels) - 1
+    assert labels[-2:] == ["0.9, closed", "New milestone…"] and sel == len(labels) - 2
+
+
+def test_with_no_milestones_new_is_still_offered():
+    assert Frame.milestone_choices("", []) == (["No milestone", "New milestone…"], 0)
 
 
 # ── The flow ────────────────────────────────────────────────────────────
@@ -145,6 +149,7 @@ FRAME_HELPERS = (
     "_start_item_edit", "_item_edit_ask", "_item_edit_done", "_item_edit_failed", "_save_item_edit",
     "_item_edited", "_refresh_details_keeping_caret", "_ask_checklist",
     "_choose_labels", "_choose_assignees", "_choose_projects", "_edit_item",
+    "_new_milestone", "_nothing_to_choose",
 )
 
 
@@ -166,7 +171,7 @@ def fake_frame(item, view=ghviewer.VIEW_ISSUES, selected=0, repo="o/r"):
     f.project_rows = Frame.project_rows
     f.NO_MILESTONE = Frame.NO_MILESTONE
     for name in FRAME_HELPERS + ("_choose_milestone",):
-        setattr(f, name, (lambda n: lambda *a: getattr(Frame, n)(f, *a))(name))
+        setattr(f, name, (lambda n: lambda *a, **k: getattr(Frame, n)(f, *a, **k))(name))
     return f
 
 
@@ -176,6 +181,15 @@ def run_now(monkeypatch):
     monkeypatch.setattr(ghviewer.wx, "CallAfter", lambda fn, *a, **k: fn(*a, **k))
     monkeypatch.setattr(ghviewer, "resolve_issue_repo",
                         lambda repo: "up/r" if repo == "me/fork" else repo)
+    BOXES.clear()
+    ACCESS.clear()
+    monkeypatch.setattr(ghviewer, "can_change_items", lambda repo: repo not in ACCESS)
+    monkeypatch.setattr(ghviewer.wx, "MessageBox",
+                        lambda msg, title="", *a, **k: BOXES.append((title, msg)))
+
+
+BOXES: list = []   # (title, message) of every message box shown
+ACCESS: set = set()  # repositories you can't change items in
 
 
 @pytest.fixture
@@ -186,7 +200,7 @@ def flow(monkeypatch):
     set_calls = []
     fetched = []
     monkeypatch.setattr(ghviewer, "fetch_milestones",
-                        lambda repo, state, resolved=False:
+                        lambda repo, state, limit=100, resolved=False:
                         fetched.append((repo, resolved)) or list(MS))
     monkeypatch.setattr(ghviewer, "set_item_milestone",
                         lambda item, repo, m: set_calls.append((item.number, repo, m)))
@@ -253,37 +267,103 @@ def test_keeping_a_closed_milestone_sends_nothing(flow):
     FakeDialog.answer = (ghviewer.wx.ID_OK, None)
     Frame._set_milestone_flow(f)
     assert f.set_calls == []
-    assert FakeDialog.shown[0][2][-1] == "0.9, closed"
+    assert FakeDialog.shown[0][2][-2] == "0.9, closed"
 
 
-def test_no_open_milestones_says_so(flow, monkeypatch):
-    monkeypatch.setattr(ghviewer, "fetch_milestones", lambda repo, state, resolved=False: [])
+class FakeTitle:
+    """The New Milestone box: OK or Cancel, with what was typed."""
+    answer = (None, "")
+
+    def __init__(self, parent, prompt, title, value=""):
+        FakeTitle.seen = (prompt, title)
+    def ShowModal(self): return FakeTitle.answer[0]
+    def GetValue(self): return FakeTitle.answer[1]
+    def Destroy(self): pass
+
+
+@pytest.fixture
+def new_box(monkeypatch):
+    monkeypatch.setattr(ghviewer.wx, "TextEntryDialog", FakeTitle)
+    created = []
+
+    def create(repo, title):
+        created.append((repo, title))
+        return Milestone(9, title, repo=repo)
+    monkeypatch.setattr(ghviewer, "create_milestone", create)
+    return created
+
+
+def test_no_milestones_still_opens_the_box_saying_so(flow, monkeypatch, new_box):
+    # TheIdeaPlace/AIChat #575: no milestones at all, and nothing happened.
+    monkeypatch.setattr(ghviewer, "fetch_milestones", lambda repo, state, limit=100, resolved=False: [])
     f = flow(Item(5, "Bug", "OPEN", "u", False))
+    FakeDialog.answer = (ghviewer.wx.ID_CANCEL, None)
     Frame._set_milestone_flow(f)
-    assert FakeDialog.shown == []
-    assert f.said == ["o/r has no open milestones."]
+    message, caption, choices = FakeDialog.shown[0]
+    assert message.startswith("o/r has no open milestones.")
+    assert choices == ["No milestone", "New milestone…"]
+    assert f.said == ["Milestone unchanged."]
+
+
+def test_new_milestone_is_created_and_the_item_put_in_it(flow, monkeypatch, new_box):
+    monkeypatch.setattr(ghviewer, "fetch_milestones", lambda repo, state, limit=100, resolved=False: [])
+    item = Item(5, "Bug", "OPEN", "u", False)
+    f = flow(item)
+    FakeDialog.answer = (ghviewer.wx.ID_OK, 1)
+    FakeTitle.answer = (ghviewer.wx.ID_OK, "  0.6  ")
+    Frame._set_milestone_flow(f)
+    assert FakeTitle.seen == ("Title of the new milestone in o/r:", "New Milestone")
+    assert new_box == [("o/r", "0.6")]
+    assert f.set_calls[0][:2] == (5, "o/r") and f.set_calls[0][2].title == "0.6"
+    assert item.milestone == "0.6"
+    assert f.said == ["Created milestone 0.6. #5 is in it."]
+
+
+def test_new_milestone_with_a_title_that_exists_uses_it(flow, monkeypatch, new_box):
+    closed = Milestone(4, "0.5", state="closed")
+    monkeypatch.setattr(ghviewer, "fetch_milestones", lambda repo, state, limit=100, resolved=False:
+                        [closed] if state == "all" else [])
+    item = Item(5, "Bug", "OPEN", "u", False)
+    f = flow(item)
+    FakeDialog.answer = (ghviewer.wx.ID_OK, 1)
+    FakeTitle.answer = (ghviewer.wx.ID_OK, "0.5")
+    Frame._set_milestone_flow(f)
+    assert new_box == []
+    assert f.set_calls == [(5, "o/r", closed)]
+    assert f.said == ["0.5 already exists, which is closed. #5 is in milestone 0.5."]
+
+
+@pytest.mark.parametrize("answer", [(ghviewer.wx.ID_CANCEL, "x"), (ghviewer.wx.ID_OK, "   ")])
+def test_new_milestone_cancelled_or_blank_changes_nothing(flow, new_box, answer):
+    f = flow(Item(5, "Bug", "OPEN", "u", False))
+    FakeDialog.answer = (ghviewer.wx.ID_OK, len(MS) + 1)
+    FakeTitle.answer = answer
+    Frame._set_milestone_flow(f)
+    assert new_box == [] and f.set_calls == []
+    assert f.said == ["Milestone unchanged."] and f._item_edit_busy is False
 
 
 def test_no_open_milestones_still_lets_you_clear_one(flow, monkeypatch):
-    monkeypatch.setattr(ghviewer, "fetch_milestones", lambda repo, state, resolved=False: [])
+    monkeypatch.setattr(ghviewer, "fetch_milestones", lambda repo, state, limit=100, resolved=False: [])
     item = Item(5, "Bug", "OPEN", "u", False, milestone="0.9")
     f = flow(item)
     FakeDialog.answer = (ghviewer.wx.ID_OK, 0)
     Frame._set_milestone_flow(f)
-    assert FakeDialog.shown[0][2] == ["No milestone", "0.9, closed"]
+    assert FakeDialog.shown[0][2] == ["No milestone", "0.9, closed", "New milestone…"]
     assert f.set_calls == [(5, "o/r", None)]
 
 
-def test_a_failed_fetch_is_said(flow, monkeypatch):
-    def boom(repo, state, resolved=False):
+def test_a_failed_fetch_is_shown_in_a_box(flow, monkeypatch):
+    def boom(repo, state, limit=100, resolved=False):
         raise GhError("HTTP 404")
     monkeypatch.setattr(ghviewer, "fetch_milestones", boom)
     f = flow(Item(5, "Bug", "OPEN", "u", False))
     Frame._set_milestone_flow(f)
-    assert f.said == ["Couldn't get the milestones of o/r: HTTP 404"]
+    assert BOXES == [("Couldn't Do It", "Couldn't get the milestones of o/r.\n\nHTTP 404")]
+    assert f.announced[-1] == "Couldn't get the milestones of o/r: HTTP 404"
 
 
-def test_a_failed_set_is_said_and_nothing_changes(flow, monkeypatch):
+def test_a_failed_set_is_shown_and_nothing_changes(flow, monkeypatch):
     def boom(item, repo, m):
         raise GhError("HTTP 403: Must have push access")
     monkeypatch.setattr(ghviewer, "set_item_milestone", boom)
@@ -292,16 +372,26 @@ def test_a_failed_set_is_said_and_nothing_changes(flow, monkeypatch):
     FakeDialog.answer = (ghviewer.wx.ID_OK, 1)
     Frame._set_milestone_flow(f)
     assert item.milestone == "" and f.redrawn == []
-    assert f.said == ["Couldn't change #5: HTTP 403: Must have push access"]
+    assert BOXES == [("Couldn't Do It", "Couldn't change #5.\n\nHTTP 403: Must have push access")]
 
 
-def test_only_in_issues_and_prs(flow):
+@pytest.mark.parametrize("view", [ghviewer.VIEW_ISSUES, ghviewer.VIEW_MY_WORK,
+                                  ghviewer.VIEW_SEARCH_ISSUES])
+def test_works_in_every_list_of_issues(flow, view):
+    item = Item(5, "Bug", "OPEN", "u", False, repo="x/y")
+    f = flow(item, view=view)
+    FakeDialog.answer = (ghviewer.wx.ID_OK, 1)
+    Frame._set_milestone_flow(f)
+    assert f.set_calls == [(5, "x/y", MS[0])]
+
+
+def test_not_outside_lists_of_issues(flow):
     f = flow(Item(5, "Bug", "OPEN", "u", False), view=ghviewer.VIEW_COMMITS)
     Frame._set_milestone_flow(f)
-    assert f.said == ["Select an issue or pull request in Issues & PRs first."]
+    assert f.said == ["Select an issue or pull request first."]
     f = flow(None)
     Frame._set_milestone_flow(f)
-    assert f.said == ["Select an issue or pull request in Issues & PRs first."]
+    assert f.said == ["Select an issue or pull request first."]
 
 
 def test_details_name_the_milestone():

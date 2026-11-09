@@ -142,7 +142,7 @@ class NowThread:
 
 # The frame's own methods the fake frame runs for real (#120, #122).
 FRAME_HELPERS = (
-    "_start_item_edit", "_item_edit_done", "_item_edit_failed", "_save_item_edit",
+    "_start_item_edit", "_item_edit_ask", "_item_edit_done", "_item_edit_failed", "_save_item_edit",
     "_item_edited", "_refresh_details_keeping_caret", "_ask_checklist",
     "_choose_labels", "_choose_assignees", "_choose_projects", "_edit_item",
 )
@@ -163,7 +163,7 @@ def fake_frame(item, view=ghviewer.VIEW_ISSUES, selected=0, repo="o/r"):
     f._show_details = f.details.append
     f.list_ctrl = SimpleNamespace(GetFirstSelected=lambda: selected)
     f.milestone_choices = Frame.milestone_choices
-    f.project_names = Frame.project_names
+    f.project_rows = Frame.project_rows
     f.NO_MILESTONE = Frame.NO_MILESTONE
     for name in FRAME_HELPERS + ("_choose_milestone",):
         setattr(f, name, (lambda n: lambda *a: getattr(Frame, n)(f, *a))(name))

@@ -127,8 +127,9 @@ from gh_data import (
     request_reviewers,
     review_pr,
     set_item_milestone,
-    set_item_labels,
-    set_item_assignees,
+    change_item_labels,
+    change_item_assignees,
+    fetch_item_now,
     edit_item,
     fetch_assignable_users,
     fetch_label_names,
@@ -2768,8 +2769,10 @@ class ChecklistDialog(wx.Dialog):
         self.model = model
         self._say = say or (lambda text: False)
         outer = wx.BoxSizer(wx.VERTICAL)
-        label = f"&{prompt}"
-        outer.Add(wx.StaticText(self, label=label), 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
+        label = "&" + prompt.replace("&", "&&")
+        text = wx.StaticText(self, label=label)
+        text.Wrap(420)
+        outer.Add(text, 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
         self.list = wx.ListBox(self, choices=model.rows(), style=wx.LB_SINGLE, size=(420, 280))
         _name(self.list, prompt)
         if len(model):
@@ -2940,10 +2943,11 @@ class EditItemDialog(NewIssueDialog):
     NEEDS_TITLE = "A title is required."
     OK_LABEL = "&Save"
 
-    def __init__(self, parent: wx.Window, repo: str, item: Item) -> None:
+    def __init__(self, parent: wx.Window, repo: str, item: Item, title: str,
+                 body: str) -> None:
         self._item = item
         self.DIALOG_TITLE = f"Edit #{item.number}"
-        super().__init__(parent, repo, item.title, item.body)
+        super().__init__(parent, repo, title, body)
 
     def _intro(self, repo: str) -> str:
         kind = "pull request" if self._item.is_pr else "issue"
@@ -4300,6 +4304,11 @@ class GhViewerFrame(wx.Frame):
         f = getattr(self, "item_filter", None) or ItemFilter()
         menu_bar.Check(ID_FILTER_MINE, f.assignee == "@me")
         menu_bar.Check(ID_FILTER_ASSIGNEE, bool(f.assignee) and f.assignee != "@me")
+        # Who, when it is someone: the check alone doesn't say.
+        other = f.assignee if f.assignee != "@me" else ""
+        menu_bar.SetLabel(ID_FILTER_ASSIGNEE, f"Assigned To {other}…" if other else "Assigned To…")
+        other = f.author if f.author != "@me" else ""
+        menu_bar.SetLabel(ID_FILTER_AUTHOR, f"Opened By {other}…" if other else "Opened By…")
         menu_bar.Check(ID_FILTER_MY_OWN, f.author == "@me")
         menu_bar.Check(ID_FILTER_AUTHOR, bool(f.author) and f.author != "@me")
         menu_bar.Check(ID_FILTER_NO_ASSIGNEE, f.no_assignee)
@@ -10421,7 +10430,9 @@ class GhViewerFrame(wx.Frame):
     def _filter_mine(self) -> None:
         """Assigned to Me: on, or off if it is on."""
         f = self.item_filter
-        self._set_item_filter(dataclass_replace(f, assignee="" if f.assignee == "@me" else "@me"))
+        mine = f.assignee != "@me"
+        self._set_item_filter(dataclass_replace(f, assignee="@me" if mine else "",
+                                                no_assignee=f.no_assignee and not mine))
 
     def _filter_my_own(self) -> None:
         """Opened by Me: on, or off if it is on."""
@@ -10431,7 +10442,11 @@ class GhViewerFrame(wx.Frame):
     def _filter_toggle(self, name: str) -> None:
         """No Assignee or No Milestone, on or off."""
         f = self.item_filter
-        self._set_item_filter(dataclass_replace(f, **{name: not getattr(f, name)}))
+        on = not getattr(f, name)
+        changes = {name: on}
+        if name == "no_assignee" and on:
+            changes["assignee"] = ""  # nothing is both
+        self._set_item_filter(dataclass_replace(f, **changes))
 
     _FILTER_PROMPTS = {
         "assignee": ("Assigned To", "Show issues and pull requests assigned to "
@@ -10452,7 +10467,12 @@ class GhViewerFrame(wx.Frame):
             login = dlg.GetValue().strip().lstrip("@").strip()
         finally:
             dlg.Destroy()
-        self._set_item_filter(dataclass_replace(self.item_filter, **{name: login}))
+        if login.lower() == "me":
+            login = "@me"
+        changes = {name: login}
+        if name == "assignee" and login:
+            changes["no_assignee"] = False  # nothing is both
+        self._set_item_filter(dataclass_replace(self.item_filter, **changes))
 
     def _filter_clear(self) -> None:
         self._set_item_filter(ItemFilter())
@@ -10645,24 +10665,38 @@ class GhViewerFrame(wx.Frame):
             try:
                 where = resolve_issue_repo(repo) or repo
                 data = load(item, where) if load else None
-            except GhError as exc:
+            except Exception as exc:  # noqa: BLE001 - any failure must free the next change
                 wx.CallAfter(self._item_edit_failed, f"Couldn't get the {what} of {repo}", exc)
                 return
-            wx.CallAfter(then, item, where, data)
+            wx.CallAfter(self._item_edit_ask, then, item, where, data)
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def _item_edit_ask(self, then, item: Item, repo: str, data) -> None:
+        """``then``, the box, on the UI thread. Dropped, freeing the next
+        change, if Issues & PRs is no longer showing; an unexpected error
+        is said rather than leaving every later change refused."""
+        if self.view_mode != VIEW_ISSUES:
+            self._item_edit_busy = False
+            return
+        try:
+            then(item, repo, data)
+        except Exception as exc:  # noqa: BLE001
+            self._item_edit_failed(f"Couldn't change #{item.number}", exc)
 
     def _item_edit_done(self, msg: str) -> None:
         self._item_edit_busy = False
         self._tell(msg)
 
-    def _item_edit_failed(self, msg: str, exc: GhError) -> None:
+    def _item_edit_failed(self, msg: str, exc: Exception) -> None:
         self._item_edit_busy = False
         if isinstance(exc, MissingScope):
             self._tell(f"{msg}: it needs gh's \"{exc.scope}\" permission.")
             wx.MessageBox(str(exc), "Permission Needed", wx.OK | wx.ICON_INFORMATION, self)
-        else:
+        elif isinstance(exc, GhError):
             self._tell(f"{msg}: {exc}")
+        else:
+            self._tell(f"{msg}: {type(exc).__name__}: {exc}")
 
     def _save_item_edit(self, item: Item, call, update, said: str) -> None:
         """Run ``call`` off the UI thread; then ``update(item)``, show the
@@ -10672,7 +10706,7 @@ class GhViewerFrame(wx.Frame):
         def worker() -> None:
             try:
                 call()
-            except GhError as exc:
+            except Exception as exc:  # noqa: BLE001 - any failure must free the next change
                 wx.CallAfter(self._item_edit_failed, f"Couldn't change #{item.number}", exc)
                 return
             wx.CallAfter(self._item_edited, item, update, said)
@@ -10682,14 +10716,25 @@ class GhViewerFrame(wx.Frame):
     def _item_edited(self, item: Item, update, said: str) -> None:
         """Show the change where the item is, without reloading the list,
         so the place in it is kept; in the details panel, the caret stays on
-        what was being read."""
-        update(item)
-        row = self._row_of(item)
-        if row >= 0:
-            self._redraw_row(row, item)
-            if row == self.list_ctrl.GetFirstSelected():
-                self._refresh_details_keeping_caret(row)
-        self._item_edit_done(said)
+        what was being read. The list may have been reloaded meanwhile, so
+        the row is found by its number, and the copy in it changed too."""
+        try:
+            update(item)
+            row = -1
+            if self.view_mode == VIEW_ISSUES:
+                row = next((i for i, it in enumerate(self._shown)
+                            if isinstance(it, Item) and it.number == item.number
+                            and it.repo == item.repo), -1)
+            if row >= 0:
+                shown = self._shown[row]
+                if shown is not item:
+                    update(shown)
+                self._redraw_row(row, shown)
+                if row == self.list_ctrl.GetFirstSelected():
+                    self._refresh_details_keeping_caret(row)
+        finally:
+            # Saved on GitHub whatever happened to the row here.
+            self._item_edit_done(said)
 
     def _refresh_details_keeping_caret(self, row: int) -> None:
         """Show ``row`` in the details panel again. When the panel has focus,
@@ -10775,50 +10820,56 @@ class GhViewerFrame(wx.Frame):
             f"#{item.number} is in milestone {target.title}." if target is not None
             else f"#{item.number} has no milestone.")
 
-    # Labels (#122)
+    # Labels (#122). The box starts from the item as it is on GitHub now,
+    # and only what was checked or unchecked is sent, so a label someone
+    # added since the list loaded is neither hidden nor undone.
 
     def _set_labels_flow(self) -> None:
         """Actions ▸ Set Labels (L): check the labels the issue or pull
         request should have."""
         self._start_item_edit(
-            "labels", lambda item, where: fetch_label_names(where), self._choose_labels)
+            "labels", lambda item, where: (fetch_label_names(where), fetch_item_now(item, where)),
+            self._choose_labels)
 
-    def _choose_labels(self, item: Item, repo: str, names: list) -> None:
-        if not names and not item.labels:
+    def _choose_labels(self, item: Item, repo: str, data) -> None:
+        names, now = data
+        if not names and not now.labels:
             self._item_edit_done(f"{repo} has no labels.")
             return
-        model = Checklist(names, item.labels)
+        model = Checklist(names, now.labels)
         if not self._ask_checklist("Set Labels", f"Labels for #{item.number} {item.title}",
                                    model):
             return
-        chosen = model.chosen()
+        chosen, added, removed = model.chosen(), model.added(), model.removed()
         self._save_item_edit(
-            item, lambda: set_item_labels(item, repo, chosen),
+            item, lambda: change_item_labels(item, repo, added, removed),
             lambda it: setattr(it, "labels", list(chosen)),
-            change_said(item.number, "Labels", model.added(), model.removed(), chosen))
+            change_said(item.number, "Labels", added, removed, chosen))
 
-    # Assignees (#122)
+    # Assignees (#122), the same way.
 
     def _set_assignees_flow(self) -> None:
         """Actions ▸ Set Assignees (A): check who the issue or pull request
         is assigned to."""
         self._start_item_edit(
-            "people who can be assigned", lambda item, where: fetch_assignable_users(where),
+            "people who can be assigned",
+            lambda item, where: (fetch_assignable_users(where), fetch_item_now(item, where)),
             self._choose_assignees)
 
-    def _choose_assignees(self, item: Item, repo: str, logins: list) -> None:
-        if not logins and not item.assignees:
+    def _choose_assignees(self, item: Item, repo: str, data) -> None:
+        logins, now = data
+        if not logins and not now.assignees:
             self._item_edit_done(f"No one can be assigned in {repo}.")
             return
-        model = Checklist(logins, item.assignees)
+        model = Checklist(logins, now.assignees)
         if not self._ask_checklist("Set Assignees",
                                    f"Assignees for #{item.number} {item.title}", model):
             return
-        chosen = model.chosen()
+        chosen, added, removed = model.chosen(), model.added(), model.removed()
         self._save_item_edit(
-            item, lambda: set_item_assignees(item, repo, chosen),
+            item, lambda: change_item_assignees(item, repo, added, removed),
             lambda it: setattr(it, "assignees", list(chosen)),
-            change_said(item.number, "Assignees", model.added(), model.removed(), chosen))
+            change_said(item.number, "Assignees", added, removed, chosen))
 
     # Projects (#122)
 
@@ -10828,33 +10879,44 @@ class GhViewerFrame(wx.Frame):
         self._start_item_edit("projects", fetch_item_projects, self._choose_projects)
 
     @staticmethod
-    def project_names(projects: list) -> dict:
-        """Each project by the name it is listed as: its title, with its
-        number after it where two share a title."""
+    def project_rows(available: list, current: list) -> list:
+        """(name, project) for each row of Set Projects, every name unique and
+        every project once, by id: the open projects, then any the item is in
+        that aren't among them (closed, another owner's, or past the first
+        hundred). Where titles clash, the owner and number tell them apart;
+        "(closed)" marks a closed one."""
+        projects = list(available)
+        known = {p.id for p in projects}
+        projects += [p for p in current if p.id not in known]
         titles = [p.title for p in projects]
-        return {(f"{p.title} (#{p.number})" if titles.count(p.title) > 1 else p.title): p
-                for p in projects}
+        rows, used = [], set()
+        for p in projects:
+            name = p.title
+            if titles.count(p.title) > 1:
+                name = f"{p.title} ({p.owner}, #{p.number})" if p.owner else f"{p.title} (#{p.number})"
+            if p.closed:
+                name += " (closed)"
+            base, n = name, 2
+            while name in used:  # the same title, owner and number twice
+                name, n = f"{base} {n}", n + 1
+            used.add(name)
+            rows.append((name, p))
+        return rows
 
     def _choose_projects(self, item: Item, repo: str, data) -> None:
         if not data.available and not data.current:
             self._item_edit_done(f"{repo} and its owner have no open projects.")
             return
-        # Current ones keyed as the available are, so the same project
-        # reads the same; a closed one it is still in is added at the end.
-        by_name = self.project_names(data.available)
-        ids = {p.id: name for name, p in by_name.items()}
-        current_names = []
-        for p in data.current:
-            name = ids.get(p.id) or (f"{p.title} (closed)" if p.closed else p.title)
-            by_name.setdefault(name, p)
-            current_names.append(name)
-        item_ids = {p.id: p.item_id for p in data.current}
-        model = Checklist(list(ids.values()), current_names)
+        rows = self.project_rows(data.available, data.current)
+        by_name = dict(rows)
+        entry = {p.id: p.item_id for p in data.current}
+        model = Checklist([name for name, _ in rows],
+                          [name for name, p in rows if p.id in entry])
         if not self._ask_checklist("Set Projects", f"Projects for #{item.number} {item.title}",
                                    model):
             return
         adds = [by_name[n].id for n in model.added()]
-        removes = [(by_name[n].id, item_ids[by_name[n].id]) for n in model.removed()]
+        removes = [(by_name[n].id, entry[by_name[n].id]) for n in model.removed()]
 
         def call() -> None:
             for project_id in adds:
@@ -10871,10 +10933,12 @@ class GhViewerFrame(wx.Frame):
 
     def _edit_item_flow(self) -> None:
         """Actions ▸ Edit Title and Description (E)."""
-        self._start_item_edit("details", None, self._edit_item)
+        self._start_item_edit("title and description", fetch_item_now, self._edit_item)
 
-    def _edit_item(self, item: Item, repo: str, _data) -> None:
-        dlg = EditItemDialog(self, repo, item)
+    def _edit_item(self, item: Item, repo: str, now) -> None:
+        """The form starts from the item as it is on GitHub now; only a
+        field that was changed is sent."""
+        dlg = EditItemDialog(self, repo, item, now.title, now.body)
         try:
             if dlg.ShowModal() != wx.ID_OK:
                 self._item_edit_done("Not changed.")
@@ -10882,14 +10946,18 @@ class GhViewerFrame(wx.Frame):
             title, body = dlg.values()
         finally:
             dlg.Destroy()
-        if title == item.title and body == (item.body or "").rstrip():
+        new_title = title if title != now.title else None
+        new_body = body if body != now.body.rstrip() else None
+        if new_title is None and new_body is None:
             self._item_edit_done("Not changed.")
             return
 
         def update(it: Item) -> None:
-            it.title, it.body = title, body
+            it.title = title
+            if new_body is not None:
+                it.body = body
 
-        self._save_item_edit(item, lambda: edit_item(item, repo, title, body), update,
+        self._save_item_edit(item, lambda: edit_item(item, repo, new_title, new_body), update,
                              f"#{item.number} saved.")
 
     def _do_comment(self) -> None:

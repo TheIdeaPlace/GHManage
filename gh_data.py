@@ -668,19 +668,65 @@ def _patch_item(item: Item, repo: str, body: dict, endpoint: str = "", method: s
              "--input", "-", "--silent"], stdin=json.dumps(body))
 
 
-def set_item_labels(item: Item, repo: str, names: list[str]) -> None:
-    """Give the issue or PR exactly these labels (#122)."""
-    _patch_item(item, repo, {"labels": list(names)}, "/labels", "PUT")
+def change_item_labels(item: Item, repo: str, add: list[str], remove: list[str]) -> None:
+    """Add and remove labels on the issue or PR (#122). Only the change is
+    sent, never the whole set: a label someone added on the web since the
+    list loaded stays. Removing one that is already gone is no error."""
+    if add:
+        _patch_item(item, repo, {"labels": list(add)}, "/labels", "POST")
+    for name in remove:
+        try:
+            _run_gh(["api", "-X", "DELETE",
+                     f"repos/{repo}/issues/{item.number}/labels/{quote(name, safe='')}",
+                     "--silent"])
+        except GhError as exc:
+            if "404" not in str(exc):
+                raise
 
 
-def set_item_assignees(item: Item, repo: str, logins: list[str]) -> None:
-    """Assign the issue or PR to exactly these people (#122)."""
-    _patch_item(item, repo, {"assignees": list(logins)})
+def change_item_assignees(item: Item, repo: str, add: list[str], remove: list[str]) -> None:
+    """Assign and unassign people on the issue or PR (#122), sending only
+    the change, as labels do."""
+    if add:
+        _patch_item(item, repo, {"assignees": list(add)}, "/assignees", "POST")
+    if remove:
+        _patch_item(item, repo, {"assignees": list(remove)}, "/assignees", "DELETE")
 
 
-def edit_item(item: Item, repo: str, title: str, body: str) -> None:
-    """Change the issue's or PR's title and description (#122)."""
-    _patch_item(item, repo, {"title": title, "body": body})
+def edit_item(item: Item, repo: str, title: Optional[str] = None,
+              body: Optional[str] = None) -> None:
+    """Change the issue's or PR's title, description or both (#122). Only
+    what is given is sent, so changing the title never rewrites the
+    description."""
+    fields = {k: v for k, v in (("title", title), ("body", body)) if v is not None}
+    if fields:
+        _patch_item(item, repo, fields)
+
+
+@dataclass
+class ItemNow:
+    """An issue's or PR's title, description, labels and assignees as they
+    are on GitHub now, read just before changing them."""
+    title: str
+    body: str
+    labels: list
+    assignees: list
+
+
+def fetch_item_now(item: Item, repo: str) -> ItemNow:
+    """Read the issue or PR afresh: the list may be minutes old, and a box
+    that starts from an old copy would show, or undo, changes made since.
+    Line endings as the text box gives them back (\\n), so an untouched
+    description compares as unchanged."""
+    if not repo:
+        raise GhError("No repository for #%d" % item.number)
+    raw = json.loads(_run_gh(["api", f"repos/{repo}/issues/{item.number}"]) or "{}")
+    return ItemNow(
+        title=raw.get("title") or "",
+        body=(raw.get("body") or "").replace("\r\n", "\n"),
+        labels=[l.get("name", "") for l in raw.get("labels") or [] if isinstance(l, dict)],
+        assignees=[a.get("login", "") for a in raw.get("assignees") or [] if isinstance(a, dict)],
+    )
 
 
 def fetch_assignable_users(repo: str, limit: int = 100) -> list[str]:
@@ -709,6 +755,7 @@ class Project:
     number: int = 0
     closed: bool = False
     item_id: str = ""   # the item's entry in the project, when it is in it
+    owner: str = ""     # the user or organization it belongs to
 
 
 @dataclass
@@ -719,7 +766,8 @@ class ItemProjects:
     current: list = field(default_factory=list)     # Project with item_id set
 
 
-_PROJECT_FIELDS = "id title number closed"
+_PROJECT_FIELDS = ("id title number closed "
+                   "owner { ... on User { login } ... on Organization { login } }")
 _ITEM_PROJECTS_QUERY = """
 query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
@@ -737,7 +785,7 @@ query($owner: String!, $name: String!, $number: Int!) {
 def _project(node: dict, item_id: str = "") -> Project:
     return Project(id=node.get("id") or "", title=node.get("title") or "",
                    number=int(node.get("number") or 0), closed=bool(node.get("closed")),
-                   item_id=item_id)
+                   item_id=item_id, owner=(node.get("owner") or {}).get("login") or "")
 
 
 def _project_error(reply: dict) -> Optional[GhError]:
@@ -756,6 +804,11 @@ def fetch_item_projects(item: Item, repo: str) -> ItemProjects:
     issue or PR is in. ``repo`` as given (already resolved)."""
     owner, _, name = repo.partition("/")
     reply = _graphql(_ITEM_PROJECTS_QUERY, {"owner": owner, "name": name, "number": item.number})
+    # A missing permission is said as such even when GitHub sent the rest:
+    # the projects would otherwise come back empty, as if there were none.
+    err = _project_error(reply)
+    if isinstance(err, MissingScope):
+        raise err
     data = reply.get("data") if isinstance(reply.get("data"), dict) else {}
     node = data.get("repository") if isinstance(data, dict) else None
     content = node.get("issueOrPullRequest") if isinstance(node, dict) else None

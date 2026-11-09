@@ -11,7 +11,7 @@ import pytest
 
 import gh_data
 from checklist import Checklist, change_said
-from gh_data import GhError, Item, ItemFilter, ItemProjects, MissingScope, Project
+from gh_data import GhError, Item, ItemFilter, ItemNow, ItemProjects, MissingScope, Project
 
 if os.environ.get("CI"):
     import wx  # noqa: F401
@@ -74,25 +74,42 @@ def test_change_said(added, removed, now, said):
 ISSUE = Item(7, "T", "OPEN", "u", False, labels=["docs"], assignees=["bob"], body="Old")
 
 
-def test_labels_are_put_as_a_whole_set_on_stdin(fake_gh):
+def test_only_the_label_changes_are_sent(fake_gh):
     fake_gh.route("labels", "")
-    gh_data.set_item_labels(ISSUE, "o/r", ["bug", "ui"])
-    (call,) = fake_gh.calls
-    assert call[:4] == ["api", "-X", "PUT", "repos/o/r/issues/7/labels"]
+    gh_data.change_item_labels(ISSUE, "o/r", ["bug", "ui"], ["needs info/triage"])
+    add, remove = fake_gh.calls
+    assert add[:4] == ["api", "-X", "POST", "repos/o/r/issues/7/labels"]
     assert json.loads(fake_gh.stdin[0]) == {"labels": ["bug", "ui"]}
+    assert remove[:4] == ["api", "-X", "DELETE",
+                          "repos/o/r/issues/7/labels/needs%20info%2Ftriage"]
 
 
-def test_no_labels_clears_them(fake_gh):
-    fake_gh.route("labels", "")
-    gh_data.set_item_labels(ISSUE, "o/r", [])
-    assert json.loads(fake_gh.stdin[0]) == {"labels": []}
+def test_removing_a_label_already_gone_is_no_error(fake_gh):
+    fake_gh.route("DELETE", GhError("HTTP 404: Label does not exist"))
+    gh_data.change_item_labels(ISSUE, "o/r", [], ["docs"])
 
 
-def test_assignees_are_patched(fake_gh):
-    fake_gh.route("PATCH", "")
-    gh_data.set_item_assignees(ISSUE, "o/r", ["alice"])
-    assert fake_gh.calls[0][:4] == ["api", "-X", "PATCH", "repos/o/r/issues/7"]
-    assert json.loads(fake_gh.stdin[0]) == {"assignees": ["alice"]}
+def test_other_label_failures_are_errors(fake_gh):
+    fake_gh.route("DELETE", GhError("HTTP 403: Forbidden"))
+    with pytest.raises(GhError, match="403"):
+        gh_data.change_item_labels(ISSUE, "o/r", [], ["docs"])
+
+
+def test_nothing_to_change_sends_nothing(fake_gh):
+    gh_data.change_item_labels(ISSUE, "o/r", [], [])
+    gh_data.change_item_assignees(ISSUE, "o/r", [], [])
+    gh_data.edit_item(ISSUE, "o/r")
+    assert fake_gh.calls == []
+
+
+def test_only_the_assignee_changes_are_sent(fake_gh):
+    fake_gh.route("assignees", "")
+    gh_data.change_item_assignees(ISSUE, "o/r", ["alice"], ["bob"])
+    add, remove = fake_gh.calls
+    assert add[:4] == ["api", "-X", "POST", "repos/o/r/issues/7/assignees"]
+    assert remove[:4] == ["api", "-X", "DELETE", "repos/o/r/issues/7/assignees"]
+    assert [json.loads(x) for x in fake_gh.stdin] == [{"assignees": ["alice"]},
+                                                      {"assignees": ["bob"]}]
 
 
 def test_title_and_body_go_on_stdin_not_the_command_line(fake_gh):
@@ -102,9 +119,29 @@ def test_title_and_body_go_on_stdin_not_the_command_line(fake_gh):
     assert "New -title" not in " ".join(fake_gh.calls[0])
 
 
+def test_a_title_alone_leaves_the_description(fake_gh):
+    fake_gh.route("PATCH", "")
+    gh_data.edit_item(ISSUE, "o/r", title="Only this")
+    assert json.loads(fake_gh.stdin[0]) == {"title": "Only this"}
+
+
+def test_the_item_is_read_afresh_with_text_box_line_endings(fake_gh):
+    fake_gh.route("repos/o/r/issues/7", {"title": "T", "body": "a\r\nb",
+                                         "labels": [{"name": "bug"}],
+                                         "assignees": [{"login": "bob"}]})
+    now = gh_data.fetch_item_now(ISSUE, "o/r")
+    assert (now.title, now.body, now.labels, now.assignees) == ("T", "a\nb", ["bug"], ["bob"])
+    assert gh_data.fetch_item_now(ISSUE, "o/r").body == "a\nb"
+    fake_gh.routes.clear()
+    fake_gh.route("repos/o/r/issues/7", {"title": "T", "body": None})
+    assert gh_data.fetch_item_now(ISSUE, "o/r").body == ""
+
+
 def test_no_repository_is_an_error_and_sends_nothing(fake_gh):
     with pytest.raises(GhError):
-        gh_data.set_item_labels(ISSUE, "", ["bug"])
+        gh_data.change_item_labels(ISSUE, "", ["bug"], [])
+    with pytest.raises(GhError):
+        gh_data.fetch_item_now(ISSUE, "")
     assert fake_gh.calls == []
 
 
@@ -147,6 +184,23 @@ def test_projects_without_the_permission_say_which(monkeypatch):
     with pytest.raises(MissingScope) as caught:
         gh_data.fetch_item_projects(ISSUE, "o/r")
     assert caught.value.scope == "project"
+
+
+def test_a_missing_permission_is_said_even_with_the_item_found(monkeypatch):
+    reply = _projects_reply([], [], [])
+    reply["data"]["repository"]["projectsV2"] = None
+    reply["errors"] = [{"type": "INSUFFICIENT_SCOPES", "message": "Your token has not been "
+                        "granted the required scopes ... requires one of the following "
+                        "scopes: ['read:project']"}]
+    monkeypatch.setattr(gh_data, "_graphql", lambda q, v=None: reply)
+    with pytest.raises(MissingScope):
+        gh_data.fetch_item_projects(ISSUE, "o/r")
+
+
+def test_projects_carry_their_owner(monkeypatch):
+    p = {"id": "P1", "title": "R", "number": 1, "closed": False, "owner": {"login": "org"}}
+    monkeypatch.setattr(gh_data, "_graphql", lambda q, v=None: _projects_reply([p], [], []))
+    assert gh_data.fetch_item_projects(ISSUE, "o/r").available[0].owner == "org"
 
 
 def test_projects_of_a_missing_item(monkeypatch):
@@ -256,6 +310,29 @@ def test_assigned_to_someone(monkeypatch):
     assert FakeTextEntry.seen[1] == "Assigned To"
 
 
+@pytest.mark.parametrize("typed", ["@me", "me", "ME"])
+def test_typing_me_means_you(monkeypatch, typed):
+    monkeypatch.setattr(ghviewer.wx, "TextEntryDialog", FakeTextEntry)
+    FakeTextEntry.answer = (ghviewer.wx.ID_OK, typed)
+    f = _filter_frame()
+    Frame._filter_ask(f, "author")
+    assert f.item_filter.author == "@me"
+
+
+def test_no_assignee_and_an_assignee_exclude_each_other(monkeypatch):
+    f = _filter_frame()
+    Frame._filter_mine(f)
+    Frame._filter_toggle(f, "no_assignee")
+    assert f.item_filter == ItemFilter(no_assignee=True)
+    Frame._filter_mine(f)
+    assert f.item_filter == ItemFilter(assignee="@me")
+    monkeypatch.setattr(ghviewer.wx, "TextEntryDialog", FakeTextEntry)
+    FakeTextEntry.answer = (ghviewer.wx.ID_OK, "bob")
+    Frame._filter_toggle(f, "no_assignee")
+    Frame._filter_ask(f, "assignee")
+    assert f.item_filter == ItemFilter(assignee="bob")
+
+
 def test_cancelling_a_people_filter_changes_nothing(monkeypatch):
     monkeypatch.setattr(ghviewer.wx, "TextEntryDialog", FakeTextEntry)
     FakeTextEntry.answer = (ghviewer.wx.ID_CANCEL, "x")
@@ -299,17 +376,24 @@ def edits(monkeypatch):
     sent = []
     monkeypatch.setattr(ghviewer, "fetch_label_names", lambda repo: ["bug", "docs", "ui"])
     monkeypatch.setattr(ghviewer, "fetch_assignable_users", lambda repo: ["alice", "bob"])
-    monkeypatch.setattr(ghviewer, "set_item_labels",
-                        lambda item, repo, names: sent.append(("labels", repo, names)))
-    monkeypatch.setattr(ghviewer, "set_item_assignees",
-                        lambda item, repo, logins: sent.append(("assignees", repo, logins)))
+    monkeypatch.setattr(ghviewer, "change_item_labels",
+                        lambda item, repo, add, rem: sent.append(("labels", repo, add, rem)))
+    monkeypatch.setattr(ghviewer, "change_item_assignees",
+                        lambda item, repo, add, rem: sent.append(("assignees", repo, add, rem)))
     monkeypatch.setattr(ghviewer, "add_to_project",
                         lambda pid, cid: sent.append(("add", pid, cid)))
     monkeypatch.setattr(ghviewer, "remove_from_project",
                         lambda pid, iid: sent.append(("remove", pid, iid)))
     monkeypatch.setattr(ghviewer, "edit_item",
                         lambda item, repo, t, b: sent.append(("edit", repo, t, b)))
+    # GitHub now: what a test puts in NOW, else the item as listed.
+    NOW.clear()
+    monkeypatch.setattr(ghviewer, "fetch_item_now", lambda item, repo: NOW.get(item.number) or
+                        ItemNow(item.title, item.body, list(item.labels), list(item.assignees)))
     return sent
+
+
+NOW: dict = {}
 
 
 def _item(**kw):
@@ -324,7 +408,7 @@ def test_setting_labels(edits):
     title, prompt, rows = FakeChecklistDialog.shown[0]
     assert (title, prompt) == ("Set Labels", "Labels for #5 Bug")
     assert rows == ["bug, not checked", "docs, checked", "ui, not checked"]
-    assert edits == [("labels", "o/r", ["bug"])]
+    assert edits == [("labels", "o/r", ["bug"], ["docs"])]
     assert item.labels == ["bug"] and f.redrawn and f.details == [0]
     assert f.said == ["#5: added bug, removed docs. Labels now: bug."]
     assert f._item_edit_busy is False
@@ -350,7 +434,7 @@ def test_labels_on_a_fork_go_upstream(edits):
     f = fake_frame(_item(), repo="me/fork")
     FakeChecklistDialog.toggle = ["ui"]
     Frame._set_labels_flow(f)
-    assert edits == [("labels", "up/r", ["ui"])]
+    assert edits == [("labels", "up/r", ["ui"], [])]
 
 
 def test_setting_assignees_keeps_one_who_cant_be_assigned_now(edits):
@@ -359,7 +443,7 @@ def test_setting_assignees_keeps_one_who_cant_be_assigned_now(edits):
     FakeChecklistDialog.toggle = ["alice"]
     Frame._set_assignees_flow(f)
     assert FakeChecklistDialog.shown[0][2][-1] == "zed, checked"
-    assert edits == [("assignees", "o/r", ["alice", "zed"])]
+    assert edits == [("assignees", "o/r", ["alice"], [])]
     assert item.assignees == ["alice", "zed"]
     assert f.said == ["#5: added alice. Assignees now: alice, zed."]
 
@@ -367,7 +451,7 @@ def test_setting_assignees_keeps_one_who_cant_be_assigned_now(edits):
 def test_a_failed_save_is_said_and_changes_nothing(edits, monkeypatch):
     def boom(*a):
         raise GhError("HTTP 422: too many assignees")
-    monkeypatch.setattr(ghviewer, "set_item_assignees", boom)
+    monkeypatch.setattr(ghviewer, "change_item_assignees", boom)
     item = _item()
     f = fake_frame(item)
     FakeChecklistDialog.toggle = ["alice"]
@@ -419,8 +503,8 @@ def test_no_projects_says_so(edits, monkeypatch):
 class FakeEditDialog:
     answer = (None, ("", ""))
 
-    def __init__(self, parent, repo, item):
-        FakeEditDialog.seen = (repo, item.title, item.body)
+    def __init__(self, parent, repo, item, title, body):
+        FakeEditDialog.seen = (repo, title, body)
     def ShowModal(self): return FakeEditDialog.answer[0]
     def values(self): return FakeEditDialog.answer[1]
     def Destroy(self): pass
@@ -438,12 +522,89 @@ def test_editing_the_title_and_description(edits, monkeypatch):
     assert f.said == ["#5 saved."]
 
 
+def test_the_form_starts_from_github_now_and_sends_only_the_title(edits, monkeypatch):
+    # Someone changed the description on the web after the list loaded.
+    monkeypatch.setattr(ghviewer, "EditItemDialog", FakeEditDialog)
+    NOW[5] = ItemNow("Bug", "Their new body", [], [])
+    FakeEditDialog.answer = (ghviewer.wx.ID_OK, ("Bug, fixed typo", "Their new body"))
+    item = _item(body="Stale body")
+    f = fake_frame(item)
+    Frame._edit_item_flow(f)
+    assert FakeEditDialog.seen == ("o/r", "Bug", "Their new body")
+    assert edits == [("edit", "o/r", "Bug, fixed typo", None)]
+
+
 def test_editing_with_no_change_sends_nothing(edits, monkeypatch):
     monkeypatch.setattr(ghviewer, "EditItemDialog", FakeEditDialog)
     FakeEditDialog.answer = (ghviewer.wx.ID_OK, ("Bug", "Body"))
     f = fake_frame(_item(body="Body\n\n"))
     Frame._edit_item_flow(f)
     assert edits == [] and f.said == ["Not changed."]
+
+
+def test_labels_start_from_github_now(edits):
+    # A bot added needs-info after the list loaded: shown checked, and kept.
+    NOW[5] = ItemNow("Bug", "", ["needs-info"], [])
+    item = _item()
+    f = fake_frame(item)
+    FakeChecklistDialog.toggle = ["bug"]
+    Frame._set_labels_flow(f)
+    assert "needs-info, checked" in FakeChecklistDialog.shown[0][2]
+    assert edits == [("labels", "o/r", ["bug"], [])]
+    assert item.labels == ["bug", "needs-info"]
+
+
+def test_projects_the_item_is_in_elsewhere_keep_their_own_row(edits, monkeypatch):
+    # In the user's own "Roadmap" while the repository's owner has one too.
+    data = ItemProjects("I_5", [Project("ORG", "Roadmap", 1, owner="org")],
+                        [Project("MINE", "Roadmap", 3, owner="me", item_id="E3")])
+    monkeypatch.setattr(ghviewer, "fetch_item_projects", lambda item, repo: data)
+    f = fake_frame(_item())
+    FakeChecklistDialog.toggle = ["Roadmap (me, #3)"]
+    Frame._set_projects_flow(f)
+    assert FakeChecklistDialog.shown[0][2] == ["Roadmap (org, #1), not checked",
+                                               "Roadmap (me, #3), checked"]
+    assert edits == [("remove", "MINE", "E3")]
+    assert f._item_edit_busy is False
+
+
+def test_project_rows_are_unique_even_for_twins():
+    twins = [Project("A", "Old", 2, True, owner="o", item_id="x"),
+             Project("B", "Old", 2, True, owner="o", item_id="y")]
+    names = [n for n, _ in Frame.project_rows([], twins)]
+    assert len(set(names)) == 2
+
+
+def test_an_unexpected_error_frees_the_next_change(edits, monkeypatch):
+    def broken(repo):
+        raise ValueError("bad JSON")
+    monkeypatch.setattr(ghviewer, "fetch_label_names", broken)
+    f = fake_frame(_item())
+    Frame._set_labels_flow(f)
+    assert f._item_edit_busy is False
+    assert f.said == ["Couldn't get the labels of o/r: ValueError: bad JSON"]
+
+
+def test_a_box_due_after_leaving_issues_is_dropped(edits, monkeypatch):
+    f = fake_frame(_item())
+    orig = ghviewer.fetch_label_names
+
+    def leave(repo):
+        f.view_mode = ghviewer.VIEW_BRANCHES
+        return orig(repo)
+    monkeypatch.setattr(ghviewer, "fetch_label_names", leave)
+    Frame._set_labels_flow(f)
+    assert FakeChecklistDialog.shown == [] and f._item_edit_busy is False
+
+
+def test_a_reloaded_list_gets_the_change_too(edits):
+    old = _item()
+    f = fake_frame(old)
+    fresh = _item()
+    f._shown = [fresh]      # R pressed while the box was open
+    FakeChecklistDialog.toggle = ["bug"]
+    Frame._set_labels_flow(f)
+    assert fresh.labels == ["bug"] and f.redrawn == [(0, "")]
 
 
 def test_one_change_at_a_time(edits):

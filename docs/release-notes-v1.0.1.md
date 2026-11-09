@@ -5,44 +5,57 @@ a fast, keyboard-driven list.
 
 On a Mac, use `Cmd` where these notes say `Ctrl`, and `Option` where they say `Alt`.
 
-## Setting the milestone
+This release lets you organize issues and pull requests without leaving GHManage.
+Until now you could read them, comment on them, and close or reopen them, but
+anything else meant a trip to github.com. Now you can set their milestone, labels,
+assignees and projects, and edit their title and description, all from the list.
+You can also narrow the list by those same things (#120, #122).
 
-You could list milestones and browse their issues, but not put anything in one.
-Now `I` in Issues & PRs, or **Actions → Set Milestone…**, puts the selected issue
-or pull request in one of the repository's open milestones, or takes it out (#120).
+## Change an issue or pull request where you find it
 
-The box lists "No milestone" first, then the open milestones with their due dates,
-with the item's current one selected. GHManage says where it went, "#12 is in
-milestone 2027.1.", and the row changes in place, so you keep your place in the list.
+Select an issue or pull request and press a key:
 
-An issue's or pull request's milestone is now on a "Milestone:" line in the details
-panel, and there is a **Milestone** column to add under **View → Columns…**.
+| Key | What it sets |
+|-----|--------------|
+| `I` | Its milestone |
+| `L` | Its labels |
+| `A` | Who it's assigned to |
+| `P` | The projects it's in, the repository's and its owner's |
+| `E` | Its title and description |
 
-## Labels, assignees, projects, title and description
+Each one is also on the **Actions** menu. They work in Issues & PRs, in **My
+Work** and in search results, from the list or while you're reading the item in
+the details panel.
 
-The rest of an issue or pull request can be changed from the list as well (#122):
+They all work the same way:
 
-- `L` sets its labels, `A` its assignees and `P` the projects it is in, the
-  repository's and its owner's. Each is a list where every row says whether it is
-  checked ("bug, checked"). `Space` changes a row and `Enter` saves. GHManage then
-  says what changed: "#12: added bug, removed docs. Labels now: bug, ui."
-- `E` edits the title and description, in the same form as New Issue.
+- **One box, starting from what's there now.** Milestone is a list to choose
+  one from. Labels, assignees and projects are lists where every row says
+  whether it is checked, for example "bug, checked": press `Space` to change a
+  row and `Enter` to save. Title and description open in the same form as New
+  Issue.
+- **You hear what changed,** for example "#12: added bug, removed docs. Labels
+  now: bug, ui." The row and the details panel change where you are, so you keep
+  your place in the list.
+- **What you need doesn't have to exist yet.** **New milestone…**, **New
+  Label…** and **New Project…** create one and use it straight away, so a
+  repository's first milestone or label can be made right here.
+- **Nothing is claimed that didn't happen.** Before offering a list, GHManage
+  checks that you're allowed to make the change: GitHub ignores milestones,
+  labels and assignees from people without access, and still reports success.
+  If you can't make the change, or something goes wrong, a message box says so.
+  Someone else's change made since your list loaded is kept, not undone.
 
-These are also on the **Actions** menu, and they work from the details panel and in
-**My Work** and search results too.
+An item's milestone is now shown in the details panel, and there is a
+**Milestone** column to add under **View → Columns…**.
 
-Nothing you need has to exist first. **New milestone…** at the end of the milestone
-list creates a milestone and puts the item in it, which is how a repository gets its
-first one. Set Labels and Set Projects have **New Label…** and **New Project…**
-buttons. When something can't be done, such as having no permission, GHManage says so
-in a message box rather than only on the status bar.
+## Narrow the list by the same things
 
-## Filtering by people and milestone
-
-**View → Filter** now has **Assigned to Me**, **Assigned To…**, **Opened by Me**,
-**Opened By…**, **No Assignee** and **No Milestone**, and they combine. Together,
-Assigned to Me and No Milestone list your work that isn't planned yet. **Clear These
-Filters** turns them off. The status bar and window title say which are on.
+**View → Filter** now has **Assigned to Me**, **Assigned To…**, **Opened by
+Me**, **Opened By…**, **No Assignee** and **No Milestone**. They combine:
+Assigned to Me and No Milestone together list your work that isn't planned yet.
+**Clear These Filters** turns them off, and the status bar and window title say
+which filters are on.
 
 ## Before you start
 

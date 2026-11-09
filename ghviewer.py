@@ -125,6 +125,8 @@ from gh_data import (
     merge_pr,
     request_reviewers,
     review_pr,
+    set_item_milestone,
+    resolve_issue_repo,
     set_pr_ready,
     update_pr_branch,
     WorkflowJob,
@@ -809,6 +811,7 @@ ID_REFRESH = wx.NewIdRef()
 ID_CLOSE_ITEM = wx.NewIdRef()
 ID_REOPEN = wx.NewIdRef()
 ID_COMMENT = wx.NewIdRef()
+ID_SET_MILESTONE = wx.NewIdRef()
 ID_OPEN_BROWSER = wx.NewIdRef()
 ID_QUICK_MODE = wx.NewIdRef()
 ID_FULL_MODE = wx.NewIdRef()
@@ -1059,6 +1062,20 @@ def _ctrl_pos(text: str, index: int) -> int:
     if not _UTF16_POSITIONS:
         return index
     return len(text[:index].encode("utf-16-le")) // 2
+
+
+def moved_caret(old: str, new: str, caret: int) -> int:
+    """Where a caret at ``caret`` in ``old`` belongs in ``new``, when one
+    stretch of text changed: before the change it stays put; after it, it
+    moves with the text."""
+    same = 0
+    for a, b in zip(old, new):
+        if a != b:
+            break
+        same += 1
+    if caret <= same:
+        return caret
+    return max(same, min(len(new), caret + len(new) - len(old)))
 
 
 def _text_index(text: str, pos: int) -> int:
@@ -3255,6 +3272,7 @@ class GhViewerFrame(wx.Frame):
         self._detail_gen = 0  # bumped whenever the details panel moves on
         self._whole_file_busy = False
         self._line_comment_busy = False
+        self._milestone_busy = False  # Set Milestone, from I until it is said
         self._files_head = ""  # the PR's commit Changed Files' lines are of
         self._file_view: diffview.FileView | None = None  # the changed file shown
         self.assets_release: Release | None = None  # release whose assets are shown
@@ -3569,6 +3587,7 @@ class GhViewerFrame(wx.Frame):
         self._act_close = actions_menu.Append(ID_CLOSE_ITEM, "Close Issue/PR (C)\tCtrl+W")
         self._act_reopen = actions_menu.Append(ID_REOPEN, "Reopen Issue/PR (O)\tCtrl+Shift+W")
         self._act_comment = actions_menu.Append(ID_COMMENT, "Add Comment… (M)\tCtrl+M")
+        self._act_milestone = actions_menu.Append(ID_SET_MILESTONE, "Set Milestone… (I)")
         self._act_new_issue = actions_menu.Append(ID_NEW_ISSUE, "New Issue… (N)\tCtrl+N")
         # Pull requests. K, V and D are the keys in the issues list.
         pr_menu = wx.Menu()
@@ -4177,6 +4196,7 @@ class GhViewerFrame(wx.Frame):
         issues = self.view_mode == VIEW_ISSUES
         self._act_close.Enable(issues)
         self._act_reopen.Enable(issues)
+        self._act_milestone.Enable(issues)
         self._act_comment.Enable(issues or self.view_mode == VIEW_DISCUSSIONS)
 
         in_repo = bool(self.repo) and self.view_mode not in REPOLESS_VIEWS
@@ -4402,6 +4422,7 @@ class GhViewerFrame(wx.Frame):
         self.Bind(wx.EVT_MENU, self.on_close_item, id=ID_CLOSE_ITEM)
         self.Bind(wx.EVT_MENU, self.on_reopen, id=ID_REOPEN)
         self.Bind(wx.EVT_MENU, self.on_comment, id=ID_COMMENT)
+        self.Bind(wx.EVT_MENU, lambda e: self._set_milestone_flow(), id=ID_SET_MILESTONE)
         self.Bind(wx.EVT_MENU, self.on_new_issue, id=ID_NEW_ISSUE)
         self.Bind(wx.EVT_MENU, lambda e: self._switch_account_flow(), id=ID_SWITCH_ACCOUNT)
         self.Bind(wx.EVT_MENU, lambda e: self._watch_settings_flow(), id=ID_WATCH_SETTINGS)
@@ -5787,7 +5808,7 @@ class GhViewerFrame(wx.Frame):
             f"{source} — {n_issues} issues, {n_prs} PRs ({self.state_filter}){label_info}. "
             f"Showing up to {self.current_limit} newest.{unsized}",
             keys_hint(enter_hint(VIEW_ISSUES), "H=changed files", ctrl_o_hint(VIEW_ISSUES),
-                      "M=comment  N=new issue  K=checks  V=review  C=close  O=reopen  "
+                      "M=comment  I=milestone  N=new issue  K=checks  V=review  C=close  O=reopen  "
                       "F=favorite  Ctrl++=view more  R=refresh  Ctrl+F=filter", label_hint),
         )
         self._update_title()
@@ -6990,6 +7011,8 @@ class GhViewerFrame(wx.Frame):
             lines.append(f"Labels: {', '.join(item.labels)}")
         if item.assignees:
             lines.append(f"Assignees: {', '.join(item.assignees)}")
+        if item.milestone:
+            lines.append(f"Milestone: {item.milestone}")
         if item.comments and not item.comment_list and item.repo:
             # Search and My Work don't fetch comments; the item's own view does.
             lines.append(f"Comments: {item.comments} (not read in this list)")
@@ -8150,6 +8173,7 @@ class GhViewerFrame(wx.Frame):
                 ord("K"): self._pr_checks,
                 ord("V"): self._pr_review,
                 ord("D"): self._pr_toggle_draft,
+                ord("I"): self._set_milestone_flow,
             }.get(key)
             if action:
                 action()
@@ -10381,6 +10405,127 @@ class GhViewerFrame(wx.Frame):
                 wx.CallAfter(self._on_action_error, f"Error reopening #{item.number}: {exc}")
 
         threading.Thread(target=worker, daemon=True).start()
+
+    # ── Milestone of an issue or pull request (#120) ─────────────────────
+
+    NO_MILESTONE = "No milestone"
+
+    def _set_milestone_flow(self) -> None:
+        """Actions ▸ Set Milestone (I): put the selected issue or pull
+        request in one of its repository's open milestones, or take it out."""
+        item = self._focused_item()
+        if self.view_mode != VIEW_ISSUES or not isinstance(item, Item):
+            self._tell("Select an issue or pull request in Issues & PRs first.")
+            return
+        if getattr(self, "_milestone_busy", False):
+            # A second box over the first would decide from what the item
+            # was before the first one changed it.
+            self._tell("Still setting the last milestone.")
+            return
+        repo = item.repo or self.repo
+        if not repo:
+            self._tell("Select a repository first.")
+            return
+        self._milestone_busy = True
+        self._announce(f"Getting the milestones for #{item.number}…")
+
+        def worker() -> None:
+            try:
+                # Once, for both the list and the change: a milestone's number
+                # only means something in the repository it came from.
+                where = resolve_issue_repo(repo) or repo
+                milestones = fetch_milestones(where, "open", resolved=True)
+            except GhError as exc:
+                wx.CallAfter(self._milestone_done, f"Couldn't get the milestones of {repo}: {exc}")
+                return
+            wx.CallAfter(self._choose_milestone, item, where, milestones)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _milestone_done(self, msg: str) -> None:
+        self._milestone_busy = False
+        self._tell(msg)
+
+    @classmethod
+    def milestone_choices(cls, current: str, milestones: list) -> tuple[list[str], int]:
+        """What Set Milestone lists, and which is selected: "No milestone",
+        then the open milestones with their due dates, with the one the item
+        is in selected. A closed milestone it is still in is listed too, so
+        the selection never claims it is in none."""
+        labels = [cls.NO_MILESTONE]
+        for m in milestones:
+            due = f", due {m.due_on[:10]}" if m.due_on else ""
+            labels.append(f"{m.title}{due}")
+        titles = [m.title for m in milestones]
+        if not current:
+            return labels, 0
+        if current in titles:
+            return labels, titles.index(current) + 1
+        labels.append(f"{current}, closed")
+        return labels, len(labels) - 1
+
+    def _choose_milestone(self, item: Item, repo: str, milestones: list) -> None:
+        if not milestones and not item.milestone:
+            self._milestone_done(f"{repo} has no open milestones.")
+            return
+        labels, current = self.milestone_choices(item.milestone, milestones)
+        dlg = wx.SingleChoiceDialog(
+            self, f"Milestone for #{item.number} {item.title}:", "Set Milestone", labels,
+        )
+        dlg.SetSelection(current)
+        try:
+            if dlg.ShowModal() != wx.ID_OK:
+                self._milestone_done("Milestone unchanged.")
+                return
+            choice = dlg.GetSelection()
+        finally:
+            dlg.Destroy()
+        if choice == current:
+            self._milestone_done(f"#{item.number} is already in milestone {item.milestone}."
+                                 if item.milestone
+                                 else f"#{item.number} already has no milestone.")
+            return
+        # choice is 0 (none) or an open milestone: the closed one, if listed,
+        # is the item's own, which is `current`.
+        target = milestones[choice - 1] if choice else None
+        self._announce(f"Setting the milestone of #{item.number}…")
+
+        def worker() -> None:
+            try:
+                set_item_milestone(item, repo, target)
+            except GhError as exc:
+                wx.CallAfter(self._milestone_done,
+                             f"Couldn't set the milestone of #{item.number}: {exc}")
+                return
+            wx.CallAfter(self._on_milestone_set, item, target)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_milestone_set(self, item: Item, target) -> None:
+        """Show the change where the item is, without reloading the list,
+        so the place in it is kept; in the details panel, the caret stays on
+        what was being read."""
+        item.milestone = target.title if target is not None else ""
+        row = self._row_of(item)
+        if row >= 0:
+            self._redraw_row(row, item)
+            if row == self.list_ctrl.GetFirstSelected():
+                self._refresh_details_keeping_caret(row)
+        self._milestone_done(f"#{item.number} is in milestone {target.title}."
+                             if target is not None else f"#{item.number} has no milestone.")
+
+    def _refresh_details_keeping_caret(self, row: int) -> None:
+        """Show ``row`` in the details panel again. When the panel has focus,
+        the caret stays on the same text, moved past a line added or removed
+        above it."""
+        if self._current_focus() is not self.details_text:
+            self._show_details(row)
+            return
+        old = self.details_text.GetValue()
+        caret = _text_index(old, self.details_text.GetInsertionPoint())
+        self._show_details(row)
+        new = self.details_text.GetValue()
+        self.details_text.SetInsertionPoint(_ctrl_pos(new, moved_caret(old, new, caret)))
 
     def _do_comment(self) -> None:
         item = self._focused_item()

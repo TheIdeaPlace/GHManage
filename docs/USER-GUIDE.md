@@ -422,12 +422,19 @@ Both reload the list from GitHub, so they reach items that were never in the lis
 | `C` or `Ctrl+W` | Close it |
 | `O` or `Ctrl+Shift+W` | Reopen it |
 | `M` or `Ctrl+M` | Add a comment |
+| `I` | Set its milestone |
 | `N` or `Ctrl+N` | New issue |
 | `F` | Add it to favorites, or remove it |
 | `Ctrl+G` | Go to an issue or pull request by number |
 | `Ctrl+O` | Open it on GitHub |
 
 Closing and reopening ask first, naming the item: "Close issue #12?" with its title. A comment is typed into the **Add Comment** box, which takes several lines. When the change has gone through, the status bar says so, for example "Closed #12. Refreshing…", and the list reloads.
+
+### Setting the milestone
+
+`I`, or **Actions → Set Milestone…**, puts the selected issue or pull request in one of the repository's open milestones, or takes it out of the one it is in. It works from the details panel too. The **Set Milestone** box lists "No milestone" first, then the open milestones with their due dates, such as "2027.1, due 2026-12-01", with the item's current milestone selected. If it is in a milestone that has been closed, that one is listed last, marked "closed", so you can see where it is. Choose one and press `Enter`; GHManage says, for example, "#12 is in milestone 2027.1.", and the row and the details panel change where you are, without reloading the list. `Escape` leaves it as it was. Changing a milestone needs write access to the repository.
+
+The details panel names an item's milestone on a "Milestone:" line, and the **Milestone** column can be added under **View → Columns…**.
 
 ### Creating an issue
 
@@ -524,6 +531,8 @@ Selecting a milestone shows it in the details panel: its title, state, due date,
 **View → State** is shared: choose **All** in a milestone's issues to see the closed ones as well, and the milestones list shows all of its milestones too when you go back.
 
 On a fork, milestones come from the upstream repository, the same one the issues come from.
+
+To put an issue or pull request in a milestone, see [Setting the milestone](#setting-the-milestone).
 
 A list of very large pull requests can take GitHub too long to measure. Then GHManage lists them without their sizes, and the Changes and Files columns are blank, rather than showing nothing at all.
 
@@ -1332,7 +1341,7 @@ A screen reader reads a row's columns from left to right, so the order of the co
 
 | View | Shown by default | Also available |
 |------|------------------|----------------|
-| Issues & PRs | Number, Type, State, Title | Author, Created, Updated, Labels, Assignees, Comments, Draft, Review, Changes, Files, Base branch, Head branch |
+| Issues & PRs | Number, Type, State, Title | Author, Created, Updated, Labels, Assignees, Milestone, Comments, Draft, Review, Changes, Files, Base branch, Head branch |
 | Branches | Branch, Last commit, Author, Date | Protected, Ahead, Behind |
 | Commits | Commit, Message, Author, Date | Branches, Files, Changes |
 | Tags | Tag, Commit | |
@@ -1405,6 +1414,7 @@ Everything that acts on what the list is showing is on the **Actions** menu, whi
 | Close Issue/PR | `Ctrl+W` | Issues & PRs |
 | Reopen Issue/PR | `Ctrl+Shift+W` | Issues & PRs |
 | Add Comment… | `Ctrl+M`, or `M` in the list | Issues & PRs; Discussions |
+| Set Milestone… | `I` in the list | Issues & PRs |
 | New Issue… | `Ctrl+N` | Everywhere, for the repository in front of you; shows the new issue in its Issues & PRs |
 | Search This Repository… | `Ctrl+Shift+S` | Everywhere, for the repository in front of you: a search starting `repo:owner/name` |
 | Read README | `Ctrl+Shift+R` | Everywhere, for the repository in front of you: its README, in Files |
@@ -1518,6 +1528,7 @@ On a Mac, use `Cmd` in place of `Ctrl` for every shortcut that has one, `Option`
 | `C` or `Ctrl+W` | Close |
 | `O` or `Ctrl+Shift+W` | Reopen |
 | `M` or `Ctrl+M` | Add a comment |
+| `I` | Set the milestone |
 | `N` or `Ctrl+N` | New issue |
 | `K` / `V` / `D` | On a pull request: checks / review / ready or draft |
 | `H` | On a pull request: its changed files |

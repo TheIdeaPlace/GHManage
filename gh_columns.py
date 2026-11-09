@@ -59,6 +59,7 @@ CATALOG: dict[str, ColumnDef] = {c.id: c for c in [
     _c("updated", "Updated", 100),
     _c("labels", "Labels", 150),
     _c("assignees", "Assignees", 120),
+    _c("milestone", "Milestone", 120),
     _c("comments", "Comments", 70),
     _c("draft", "Draft", 50),
     _c("review", "Review", 100),

@@ -112,6 +112,8 @@ class Item:
     body: str = ""
     labels: list[str] = field(default_factory=list)
     assignees: list[str] = field(default_factory=list)
+    # The milestone's title, or "" with none (#120).
+    milestone: str = ""
     comments: int = 0
     comment_list: list[dict] = field(default_factory=list)
     # PR-specific
@@ -155,6 +157,7 @@ class Item:
             "updated": self.updated_at[:10] if self.updated_at else "",
             "labels": ", ".join(self.labels),
             "assignees": ", ".join(self.assignees),
+            "milestone": self.milestone,
             "comments": str(self.comments),
             "draft": "Yes" if self.is_draft else "No",
             "review": self.review_status,
@@ -174,7 +177,7 @@ class Item:
 
 ALL_COLUMNS = [
     "number", "type", "state", "title", "author", "created", "updated",
-    "labels", "assignees", "comments", "draft", "review", "+/-", "files",
+    "labels", "assignees", "milestone", "comments", "draft", "review", "+/-", "files",
     "base", "head",
 ]
 
@@ -220,8 +223,8 @@ def sort_items(items: list[Item], sort_order: str) -> list[Item]:
 
 
 # JSON fields to request from gh for issues
-ISSUE_FIELDS = "number,title,state,url,author,createdAt,updatedAt,body,labels,assignees,comments"
-PR_FIELDS = "number,title,state,url,author,createdAt,updatedAt,body,labels,assignees,comments,isDraft,mergedAt,reviewDecision,additions,deletions,changedFiles,baseRefName,headRefName"
+ISSUE_FIELDS = "number,title,state,url,author,createdAt,updatedAt,body,labels,assignees,milestone,comments"
+PR_FIELDS = "number,title,state,url,author,createdAt,updatedAt,body,labels,assignees,milestone,comments,isDraft,mergedAt,reviewDecision,additions,deletions,changedFiles,baseRefName,headRefName"
 # The size of each change is what makes GitHub time out (HTTP 502) on a
 # page of very large pull requests (nvaccess/nvda's translation merges);
 # without it the same page comes back.
@@ -259,6 +262,13 @@ def _parse_comments(row: dict) -> tuple[int, list[dict]]:
     return 0, []
 
 
+def _milestone_title(row: dict) -> str:
+    """The title of the milestone in an issue or PR row, or "" with none.
+    gh gives ``{"number": 3, "title": "1.1", ...}`` or null."""
+    m = row.get("milestone")
+    return (m.get("title") or "") if isinstance(m, dict) else ""
+
+
 def _as_rows(data: object) -> list:
     """``gh issue/pr list`` return an array, ``gh issue/pr view`` one object."""
     if isinstance(data, dict):
@@ -285,6 +295,7 @@ def _parse_issues(raw: str) -> list[Item]:
                 body=row.get("body", "") or "",
                 labels=[l["name"] if isinstance(l, dict) else str(l) for l in row.get("labels", [])],
                 assignees=[a["login"] if isinstance(a, dict) else str(a) for a in row.get("assignees", [])],
+                milestone=_milestone_title(row),
                 comments=_parse_comments(row)[0],
                 comment_list=_parse_comments(row)[1],
             )
@@ -311,6 +322,7 @@ def _parse_prs(raw: str) -> list[Item]:
                 body=row.get("body", "") or "",
                 labels=[l["name"] if isinstance(l, dict) else str(l) for l in row.get("labels", [])],
                 assignees=[a["login"] if isinstance(a, dict) else str(a) for a in row.get("assignees", [])],
+                milestone=_milestone_title(row),
                 comments=_parse_comments(row)[0],
                 comment_list=_parse_comments(row)[1],
                 is_draft=row.get("isDraft", False),
@@ -565,6 +577,26 @@ def reopen_item(item: Item, repo: Optional[str]) -> None:
     if effective:
         args += ["--repo", effective]
     _run_gh(args)
+
+
+def set_item_milestone(item: Item, repo: str,
+                       milestone: "Optional[Milestone]") -> None:
+    """Put the issue or PR in ``milestone``, or (None) take it out of its
+    milestone (#120).
+
+    ``repo`` is used as given, not swapped for a fork's upstream: the caller
+    resolves it once and fetches the milestones from the same repository,
+    so a milestone's number is never sent to a repository it isn't from.
+
+    Through the REST issues endpoint, which takes pull requests too, and by
+    the milestone's number: ``gh issue edit --milestone`` takes a title, so
+    a milestone titled "2" could be taken for number 2.
+    """
+    if not repo:
+        raise GhError("No repository for #%d" % item.number)
+    value = "null" if milestone is None else str(milestone.number)
+    _run_gh(["api", "-X", "PATCH", f"repos/{repo}/issues/{item.number}",
+             "-F", f"milestone={value}", "--silent"])
 
 
 def add_comment(item: Item, comment: str, repo: Optional[str]) -> None:
@@ -3903,6 +3935,7 @@ def parse_search_item(raw: dict) -> Item:
         body=raw.get("body") or "",
         labels=labels,
         assignees=assignees,
+        milestone=_milestone_title(raw),
         comments=int(raw.get("comments") or 0),
         is_draft=bool(raw.get("draft")),
         is_merged=bool(is_pr and pr.get("merged_at")),
@@ -5094,13 +5127,15 @@ def _parse_milestone(row: dict, repo: str) -> Milestone:
 
 
 def fetch_milestones(repo: Optional[str], state: str = "open",
-                     limit: int = 100) -> list[Milestone]:
+                     limit: int = 100, resolved: bool = False) -> list[Milestone]:
     """A repository's milestones in GitHub's order, the nearest due date
     first (those with none last). ``state`` is View > State.
 
     Like labels, a fork's are its upstream's, to match the issues listed.
+    ``resolved``: ``repo`` has already been swapped for its upstream; use it
+    as it is.
     """
-    effective = resolve_issue_repo(repo) or repo
+    effective = repo if resolved else (resolve_issue_repo(repo) or repo)
     if state not in ("open", "closed", "all"):
         state = "open"
     rows = _api_pages(f"repos/{effective}/milestones?state={state}", limit)

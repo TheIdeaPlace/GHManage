@@ -112,6 +112,10 @@ LIST_KEYS: list[Command] = [
     Command("Review the pull request", "V", ISSUES),
     Command("Ready for review, or back to draft", "D", ISSUES),
     Command("Set the milestone", "I", ISSUES),
+    Command("Set the labels", "L", ISSUES),
+    Command("Set the assignees", "A", ISSUES),
+    Command("Set the projects", "P", ISSUES),
+    Command("Edit the title and description", "E", ISSUES),
     Command("The pull request's or commit's changed files", "H", CHANGES),
     Command("Compare the branch with the default branch, the tag or release with the "
             "previous one, or the commit with the latest", "C", COMPARE),

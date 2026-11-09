@@ -339,9 +339,57 @@ def _parse_prs(raw: str) -> list[Item]:
     return items
 
 
+@dataclass(frozen=True)
+class ItemFilter:
+    """View ▸ Filter in Issues & PRs (#122): who it is assigned to, who
+    opened it, and whether it has a milestone or an assignee at all.
+    ``assignee`` may be "@me"."""
+
+    assignee: str = ""
+    author: str = ""
+    no_milestone: bool = False
+    no_assignee: bool = False
+
+    @property
+    def active(self) -> bool:
+        return bool(self.assignee or self.author or self.no_milestone or self.no_assignee)
+
+    def describe(self) -> str:
+        """"assigned to me, opened by bob, no milestone", or "" with none."""
+        parts = []
+        if self.assignee:
+            parts.append("assigned to me" if self.assignee == "@me"
+                         else f"assigned to {self.assignee}")
+        if self.no_assignee:
+            parts.append("no assignee")
+        if self.author:
+            parts.append("opened by me" if self.author == "@me" else f"opened by {self.author}")
+        if self.no_milestone:
+            parts.append("no milestone")
+        return ", ".join(parts)
+
+    def args(self) -> list[str]:
+        """gh issue/pr list flags for the people in it."""
+        out: list[str] = []
+        if self.assignee:
+            out += ["--assignee", self.assignee]
+        if self.author:
+            out += ["--author", self.author]
+        return out
+
+    def search_terms(self) -> list[str]:
+        """Search qualifiers for what the flags can't say."""
+        terms = []
+        if self.no_milestone:
+            terms.append("no:milestone")
+        if self.no_assignee:
+            terms.append("no:assignee")
+        return terms
+
+
 def fetch_issues(
     repo: Optional[str], state: str = "open", limit: int = 30, label: str = "",
-    milestone: "Optional[Milestone]" = None,
+    milestone: "Optional[Milestone]" = None, item_filter: Optional[ItemFilter] = None,
 ) -> list[Item]:
     """Fetch issues (excluding PRs) for the repo.
 
@@ -366,6 +414,10 @@ def fetch_issues(
         # By number: gh takes a number or a title, and a title such as
         # "2" would be read as milestone number 2.
         args += ["--milestone", str(milestone.number)]
+    if item_filter is not None:
+        args += item_filter.args()
+        if item_filter.search_terms():
+            args += ["--search", " ".join(item_filter.search_terms())]
     if effective:
         args += ["--repo", effective]
     return _parse_issues(_run_gh(args))
@@ -373,7 +425,7 @@ def fetch_issues(
 
 def fetch_prs(
     repo: Optional[str], state: str = "open", limit: int = 30, label: str = "",
-    milestone: "Optional[Milestone]" = None,
+    milestone: "Optional[Milestone]" = None, item_filter: Optional[ItemFilter] = None,
 ) -> list[Item]:
     """Fetch pull requests for the repo.
 
@@ -389,10 +441,16 @@ def fetch_prs(
     args = ["pr", "list", "--state", state, "--limit", str(limit), "--json", PR_FIELDS]
     if label:
         args += ["--label", label]
+    terms = []
     if milestone is not None:
         # gh pr list has no --milestone; a search qualifier does it. GitHub
         # search can't escape a quote, so one in the title is left out.
-        args += ["--search", 'milestone:"%s"' % milestone.title.replace('"', "")]
+        terms.append('milestone:"%s"' % milestone.title.replace('"', ""))
+    if item_filter is not None:
+        args += item_filter.args()
+        terms += item_filter.search_terms()
+    if terms:
+        args += ["--search", " ".join(terms)]
     if effective:
         args += ["--repo", effective]
     try:
@@ -597,6 +655,140 @@ def set_item_milestone(item: Item, repo: str,
     value = "null" if milestone is None else str(milestone.number)
     _run_gh(["api", "-X", "PATCH", f"repos/{repo}/issues/{item.number}",
              "-F", f"milestone={value}", "--silent"])
+
+
+def _patch_item(item: Item, repo: str, body: dict, endpoint: str = "", method: str = "PATCH") -> None:
+    """Send ``body`` as JSON to the issue (or PR, which is an issue too) in
+    ``repo``, used as given: the caller resolved it once, for the choices
+    too. On stdin, so a title or description is never a command-line
+    argument."""
+    if not repo:
+        raise GhError("No repository for #%d" % item.number)
+    _run_gh(["api", "-X", method, f"repos/{repo}/issues/{item.number}{endpoint}",
+             "--input", "-", "--silent"], stdin=json.dumps(body))
+
+
+def set_item_labels(item: Item, repo: str, names: list[str]) -> None:
+    """Give the issue or PR exactly these labels (#122)."""
+    _patch_item(item, repo, {"labels": list(names)}, "/labels", "PUT")
+
+
+def set_item_assignees(item: Item, repo: str, logins: list[str]) -> None:
+    """Assign the issue or PR to exactly these people (#122)."""
+    _patch_item(item, repo, {"assignees": list(logins)})
+
+
+def edit_item(item: Item, repo: str, title: str, body: str) -> None:
+    """Change the issue's or PR's title and description (#122)."""
+    _patch_item(item, repo, {"title": title, "body": body})
+
+
+def fetch_assignable_users(repo: str, limit: int = 100) -> list[str]:
+    """Who issues and pull requests in ``repo`` can be assigned to, by name.
+    ``repo`` as given (already resolved)."""
+    rows = _api_pages(f"repos/{repo}/assignees", limit)
+    return sorted((r.get("login") or "" for r in rows if isinstance(r, dict) and r.get("login")),
+                  key=str.lower)
+
+
+def fetch_label_names(repo: str, limit: int = 100) -> list[str]:
+    """The names of ``repo``'s labels, A to Z. ``repo`` as given."""
+    rows = _api_pages(f"repos/{repo}/labels", limit)
+    return sorted((r.get("name") or "" for r in rows if isinstance(r, dict) and r.get("name")),
+                  key=str.lower)
+
+
+# ── Projects (v2) of an issue or pull request (#122) ───────────────────
+
+
+@dataclass
+class Project:
+    """A GitHub project (the new kind, Projects v2)."""
+    id: str
+    title: str
+    number: int = 0
+    closed: bool = False
+    item_id: str = ""   # the item's entry in the project, when it is in it
+
+
+@dataclass
+class ItemProjects:
+    """The projects an issue or PR could go in, and the ones it is in."""
+    content_id: str                 # the issue's or PR's node id
+    available: list = field(default_factory=list)   # Project, open ones, A to Z
+    current: list = field(default_factory=list)     # Project with item_id set
+
+
+_PROJECT_FIELDS = "id title number closed"
+_ITEM_PROJECTS_QUERY = """
+query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    projectsV2(first: 100) { nodes { %(f)s } }
+    owner { ... on ProjectV2Owner { projectsV2(first: 100) { nodes { %(f)s } } } }
+    issueOrPullRequest(number: $number) {
+      ... on Issue { id projectItems(first: 50) { nodes { id project { %(f)s } } } }
+      ... on PullRequest { id projectItems(first: 50) { nodes { id project { %(f)s } } } }
+    }
+  }
+}
+""" % {"f": _PROJECT_FIELDS}
+
+
+def _project(node: dict, item_id: str = "") -> Project:
+    return Project(id=node.get("id") or "", title=node.get("title") or "",
+                   number=int(node.get("number") or 0), closed=bool(node.get("closed")),
+                   item_id=item_id)
+
+
+def _project_error(reply: dict) -> Optional[GhError]:
+    """A missing permission, said as MissingScope; another error as GhError."""
+    errors = reply.get("errors") or []
+    if not errors:
+        return None
+    message = errors[0].get("message", "") if isinstance(errors[0], dict) else str(errors[0])
+    if "scope" in message and "project" in message:
+        return MissingScope("project")
+    return GhError(message or "GitHub couldn't read the projects")
+
+
+def fetch_item_projects(item: Item, repo: str) -> ItemProjects:
+    """The projects of the repository and of its owner, and the ones the
+    issue or PR is in. ``repo`` as given (already resolved)."""
+    owner, _, name = repo.partition("/")
+    reply = _graphql(_ITEM_PROJECTS_QUERY, {"owner": owner, "name": name, "number": item.number})
+    data = reply.get("data") if isinstance(reply.get("data"), dict) else {}
+    node = data.get("repository") if isinstance(data, dict) else None
+    content = node.get("issueOrPullRequest") if isinstance(node, dict) else None
+    if not isinstance(content, dict) or not content.get("id"):
+        raise _project_error(reply) or GhError(f"Couldn't find #{item.number} in {repo}")
+    seen: dict[str, Project] = {}
+    for source in (node.get("projectsV2"), (node.get("owner") or {}).get("projectsV2")):
+        for p in (source or {}).get("nodes") or []:
+            if isinstance(p, dict) and p.get("id") and not p.get("closed"):
+                seen.setdefault(p["id"], _project(p))
+    current = [_project(n["project"], n.get("id") or "")
+               for n in (content.get("projectItems") or {}).get("nodes") or []
+               if isinstance(n, dict) and isinstance(n.get("project"), dict)]
+    available = sorted(seen.values(), key=lambda p: p.title.lower())
+    return ItemProjects(content["id"], available, current)
+
+
+def add_to_project(project_id: str, content_id: str) -> None:
+    reply = _graphql(
+        "mutation($p: ID!, $c: ID!) { addProjectV2ItemById(input: {projectId: $p, "
+        "contentId: $c}) { item { id } } }", {"p": project_id, "c": content_id})
+    err = _project_error(reply)
+    if err:
+        raise err
+
+
+def remove_from_project(project_id: str, item_id: str) -> None:
+    reply = _graphql(
+        "mutation($p: ID!, $i: ID!) { deleteProjectV2Item(input: {projectId: $p, "
+        "itemId: $i}) { deletedItemId } }", {"p": project_id, "i": item_id})
+    err = _project_error(reply)
+    if err:
+        raise err
 
 
 def add_comment(item: Item, comment: str, repo: Optional[str]) -> None:

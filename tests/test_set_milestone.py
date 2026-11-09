@@ -140,17 +140,51 @@ class NowThread:
     def start(self): self.target(*self.args)
 
 
-@pytest.fixture
-def flow(monkeypatch):
+# The frame's own methods the fake frame runs for real (#120, #122).
+FRAME_HELPERS = (
+    "_start_item_edit", "_item_edit_done", "_item_edit_failed", "_save_item_edit",
+    "_item_edited", "_refresh_details_keeping_caret", "_ask_checklist",
+    "_choose_labels", "_choose_assignees", "_choose_projects", "_edit_item",
+)
+
+
+def fake_frame(item, view=ghviewer.VIEW_ISSUES, selected=0, repo="o/r"):
+    """A stand-in for the window, enough for changing an item."""
+    f = SimpleNamespace(view_mode=view, repo=repo, said=[], announced=[],
+                        redrawn=[], details=[], _item_edit_busy=False)
+    f.details_text = object()
+    f._current_focus = lambda: None
+    f._announce = f.announced.append
+    f._tell = lambda msg, *a, **k: f.said.append(msg) or False
+    f._focused_item = lambda: item
+    f._shown = [item]
+    f._row_of = lambda it: 0 if it is item else -1
+    f._redraw_row = lambda row, it: f.redrawn.append((row, it.milestone))
+    f._show_details = f.details.append
+    f.list_ctrl = SimpleNamespace(GetFirstSelected=lambda: selected)
+    f.milestone_choices = Frame.milestone_choices
+    f.project_names = Frame.project_names
+    f.NO_MILESTONE = Frame.NO_MILESTONE
+    for name in FRAME_HELPERS + ("_choose_milestone",):
+        setattr(f, name, (lambda n: lambda *a: getattr(Frame, n)(f, *a))(name))
+    return f
+
+
+def run_now(monkeypatch):
+    """Threads run at once and CallAfter calls straight through."""
     monkeypatch.setattr(ghviewer.threading, "Thread", NowThread)
     monkeypatch.setattr(ghviewer.wx, "CallAfter", lambda fn, *a, **k: fn(*a, **k))
+    monkeypatch.setattr(ghviewer, "resolve_issue_repo",
+                        lambda repo: "up/r" if repo == "me/fork" else repo)
+
+
+@pytest.fixture
+def flow(monkeypatch):
+    run_now(monkeypatch)
     monkeypatch.setattr(ghviewer.wx, "SingleChoiceDialog", FakeDialog)
     FakeDialog.shown = []
     set_calls = []
     fetched = []
-    # A fork: its issues and milestones are its upstream's.
-    monkeypatch.setattr(ghviewer, "resolve_issue_repo",
-                        lambda repo: "up/r" if repo == "me/fork" else repo)
     monkeypatch.setattr(ghviewer, "fetch_milestones",
                         lambda repo, state, resolved=False:
                         fetched.append((repo, resolved)) or list(MS))
@@ -158,24 +192,8 @@ def flow(monkeypatch):
                         lambda item, repo, m: set_calls.append((item.number, repo, m)))
 
     def make(item, view=ghviewer.VIEW_ISSUES, selected=0, repo="o/r"):
-        f = SimpleNamespace(view_mode=view, repo=repo, said=[], announced=[],
-                            redrawn=[], details=[], set_calls=set_calls, fetched=fetched,
-                            _milestone_busy=False)
-        f.details_text = object()
-        f._current_focus = lambda: None
-        f._announce = f.announced.append
-        f._tell = lambda msg, *a, **k: f.said.append(msg)
-        f._focused_item = lambda: item
-        f._shown = [item]
-        f._row_of = lambda it: 0 if it is item else -1
-        f._redraw_row = lambda row, it: f.redrawn.append((row, it.milestone))
-        f._show_details = f.details.append
-        f.list_ctrl = SimpleNamespace(GetFirstSelected=lambda: selected)
-        f.milestone_choices = Frame.milestone_choices
-        f.NO_MILESTONE = Frame.NO_MILESTONE
-        for name in ("_choose_milestone", "_on_milestone_set", "_milestone_done",
-                     "_refresh_details_keeping_caret"):
-            setattr(f, name, (lambda n: lambda *a: getattr(Frame, n)(f, *a))(name))
+        f = fake_frame(item, view, selected, repo)
+        f.set_calls, f.fetched = set_calls, fetched
         return f
     return make
 
@@ -274,7 +292,7 @@ def test_a_failed_set_is_said_and_nothing_changes(flow, monkeypatch):
     FakeDialog.answer = (ghviewer.wx.ID_OK, 1)
     Frame._set_milestone_flow(f)
     assert item.milestone == "" and f.redrawn == []
-    assert f.said == ["Couldn't set the milestone of #5: HTTP 403: Must have push access"]
+    assert f.said == ["Couldn't change #5: HTTP 403: Must have push access"]
 
 
 def test_only_in_issues_and_prs(flow):
@@ -306,10 +324,10 @@ def test_a_fork_fetches_and_sets_in_the_same_repository(flow):
 
 def test_a_second_press_while_one_is_open_says_so(flow):
     f = flow(Item(5, "Bug", "OPEN", "u", False))
-    f._milestone_busy = True
+    f._item_edit_busy = True
     Frame._set_milestone_flow(f)
     assert FakeDialog.shown == [] and f.fetched == []
-    assert f.said == ["Still setting the last milestone."]
+    assert f.said == ["Still saving the last change."]
 
 
 @pytest.mark.parametrize("answer", [(ghviewer.wx.ID_OK, 1), (ghviewer.wx.ID_CANCEL, None),
@@ -318,7 +336,7 @@ def test_every_ending_lets_it_be_used_again(flow, answer):
     f = flow(Item(5, "Bug", "OPEN", "u", False))
     FakeDialog.answer = answer
     Frame._set_milestone_flow(f)
-    assert f._milestone_busy is False
+    assert f._item_edit_busy is False
 
 
 @pytest.mark.parametrize("where", ["fetch", "set"])
@@ -330,7 +348,7 @@ def test_a_failure_lets_it_be_used_again(flow, monkeypatch, where):
     f = flow(Item(5, "Bug", "OPEN", "u", False))
     FakeDialog.answer = (ghviewer.wx.ID_OK, 1)
     Frame._set_milestone_flow(f)
-    assert f._milestone_busy is False
+    assert f._item_edit_busy is False
 
 
 # ── The details panel keeps its place ───────────────────────────────────

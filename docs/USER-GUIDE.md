@@ -411,8 +411,9 @@ The details panel shows the item in full: state, author, dates, address, labels,
 
 - **View → State** shows **Open**, **Closed** or **All**. Open is the default.
 - **View → Filter** shows **Issues Only**, **PRs Only**, or **Issues & PRs**.
+- **View → Filter** also narrows the list by people and milestone. **Assigned to Me** and **Opened by Me** show your own. **Assigned To…** and **Opened By…** ask for someone's GitHub login. **No Assignee** and **No Milestone** show what is still unassigned or unplanned. Each one is checked on the menu while it is on, and they combine, so **Assigned to Me** and **No Milestone** together list your items that have no milestone. **Clear These Filters** turns them all off. They stay on as you move between repositories, as **View → State** does, and the status bar and the window title name them, for example "owner/name — 4 issues, 1 PRs (open), assigned to me, no milestone."
 
-Both reload the list from GitHub, so they reach items that were never in the list you had.
+These reload the list from GitHub, so they reach items that were never in the list you had.
 
 ### Keys in the issues list
 
@@ -423,6 +424,10 @@ Both reload the list from GitHub, so they reach items that were never in the lis
 | `O` or `Ctrl+Shift+W` | Reopen it |
 | `M` or `Ctrl+M` | Add a comment |
 | `I` | Set its milestone |
+| `L` | Set its labels |
+| `A` | Set its assignees |
+| `P` | Set its projects |
+| `E` | Edit its title and description |
 | `N` or `Ctrl+N` | New issue |
 | `F` | Add it to favorites, or remove it |
 | `Ctrl+G` | Go to an issue or pull request by number |
@@ -435,6 +440,20 @@ Closing and reopening ask first, naming the item: "Close issue #12?" with its ti
 `I`, or **Actions → Set Milestone…**, puts the selected issue or pull request in one of the repository's open milestones, or takes it out of the one it is in. It works from the details panel too. The **Set Milestone** box lists "No milestone" first, then the open milestones with their due dates, such as "2027.1, due 2026-12-01", with the item's current milestone selected. If it is in a milestone that has been closed, that one is listed last, marked "closed", so you can see where it is. Choose one and press `Enter`; GHManage says, for example, "#12 is in milestone 2027.1.", and the row and the details panel change where you are, without reloading the list. `Escape` leaves it as it was. Changing a milestone needs write access to the repository.
 
 The details panel names an item's milestone on a "Milestone:" line, and the **Milestone** column can be added under **View → Columns…**.
+
+### Labels, assignees and projects
+
+`L`, `A` and `P`, or **Actions → Set Labels…**, **Set Assignees…** and **Set Projects…**, each open a list where every row says whether it is checked, for example "bug, checked" or "docs, not checked". Press `Space` to check or uncheck the selected row. GHManage says what it is now, such as "bug checked", and the line under the list sums up what is checked. Press `Enter` to save, or `Escape` to leave everything as it was. Typing a letter moves to the next row that starts with it.
+
+- **Set Labels** lists the repository's labels, A to Z.
+- **Set Assignees** lists everyone who can be assigned in the repository. Anyone assigned who can no longer be assigned is listed at the end, checked, so you can see them and take them off.
+- **Set Projects** lists the open projects of the repository and of its owner, the user or organization. Where two have the same title, each is followed by its number, such as "Bugs (#2)". A closed project the item is still in is listed at the end, marked "(closed)". Projects need gh's "project" permission. If gh doesn't have it, GHManage says so and shows the command that adds it.
+
+Once saved, GHManage says what changed, for example "#12: added bug, removed docs. Labels now: bug, ui.", and the row and the details panel change where you are. All of these, `I` included, work from the details panel too, and need write access to the repository.
+
+### Editing the title and description
+
+`E`, or **Actions → Edit Title and Description…**, opens the item's title and description in the same form as **New Issue**. `Ctrl+Enter` or the **Save** button saves, and GHManage says "#12 saved."
 
 ### Creating an issue
 
@@ -1414,7 +1433,7 @@ Everything that acts on what the list is showing is on the **Actions** menu, whi
 | Close Issue/PR | `Ctrl+W` | Issues & PRs |
 | Reopen Issue/PR | `Ctrl+Shift+W` | Issues & PRs |
 | Add Comment… | `Ctrl+M`, or `M` in the list | Issues & PRs; Discussions |
-| Set Milestone… | `I` in the list | Issues & PRs |
+| Set Milestone…, Set Labels…, Set Assignees…, Set Projects…, Edit Title and Description… | `I`, `L`, `A`, `P`, `E` in the list | Issues & PRs |
 | New Issue… | `Ctrl+N` | Everywhere, for the repository in front of you; shows the new issue in its Issues & PRs |
 | Search This Repository… | `Ctrl+Shift+S` | Everywhere, for the repository in front of you: a search starting `repo:owner/name` |
 | Read README | `Ctrl+Shift+R` | Everywhere, for the repository in front of you: its README, in Files |
@@ -1528,7 +1547,8 @@ On a Mac, use `Cmd` in place of `Ctrl` for every shortcut that has one, `Option`
 | `C` or `Ctrl+W` | Close |
 | `O` or `Ctrl+Shift+W` | Reopen |
 | `M` or `Ctrl+M` | Add a comment |
-| `I` | Set the milestone |
+| `I` / `L` / `A` / `P` | Set the milestone / labels / assignees / projects |
+| `E` | Edit the title and description |
 | `N` or `Ctrl+N` | New issue |
 | `K` / `V` / `D` | On a pull request: checks / review / ready or draft |
 | `H` | On a pull request: its changed files |

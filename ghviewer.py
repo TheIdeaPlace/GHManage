@@ -16,7 +16,7 @@ import sys
 import threading
 import unicodedata
 import webbrowser
-from dataclasses import dataclass
+from dataclasses import dataclass, replace as dataclass_replace
 from types import SimpleNamespace
 from typing import Callable, Optional
 from urllib.parse import quote, unquote, urlsplit
@@ -50,6 +50,7 @@ from saved_searches import (
     remove_saved_search,
 )
 
+from checklist import Checklist, change_said
 from columns import ColumnSet, LayoutEditor, cell_text, names_cell, row_text
 from gh_columns import (
     COLUMN_SETS, ACTIVITY_SET, ARTIFACT_SET, ASSET_SET, BRANCH_SET, CHANGED_FILE_SET, COMMIT_SET,
@@ -126,6 +127,15 @@ from gh_data import (
     request_reviewers,
     review_pr,
     set_item_milestone,
+    set_item_labels,
+    set_item_assignees,
+    edit_item,
+    fetch_assignable_users,
+    fetch_label_names,
+    fetch_item_projects,
+    add_to_project,
+    remove_from_project,
+    ItemFilter,
     resolve_issue_repo,
     set_pr_ready,
     update_pr_branch,
@@ -812,6 +822,17 @@ ID_CLOSE_ITEM = wx.NewIdRef()
 ID_REOPEN = wx.NewIdRef()
 ID_COMMENT = wx.NewIdRef()
 ID_SET_MILESTONE = wx.NewIdRef()
+ID_SET_LABELS = wx.NewIdRef()
+ID_SET_ASSIGNEES = wx.NewIdRef()
+ID_SET_PROJECTS = wx.NewIdRef()
+ID_EDIT_ITEM = wx.NewIdRef()
+ID_FILTER_MINE = wx.NewIdRef()
+ID_FILTER_ASSIGNEE = wx.NewIdRef()
+ID_FILTER_AUTHOR = wx.NewIdRef()
+ID_FILTER_MY_OWN = wx.NewIdRef()
+ID_FILTER_NO_MILESTONE = wx.NewIdRef()
+ID_FILTER_NO_ASSIGNEE = wx.NewIdRef()
+ID_FILTER_CLEAR = wx.NewIdRef()
 ID_OPEN_BROWSER = wx.NewIdRef()
 ID_QUICK_MODE = wx.NewIdRef()
 ID_FULL_MODE = wx.NewIdRef()
@@ -2730,6 +2751,69 @@ def login_from_choice(text: str) -> str:
     return text.split(" — ", 1)[0].strip().lstrip("@").strip()
 
 
+class ChecklistDialog(wx.Dialog):
+    """Set Labels, Set Assignees and Set Projects (#122): a list where each
+    row says whether it is checked ("bug, checked"), Space to change one,
+    and OK to save. The rules are ``checklist.Checklist``'s.
+
+    A plain list box rather than wx's CheckListBox, whose check boxes are
+    drawn by wx on Windows and not always reported to a screen reader. What
+    Space did is said through ``say``, and the row's new name is announced
+    to the screen reader as well; the summary under the list shows what is
+    checked."""
+
+    def __init__(self, parent: wx.Window, title: str, prompt: str, model: Checklist,
+                 say: Callable[[str], bool] | None = None) -> None:
+        super().__init__(parent, title=title, style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
+        self.model = model
+        self._say = say or (lambda text: False)
+        outer = wx.BoxSizer(wx.VERTICAL)
+        label = f"&{prompt}"
+        outer.Add(wx.StaticText(self, label=label), 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
+        self.list = wx.ListBox(self, choices=model.rows(), style=wx.LB_SINGLE, size=(420, 280))
+        _name(self.list, prompt)
+        if len(model):
+            self.list.SetSelection(0)
+        outer.Add(self.list, 1, wx.EXPAND | wx.ALL, 10)
+        self.summary = wx.StaticText(self, label=model.summary())
+        outer.Add(self.summary, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
+        buttons = wx.StdDialogButtonSizer()
+        ok = wx.Button(self, wx.ID_OK, "&Save")
+        ok.SetDefault()
+        buttons.AddButton(ok)
+        buttons.AddButton(wx.Button(self, wx.ID_CANCEL, "Cancel"))
+        buttons.Realize()
+        outer.Add(buttons, 0, wx.EXPAND | wx.ALL, 10)
+        self.SetSizerAndFit(outer)
+        self.SetEscapeId(wx.ID_CANCEL)
+        self.list.Bind(wx.EVT_CHAR_HOOK, self._on_list_key)
+        self.list.Bind(wx.EVT_LISTBOX_DCLICK, lambda e: self.toggle())
+        self.CentreOnParent()
+        wx.CallAfter(self.list.SetFocus)
+
+    def _on_list_key(self, event: wx.KeyEvent) -> None:
+        if event.GetKeyCode() == wx.WXK_SPACE and not event.HasAnyModifiers():
+            self.toggle()
+            return
+        event.Skip()
+
+    def toggle(self) -> None:
+        row = self.list.GetSelection()
+        if row == wx.NOT_FOUND:
+            wx.Bell()
+            return
+        said = self.model.toggle(row)
+        self.list.SetString(row, self.model.row(row))
+        self.list.SetSelection(row)
+        self.summary.SetLabel(self.model.summary())
+        # The row's text changed under the screen reader, which may still
+        # hold the old one. Windows only: on a Mac it raises NotImplementedError.
+        if wx.Platform == "__WXMSW__":
+            wx.Accessible.NotifyEvent(wx.ACC_EVENT_OBJECT_NAMECHANGE, self.list,
+                                      wx.OBJID_CLIENT, row + 1)
+        self._say(said)
+
+
 class NewIssueDialog(wx.Dialog):
     """Title and body for a new issue.
 
@@ -2847,6 +2931,23 @@ class NewPullRequestDialog(NewIssueDialog):
         """(title, body, draft)."""
         title, body = self.values()
         return title, body, self.draft_ctrl.GetValue()
+
+
+class EditItemDialog(NewIssueDialog):
+    """Edit Title and Description (#122): the New Issue form, filled in with
+    the issue's or pull request's title and description."""
+
+    NEEDS_TITLE = "A title is required."
+    OK_LABEL = "&Save"
+
+    def __init__(self, parent: wx.Window, repo: str, item: Item) -> None:
+        self._item = item
+        self.DIALOG_TITLE = f"Edit #{item.number}"
+        super().__init__(parent, repo, item.title, item.body)
+
+    def _intro(self, repo: str) -> str:
+        kind = "pull request" if self._item.is_pr else "issue"
+        return f"Edit {kind} #{self._item.number} in {repo}"
 
 
 class CompareDialog(wx.Dialog):
@@ -3272,7 +3373,7 @@ class GhViewerFrame(wx.Frame):
         self._detail_gen = 0  # bumped whenever the details panel moves on
         self._whole_file_busy = False
         self._line_comment_busy = False
-        self._milestone_busy = False  # Set Milestone, from I until it is said
+        self._item_edit_busy = False  # Set Milestone, Labels…: from the key until it is said
         self._files_head = ""  # the PR's commit Changed Files' lines are of
         self._file_view: diffview.FileView | None = None  # the changed file shown
         self.assets_release: Release | None = None  # release whose assets are shown
@@ -3289,6 +3390,8 @@ class GhViewerFrame(wx.Frame):
         # pressing Enter on a label; unlike the quick filter this is applied by
         # `gh`, so it reaches issues past the current page.
         self.label_filter: str = ""
+        # View > Filter's people and milestone (#122).
+        self.item_filter = ItemFilter()
         # Issues & PRs restricted to a milestone (Enter in Milestones).
         self.milestone_filter: Milestone | None = None
         # Whether GitHub has older activity than the Activity view has loaded;
@@ -3587,7 +3690,13 @@ class GhViewerFrame(wx.Frame):
         self._act_close = actions_menu.Append(ID_CLOSE_ITEM, "Close Issue/PR (C)\tCtrl+W")
         self._act_reopen = actions_menu.Append(ID_REOPEN, "Reopen Issue/PR (O)\tCtrl+Shift+W")
         self._act_comment = actions_menu.Append(ID_COMMENT, "Add Comment… (M)\tCtrl+M")
+        # I, L, A, P and E are the keys in the issues list (#120, #122).
         self._act_milestone = actions_menu.Append(ID_SET_MILESTONE, "Set Milestone… (I)")
+        self._act_labels = actions_menu.Append(ID_SET_LABELS, "Set Labels… (L)")
+        self._act_assignees = actions_menu.Append(ID_SET_ASSIGNEES, "Set Assignees… (A)")
+        self._act_projects = actions_menu.Append(ID_SET_PROJECTS, "Set Projects… (P)")
+        self._act_edit_item = actions_menu.Append(
+            ID_EDIT_ITEM, "Edit Title and Description… (E)")
         self._act_new_issue = actions_menu.Append(ID_NEW_ISSUE, "New Issue… (N)\tCtrl+N")
         # Pull requests. K, V and D are the keys in the issues list.
         pr_menu = wx.Menu()
@@ -3763,6 +3872,17 @@ class GhViewerFrame(wx.Frame):
         tab_menu.AppendRadioItem(ID_TAB_ISSUES, "Issues Only")
         tab_menu.AppendRadioItem(ID_TAB_PRS, "PRs Only")
         tab_menu.AppendRadioItem(ID_TAB_BOTH, "Issues & PRs")
+        # Who it is assigned to or opened by, and what it lacks (#122). They
+        # stay on, across repositories, until turned off, as State does; the
+        # status bar and the window title name them.
+        tab_menu.AppendSeparator()
+        tab_menu.AppendCheckItem(ID_FILTER_MINE, "Assigned to Me")
+        tab_menu.AppendCheckItem(ID_FILTER_ASSIGNEE, "Assigned To…")
+        tab_menu.AppendCheckItem(ID_FILTER_MY_OWN, "Opened by Me")
+        tab_menu.AppendCheckItem(ID_FILTER_AUTHOR, "Opened By…")
+        tab_menu.AppendCheckItem(ID_FILTER_NO_ASSIGNEE, "No Assignee")
+        tab_menu.AppendCheckItem(ID_FILTER_NO_MILESTONE, "No Milestone")
+        tab_menu.Append(ID_FILTER_CLEAR, "Clear These Filters")
         view_menu.AppendSubMenu(tab_menu, "Filter")
 
         # How Changed Files marks each line; the same choices as The Chat Place.
@@ -4177,6 +4297,14 @@ class GhViewerFrame(wx.Frame):
         menu_bar.Check(ID_TAB_ISSUES, self.tab_filter == "issues")
         menu_bar.Check(ID_TAB_PRS, self.tab_filter == "prs")
         menu_bar.Check(ID_TAB_BOTH, self.tab_filter == "both")
+        f = getattr(self, "item_filter", None) or ItemFilter()
+        menu_bar.Check(ID_FILTER_MINE, f.assignee == "@me")
+        menu_bar.Check(ID_FILTER_ASSIGNEE, bool(f.assignee) and f.assignee != "@me")
+        menu_bar.Check(ID_FILTER_MY_OWN, f.author == "@me")
+        menu_bar.Check(ID_FILTER_AUTHOR, bool(f.author) and f.author != "@me")
+        menu_bar.Check(ID_FILTER_NO_ASSIGNEE, f.no_assignee)
+        menu_bar.Check(ID_FILTER_NO_MILESTONE, f.no_milestone)
+        menu_bar.Enable(ID_FILTER_CLEAR, f.active)
         # Sort order
         for item_id, order in self._sort_menu_items.items():
             menu_bar.Check(item_id, order == self.sort_order)
@@ -4196,7 +4324,9 @@ class GhViewerFrame(wx.Frame):
         issues = self.view_mode == VIEW_ISSUES
         self._act_close.Enable(issues)
         self._act_reopen.Enable(issues)
-        self._act_milestone.Enable(issues)
+        for entry in (self._act_milestone, self._act_labels, self._act_assignees,
+                      self._act_projects, self._act_edit_item):
+            entry.Enable(issues)
         self._act_comment.Enable(issues or self.view_mode == VIEW_DISCUSSIONS)
 
         in_repo = bool(self.repo) and self.view_mode not in REPOLESS_VIEWS
@@ -4423,6 +4553,19 @@ class GhViewerFrame(wx.Frame):
         self.Bind(wx.EVT_MENU, self.on_reopen, id=ID_REOPEN)
         self.Bind(wx.EVT_MENU, self.on_comment, id=ID_COMMENT)
         self.Bind(wx.EVT_MENU, lambda e: self._set_milestone_flow(), id=ID_SET_MILESTONE)
+        self.Bind(wx.EVT_MENU, lambda e: self._set_labels_flow(), id=ID_SET_LABELS)
+        self.Bind(wx.EVT_MENU, lambda e: self._set_assignees_flow(), id=ID_SET_ASSIGNEES)
+        self.Bind(wx.EVT_MENU, lambda e: self._set_projects_flow(), id=ID_SET_PROJECTS)
+        self.Bind(wx.EVT_MENU, lambda e: self._edit_item_flow(), id=ID_EDIT_ITEM)
+        self.Bind(wx.EVT_MENU, lambda e: self._filter_mine(), id=ID_FILTER_MINE)
+        self.Bind(wx.EVT_MENU, lambda e: self._filter_ask('assignee'), id=ID_FILTER_ASSIGNEE)
+        self.Bind(wx.EVT_MENU, lambda e: self._filter_ask('author'), id=ID_FILTER_AUTHOR)
+        self.Bind(wx.EVT_MENU, lambda e: self._filter_my_own(), id=ID_FILTER_MY_OWN)
+        self.Bind(wx.EVT_MENU, lambda e: self._filter_toggle('no_milestone'),
+                  id=ID_FILTER_NO_MILESTONE)
+        self.Bind(wx.EVT_MENU, lambda e: self._filter_toggle('no_assignee'),
+                  id=ID_FILTER_NO_ASSIGNEE)
+        self.Bind(wx.EVT_MENU, lambda e: self._filter_clear(), id=ID_FILTER_CLEAR)
         self.Bind(wx.EVT_MENU, self.on_new_issue, id=ID_NEW_ISSUE)
         self.Bind(wx.EVT_MENU, lambda e: self._switch_account_flow(), id=ID_SWITCH_ACCOUNT)
         self.Bind(wx.EVT_MENU, lambda e: self._watch_settings_flow(), id=ID_WATCH_SETTINGS)
@@ -5368,12 +5511,12 @@ class GhViewerFrame(wx.Frame):
                     if self.tab_filter in ("issues", "both"):
                         issues = fetch_issues(
                             self.repo, self.state_filter, self.current_limit,
-                            self.label_filter, milestone,
+                            self.label_filter, milestone, self.item_filter,
                         )
                     if self.tab_filter in ("prs", "both"):
                         prs = fetch_prs(
                             self.repo, self.state_filter, self.current_limit,
-                            self.label_filter, milestone,
+                            self.label_filter, milestone, self.item_filter,
                         )
                     combined = sort_items(issues + prs, self.sort_order)
                     wx.CallAfter(
@@ -5730,6 +5873,9 @@ class GhViewerFrame(wx.Frame):
         milestone = getattr(self, "milestone_filter", None)
         if self.view_mode == VIEW_ISSUES and milestone is not None:
             parts.append(f"milestone: {milestone.title}")
+        item_filter = getattr(self, "item_filter", None)
+        if self.view_mode == VIEW_ISSUES and item_filter is not None and item_filter.active:
+            parts.append(item_filter.describe())
         if self.repo and self.view_mode not in REPOLESS_VIEWS:
             parts.append(self.repo)
         parts.append("ghviewer")
@@ -5797,6 +5943,9 @@ class GhViewerFrame(wx.Frame):
         if milestone is not None:
             label_info = f" in milestone '{milestone.title}'"
             label_hint = "  Backspace=back to milestones"
+        item_filter = getattr(self, "item_filter", None)
+        if item_filter is not None and item_filter.active:
+            label_info += f", {item_filter.describe()}"
         if self._return_to:
             back = self._view_label(self._return_to[0], lower=True)
             label_hint = f"  Backspace=back to {back}"
@@ -5808,7 +5957,7 @@ class GhViewerFrame(wx.Frame):
             f"{source} — {n_issues} issues, {n_prs} PRs ({self.state_filter}){label_info}. "
             f"Showing up to {self.current_limit} newest.{unsized}",
             keys_hint(enter_hint(VIEW_ISSUES), "H=changed files", ctrl_o_hint(VIEW_ISSUES),
-                      "M=comment  I=milestone  N=new issue  K=checks  V=review  C=close  O=reopen  "
+                      "M=comment  I=milestone  L=labels  A=assignees  P=projects  E=edit  N=new issue  K=checks  V=review  C=close  O=reopen  "
                       "F=favorite  Ctrl++=view more  R=refresh  Ctrl+F=filter", label_hint),
         )
         self._update_title()
@@ -8174,6 +8323,10 @@ class GhViewerFrame(wx.Frame):
                 ord("V"): self._pr_review,
                 ord("D"): self._pr_toggle_draft,
                 ord("I"): self._set_milestone_flow,
+                ord("L"): self._set_labels_flow,
+                ord("A"): self._set_assignees_flow,
+                ord("P"): self._set_projects_flow,
+                ord("E"): self._edit_item_flow,
             }.get(key)
             if action:
                 action()
@@ -10253,6 +10406,57 @@ class GhViewerFrame(wx.Frame):
         self._update_menu_checks()
         self._reload_after_filter()
 
+    # View ▸ Filter: people and milestone (#122)
+
+    def _set_item_filter(self, new: "ItemFilter") -> None:
+        self.item_filter = new
+        self._update_menu_checks()
+        if self.view_mode != VIEW_ISSUES:
+            desc = new.describe()
+            self._tell(f"Issues & PRs will be filtered: {desc}." if desc
+                       else "Issues & PRs will not be filtered.")
+            return
+        self._reload_after_filter()
+
+    def _filter_mine(self) -> None:
+        """Assigned to Me: on, or off if it is on."""
+        f = self.item_filter
+        self._set_item_filter(dataclass_replace(f, assignee="" if f.assignee == "@me" else "@me"))
+
+    def _filter_my_own(self) -> None:
+        """Opened by Me: on, or off if it is on."""
+        f = self.item_filter
+        self._set_item_filter(dataclass_replace(f, author="" if f.author == "@me" else "@me"))
+
+    def _filter_toggle(self, name: str) -> None:
+        """No Assignee or No Milestone, on or off."""
+        f = self.item_filter
+        self._set_item_filter(dataclass_replace(f, **{name: not getattr(f, name)}))
+
+    _FILTER_PROMPTS = {
+        "assignee": ("Assigned To", "Show issues and pull requests assigned to "
+                     "(a GitHub login; leave it empty for anyone):"),
+        "author": ("Opened By", "Show issues and pull requests opened by "
+                   "(a GitHub login; leave it empty for anyone):"),
+    }
+
+    def _filter_ask(self, name: str) -> None:
+        """Assigned To… or Opened By…: a login, or empty for anyone."""
+        title, prompt = self._FILTER_PROMPTS[name]
+        now = getattr(self.item_filter, name)
+        dlg = wx.TextEntryDialog(self, prompt, title, "" if now == "@me" else now)
+        try:
+            if dlg.ShowModal() != wx.ID_OK:
+                self._update_menu_checks()  # a check item flips itself when chosen
+                return
+            login = dlg.GetValue().strip().lstrip("@").strip()
+        finally:
+            dlg.Destroy()
+        self._set_item_filter(dataclass_replace(self.item_filter, **{name: login}))
+
+    def _filter_clear(self) -> None:
+        self._set_item_filter(ItemFilter())
+
     def _reload_after_filter(self) -> None:
         """After View ▸ State or Filter: the list again, with it. In Changed
         Files, the issues and pull requests are read again on the way back
@@ -10406,45 +10610,122 @@ class GhViewerFrame(wx.Frame):
 
         threading.Thread(target=worker, daemon=True).start()
 
-    # ── Milestone of an issue or pull request (#120) ─────────────────────
+    # ── Changing an issue or pull request (#120, #122) ───────────────────
+    #
+    # Milestone, labels, assignees, projects, title and description share one
+    # shape: what can be chosen is fetched off the UI thread from the
+    # repository the item is in (resolved once, upstream for a fork, so the
+    # choices and the change go to the same place), a box asks, the change is
+    # sent off the UI thread, and the row and details panel change in place.
+    # One at a time: a second box over the first would decide from what the
+    # item was before the first one changed it.
 
     NO_MILESTONE = "No milestone"
 
-    def _set_milestone_flow(self) -> None:
-        """Actions ▸ Set Milestone (I): put the selected issue or pull
-        request in one of its repository's open milestones, or take it out."""
+    def _start_item_edit(self, what: str, load, then) -> None:
+        """``what``: "milestones", said as "Getting the milestones for #5…".
+        ``load(item, repo)`` runs off the UI thread; ``then(item, repo, data)``
+        on it, with the box. ``load`` None: nothing to fetch."""
         item = self._focused_item()
         if self.view_mode != VIEW_ISSUES or not isinstance(item, Item):
             self._tell("Select an issue or pull request in Issues & PRs first.")
             return
-        if getattr(self, "_milestone_busy", False):
-            # A second box over the first would decide from what the item
-            # was before the first one changed it.
-            self._tell("Still setting the last milestone.")
+        if getattr(self, "_item_edit_busy", False):
+            self._tell("Still saving the last change.")
             return
         repo = item.repo or self.repo
         if not repo:
             self._tell("Select a repository first.")
             return
-        self._milestone_busy = True
-        self._announce(f"Getting the milestones for #{item.number}…")
+        self._item_edit_busy = True
+        self._announce(f"Getting the {what} for #{item.number}…" if load
+                       else f"Opening #{item.number}…")
 
         def worker() -> None:
             try:
-                # Once, for both the list and the change: a milestone's number
-                # only means something in the repository it came from.
                 where = resolve_issue_repo(repo) or repo
-                milestones = fetch_milestones(where, "open", resolved=True)
+                data = load(item, where) if load else None
             except GhError as exc:
-                wx.CallAfter(self._milestone_done, f"Couldn't get the milestones of {repo}: {exc}")
+                wx.CallAfter(self._item_edit_failed, f"Couldn't get the {what} of {repo}", exc)
                 return
-            wx.CallAfter(self._choose_milestone, item, where, milestones)
+            wx.CallAfter(then, item, where, data)
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _milestone_done(self, msg: str) -> None:
-        self._milestone_busy = False
+    def _item_edit_done(self, msg: str) -> None:
+        self._item_edit_busy = False
         self._tell(msg)
+
+    def _item_edit_failed(self, msg: str, exc: GhError) -> None:
+        self._item_edit_busy = False
+        if isinstance(exc, MissingScope):
+            self._tell(f"{msg}: it needs gh's \"{exc.scope}\" permission.")
+            wx.MessageBox(str(exc), "Permission Needed", wx.OK | wx.ICON_INFORMATION, self)
+        else:
+            self._tell(f"{msg}: {exc}")
+
+    def _save_item_edit(self, item: Item, call, update, said: str) -> None:
+        """Run ``call`` off the UI thread; then ``update(item)``, show the
+        change where the item is and say ``said``."""
+        self._announce(f"Saving #{item.number}…")
+
+        def worker() -> None:
+            try:
+                call()
+            except GhError as exc:
+                wx.CallAfter(self._item_edit_failed, f"Couldn't change #{item.number}", exc)
+                return
+            wx.CallAfter(self._item_edited, item, update, said)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _item_edited(self, item: Item, update, said: str) -> None:
+        """Show the change where the item is, without reloading the list,
+        so the place in it is kept; in the details panel, the caret stays on
+        what was being read."""
+        update(item)
+        row = self._row_of(item)
+        if row >= 0:
+            self._redraw_row(row, item)
+            if row == self.list_ctrl.GetFirstSelected():
+                self._refresh_details_keeping_caret(row)
+        self._item_edit_done(said)
+
+    def _refresh_details_keeping_caret(self, row: int) -> None:
+        """Show ``row`` in the details panel again. When the panel has focus,
+        the caret stays on the same text, moved past a line added or removed
+        above it."""
+        if self._current_focus() is not self.details_text:
+            self._show_details(row)
+            return
+        old = self.details_text.GetValue()
+        caret = _text_index(old, self.details_text.GetInsertionPoint())
+        self._show_details(row)
+        new = self.details_text.GetValue()
+        self.details_text.SetInsertionPoint(_ctrl_pos(new, moved_caret(old, new, caret)))
+
+    def _ask_checklist(self, title: str, prompt: str, model: Checklist) -> bool:
+        """The checklist box; True if saved with something changed. Says
+        "unchanged" otherwise, and lets the next change start."""
+        dlg = ChecklistDialog(self, title, prompt, model, say=self._tell)
+        try:
+            saved = dlg.ShowModal() == wx.ID_OK
+        finally:
+            dlg.Destroy()
+        if not saved or not model.changed:
+            self._item_edit_done(f"{title.replace('Set ', '')} unchanged.")
+            return False
+        return True
+
+    # Milestone (#120)
+
+    def _set_milestone_flow(self) -> None:
+        """Actions ▸ Set Milestone (I): put the selected issue or pull
+        request in one of its repository's open milestones, or take it out."""
+        self._start_item_edit(
+            "milestones",
+            lambda item, where: fetch_milestones(where, "open", resolved=True),
+            self._choose_milestone)
 
     @classmethod
     def milestone_choices(cls, current: str, milestones: list) -> tuple[list[str], int]:
@@ -10466,7 +10747,7 @@ class GhViewerFrame(wx.Frame):
 
     def _choose_milestone(self, item: Item, repo: str, milestones: list) -> None:
         if not milestones and not item.milestone:
-            self._milestone_done(f"{repo} has no open milestones.")
+            self._item_edit_done(f"{repo} has no open milestones.")
             return
         labels, current = self.milestone_choices(item.milestone, milestones)
         dlg = wx.SingleChoiceDialog(
@@ -10475,57 +10756,141 @@ class GhViewerFrame(wx.Frame):
         dlg.SetSelection(current)
         try:
             if dlg.ShowModal() != wx.ID_OK:
-                self._milestone_done("Milestone unchanged.")
+                self._item_edit_done("Milestone unchanged.")
                 return
             choice = dlg.GetSelection()
         finally:
             dlg.Destroy()
         if choice == current:
-            self._milestone_done(f"#{item.number} is already in milestone {item.milestone}."
+            self._item_edit_done(f"#{item.number} is already in milestone {item.milestone}."
                                  if item.milestone
                                  else f"#{item.number} already has no milestone.")
             return
         # choice is 0 (none) or an open milestone: the closed one, if listed,
         # is the item's own, which is `current`.
         target = milestones[choice - 1] if choice else None
-        self._announce(f"Setting the milestone of #{item.number}…")
+        self._save_item_edit(
+            item, lambda: set_item_milestone(item, repo, target),
+            lambda it: setattr(it, "milestone", target.title if target is not None else ""),
+            f"#{item.number} is in milestone {target.title}." if target is not None
+            else f"#{item.number} has no milestone.")
 
-        def worker() -> None:
-            try:
-                set_item_milestone(item, repo, target)
-            except GhError as exc:
-                wx.CallAfter(self._milestone_done,
-                             f"Couldn't set the milestone of #{item.number}: {exc}")
-                return
-            wx.CallAfter(self._on_milestone_set, item, target)
+    # Labels (#122)
 
-        threading.Thread(target=worker, daemon=True).start()
+    def _set_labels_flow(self) -> None:
+        """Actions ▸ Set Labels (L): check the labels the issue or pull
+        request should have."""
+        self._start_item_edit(
+            "labels", lambda item, where: fetch_label_names(where), self._choose_labels)
 
-    def _on_milestone_set(self, item: Item, target) -> None:
-        """Show the change where the item is, without reloading the list,
-        so the place in it is kept; in the details panel, the caret stays on
-        what was being read."""
-        item.milestone = target.title if target is not None else ""
-        row = self._row_of(item)
-        if row >= 0:
-            self._redraw_row(row, item)
-            if row == self.list_ctrl.GetFirstSelected():
-                self._refresh_details_keeping_caret(row)
-        self._milestone_done(f"#{item.number} is in milestone {target.title}."
-                             if target is not None else f"#{item.number} has no milestone.")
-
-    def _refresh_details_keeping_caret(self, row: int) -> None:
-        """Show ``row`` in the details panel again. When the panel has focus,
-        the caret stays on the same text, moved past a line added or removed
-        above it."""
-        if self._current_focus() is not self.details_text:
-            self._show_details(row)
+    def _choose_labels(self, item: Item, repo: str, names: list) -> None:
+        if not names and not item.labels:
+            self._item_edit_done(f"{repo} has no labels.")
             return
-        old = self.details_text.GetValue()
-        caret = _text_index(old, self.details_text.GetInsertionPoint())
-        self._show_details(row)
-        new = self.details_text.GetValue()
-        self.details_text.SetInsertionPoint(_ctrl_pos(new, moved_caret(old, new, caret)))
+        model = Checklist(names, item.labels)
+        if not self._ask_checklist("Set Labels", f"Labels for #{item.number} {item.title}",
+                                   model):
+            return
+        chosen = model.chosen()
+        self._save_item_edit(
+            item, lambda: set_item_labels(item, repo, chosen),
+            lambda it: setattr(it, "labels", list(chosen)),
+            change_said(item.number, "Labels", model.added(), model.removed(), chosen))
+
+    # Assignees (#122)
+
+    def _set_assignees_flow(self) -> None:
+        """Actions ▸ Set Assignees (A): check who the issue or pull request
+        is assigned to."""
+        self._start_item_edit(
+            "people who can be assigned", lambda item, where: fetch_assignable_users(where),
+            self._choose_assignees)
+
+    def _choose_assignees(self, item: Item, repo: str, logins: list) -> None:
+        if not logins and not item.assignees:
+            self._item_edit_done(f"No one can be assigned in {repo}.")
+            return
+        model = Checklist(logins, item.assignees)
+        if not self._ask_checklist("Set Assignees",
+                                   f"Assignees for #{item.number} {item.title}", model):
+            return
+        chosen = model.chosen()
+        self._save_item_edit(
+            item, lambda: set_item_assignees(item, repo, chosen),
+            lambda it: setattr(it, "assignees", list(chosen)),
+            change_said(item.number, "Assignees", model.added(), model.removed(), chosen))
+
+    # Projects (#122)
+
+    def _set_projects_flow(self) -> None:
+        """Actions ▸ Set Projects (P): check the projects (the new kind) the
+        issue or pull request is in: the repository's and its owner's."""
+        self._start_item_edit("projects", fetch_item_projects, self._choose_projects)
+
+    @staticmethod
+    def project_names(projects: list) -> dict:
+        """Each project by the name it is listed as: its title, with its
+        number after it where two share a title."""
+        titles = [p.title for p in projects]
+        return {(f"{p.title} (#{p.number})" if titles.count(p.title) > 1 else p.title): p
+                for p in projects}
+
+    def _choose_projects(self, item: Item, repo: str, data) -> None:
+        if not data.available and not data.current:
+            self._item_edit_done(f"{repo} and its owner have no open projects.")
+            return
+        # Current ones keyed as the available are, so the same project
+        # reads the same; a closed one it is still in is added at the end.
+        by_name = self.project_names(data.available)
+        ids = {p.id: name for name, p in by_name.items()}
+        current_names = []
+        for p in data.current:
+            name = ids.get(p.id) or (f"{p.title} (closed)" if p.closed else p.title)
+            by_name.setdefault(name, p)
+            current_names.append(name)
+        item_ids = {p.id: p.item_id for p in data.current}
+        model = Checklist(list(ids.values()), current_names)
+        if not self._ask_checklist("Set Projects", f"Projects for #{item.number} {item.title}",
+                                   model):
+            return
+        adds = [by_name[n].id for n in model.added()]
+        removes = [(by_name[n].id, item_ids[by_name[n].id]) for n in model.removed()]
+
+        def call() -> None:
+            for project_id in adds:
+                add_to_project(project_id, data.content_id)
+            for project_id, entry in removes:
+                remove_from_project(project_id, entry)
+
+        self._save_item_edit(
+            item, call, lambda it: None,
+            change_said(item.number, "Projects", model.added(), model.removed(),
+                        model.chosen()))
+
+    # Title and description (#122)
+
+    def _edit_item_flow(self) -> None:
+        """Actions ▸ Edit Title and Description (E)."""
+        self._start_item_edit("details", None, self._edit_item)
+
+    def _edit_item(self, item: Item, repo: str, _data) -> None:
+        dlg = EditItemDialog(self, repo, item)
+        try:
+            if dlg.ShowModal() != wx.ID_OK:
+                self._item_edit_done("Not changed.")
+                return
+            title, body = dlg.values()
+        finally:
+            dlg.Destroy()
+        if title == item.title and body == (item.body or "").rstrip():
+            self._item_edit_done("Not changed.")
+            return
+
+        def update(it: Item) -> None:
+            it.title, it.body = title, body
+
+        self._save_item_edit(item, lambda: edit_item(item, repo, title, body), update,
+                             f"#{item.number} saved.")
 
     def _do_comment(self) -> None:
         item = self._focused_item()

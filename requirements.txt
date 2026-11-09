@@ -3,7 +3,7 @@ velopack
 # Parses on.workflow_dispatch.inputs out of a workflow file so the Run Workflow
 # dialog can offer the same inputs the web UI does. There is no API for this —
 # GitHub builds its own form from the file too.
-PyYAML>=6.0
+PyYAML>=6.0.3
 # How Changed Files marks each changed line (difftext), shared with The Chat Place.
 # A commit of TheIdeaPlace/app-kit's main, so builds don't move under us; an archive,
 # so no builder needs git.

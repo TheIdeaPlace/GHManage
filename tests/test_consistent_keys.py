@@ -442,7 +442,8 @@ def _hook_frame(view, focus="list", item=None):
     for name in ("_do_new_label", "_delete_focused_item", "_show_run_jobs", "on_open_browser",
                  "_back_to_row", "on_item_activated", "_show_what_failed", "_rerun_run",
                  "_cancel_run", "_pr_checks", "_pr_review", "_pr_toggle_draft",
-                 "_set_milestone_flow", "_show_file_history", "_toggle_blame", "_show_changed_files",
+                 "_set_milestone_flow", "_set_labels_flow", "_set_assignees_flow",
+                 "_set_projects_flow", "_edit_item_flow", "_show_file_history", "_toggle_blame", "_show_changed_files",
                  "_open_whole_file", "_go_to_event_repo"):
         setattr(f, name, (lambda n: lambda *a: f.calls.append(n))(name))
     f._enter_from_details = lambda: Frame._enter_from_details(f)

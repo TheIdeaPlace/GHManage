@@ -18,6 +18,25 @@ milestone 2027.1.", and the row changes in place, so you keep your place in the 
 An issue's or pull request's milestone is now on a "Milestone:" line in the details
 panel, and there is a **Milestone** column to add under **View → Columns…**.
 
+## Labels, assignees, projects, title and description
+
+The rest of an issue or pull request can be changed from the list as well (#122):
+
+- `L` sets its labels, `A` its assignees and `P` the projects it is in, the
+  repository's and its owner's. Each is a list where every row says whether it is
+  checked ("bug, checked"). `Space` changes a row and `Enter` saves. GHManage then
+  says what changed: "#12: added bug, removed docs. Labels now: bug, ui."
+- `E` edits the title and description, in the same form as New Issue.
+
+These are also on the **Actions** menu, and they work from the details panel too.
+
+## Filtering by people and milestone
+
+**View → Filter** now has **Assigned to Me**, **Assigned To…**, **Opened by Me**,
+**Opened By…**, **No Assignee** and **No Milestone**, and they combine. Together,
+Assigned to Me and No Milestone list your work that isn't planned yet. **Clear These
+Filters** turns them off. The status bar and window title say which are on.
+
 ## Before you start
 
 GHManage drives the [GitHub CLI](https://cli.github.com/), so install it and sign

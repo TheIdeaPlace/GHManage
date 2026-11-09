@@ -83,22 +83,55 @@ def test_main_passes_the_setting_to_bootstrap(monkeypatch):
     assert seen == [False]
 
 
-def test_the_startup_check_is_skipped_when_off():
-    src = open(ghviewer.__file__, encoding="utf-8").read()
-    assert ("if self.updater and settings.load_auto_update():\n"
-            "            wx.CallLater(2000, self._start_update_check)") in src
+@pytest.mark.parametrize("updater_there, on, checks", [
+    (True, True, True), (True, False, False), (False, True, False),
+])
+def test_the_startup_check_only_when_on_and_installed(updater_there, on, checks):
+    settings.save_auto_update(on)
+    f = SimpleNamespace(updater=object() if updater_there else None)
+    assert Frame._should_check_at_startup(f) is checks
 
 
-def test_toggling_saves_checks_the_menu_and_says_so():
+def test_main_still_runs_velopacks_hooks_when_the_setting_cant_be_read(monkeypatch):
+    # An APPDATA that can't be written must not stop install or uninstall.
+    def broken():
+        raise OSError("Access is denied")
+    monkeypatch.setattr(settings, "load_auto_update", broken)
+    seen = []
+    monkeypatch.setattr(updater, "bootstrap", lambda auto_apply=True: seen.append(auto_apply)
+                        or (_ for _ in ()).throw(SystemExit))
+    with pytest.raises(SystemExit):
+        ghviewer.main()
+    assert seen == [True]
+
+
+def test_toggling_saves_checks_the_menu_and_always_says_so():
     checked, said = [], []
-    f = SimpleNamespace(_tell=said.append)
+    f = SimpleNamespace(_tell=lambda msg, *a, **k: said.append((msg, k.get("force"))))
     f.GetMenuBar = lambda: SimpleNamespace(Check=lambda i, v: checked.append((i, v)))
     Frame._toggle_auto_update(f)
     assert settings.load_auto_update() is False
     assert checked == [(ghviewer.ID_AUTO_UPDATE, False)]
-    assert said[0].startswith("Automatic updates off.")
+    assert said[0] == ("Automatic updates off. Updates are installed only when you choose.",
+                       True)   # spoken even with Speak Results off
     Frame._toggle_auto_update(f)
-    assert settings.load_auto_update() is True and said[1].startswith("Automatic updates on.")
+    assert settings.load_auto_update() is True and said[1] == ("Automatic updates on.", True)
+
+
+@pytest.mark.parametrize("on, says", [
+    (True, "It will be retried the next time GHManage starts."),
+    (False, "won't be retried by itself"),
+])
+def test_a_failed_install_doesnt_promise_a_retry_off_wont_make(monkeypatch, on, says):
+    monkeypatch.setattr(ghviewer.wx, "MessageDialog", YesDialog)
+    boxes = []
+    monkeypatch.setattr(ghviewer.wx, "MessageBox", lambda msg, *a, **k: boxes.append(msg))
+    monkeypatch.setattr(ghviewer.bugreport, "end_run", lambda: None)
+    monkeypatch.setattr(ghviewer.bugreport, "begin_run", lambda: None)
+    settings.save_auto_update(on)
+    f = SimpleNamespace(updater=SimpleNamespace(apply_update_and_restart=lambda args: False))
+    Frame._show_update_dialog(f, "9.9.9", "u")
+    assert says in boxes[0]
 
 
 class FakeDialog:
@@ -116,6 +149,12 @@ class FakeDialog:
 
     def Destroy(self):
         pass
+
+
+class YesDialog(FakeDialog):
+    """Restart Now."""
+    def ShowModal(self):
+        return ghviewer.wx.ID_YES
 
 
 @pytest.mark.parametrize("on, later, says", [

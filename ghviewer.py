@@ -3727,7 +3727,7 @@ class GhViewerFrame(wx.Frame):
         # Check for updates in the background so startup is never blocked.
         # Must come after Show(): a modal raised against an unshown frame
         # returns immediately instead of waiting for the user.
-        if self.updater and settings.load_auto_update():
+        if self._should_check_at_startup():
             wx.CallLater(2000, self._start_update_check)
 
     # ── UI construction ─────────────────────────────────────────────────
@@ -4312,10 +4312,15 @@ class GhViewerFrame(wx.Frame):
         on = not settings.load_auto_update()
         settings.save_auto_update(on)
         self.GetMenuBar().Check(ID_AUTO_UPDATE, on)
-        self._tell("Automatic updates on. GHManage looks for updates when it starts and "
-                   "installs them by itself." if on else
-                   "Automatic updates off. GHManage won't look for updates or install them "
-                   "by itself; Check for Updates still can.")
+        # Said whatever Speak Results is, or turning this off would be silent.
+        self._tell("Automatic updates on." if on else
+                   "Automatic updates off. Updates are installed only when you choose.",
+                   force=True)
+
+    def _should_check_at_startup(self) -> bool:
+        """Look for an update once GHManage has started: only an installed
+        copy that can update itself, with Help ▸ Automatic Updates on."""
+        return bool(self.updater) and auto_update_setting()
 
     def _show_update_dialog(self, version: str, url: str) -> None:
         auto = settings.load_auto_update()
@@ -4347,9 +4352,12 @@ class GhViewerFrame(wx.Frame):
         bugreport.end_run()  # the update ends this run; it didn't crash
         if not self.updater.apply_update_and_restart(sys.argv[1:]):
             bugreport.begin_run()
+            retry = ("It will be retried the next time GHManage starts."
+                     if auto_update_setting() else
+                     "Automatic updates are off, so it won't be retried by itself; "
+                     "Check for Updates can try again.")
             wx.MessageBox(
-                "The update could not be applied. It will be retried the next "
-                f"time GHManage starts.\n\nRelease notes:\n{url}",
+                f"The update could not be applied. {retry}\n\nRelease notes:\n{url}",
                 "Update Failed",
                 wx.OK | wx.ICON_WARNING,
                 self,
@@ -13776,10 +13784,20 @@ class GhViewerFrame(wx.Frame):
 # ── Entry point ────────────────────────────────────────────────────────
 
 
+def auto_update_setting() -> bool:
+    """Help > Automatic Updates, read before Velopack's hooks run. Anything
+    going wrong reading it (no settings folder yet, one that can't be
+    written) means on: the install and uninstall hooks must never fail here."""
+    try:
+        return settings.load_auto_update()
+    except Exception:  # noqa: BLE001
+        return True
+
+
 def main() -> None:
     # Must run before argparse: Velopack relaunches the app with its own hook
     # arguments during install/update/uninstall, and this handles and exits.
-    updater.bootstrap(auto_apply=settings.load_auto_update())
+    updater.bootstrap(auto_apply=auto_update_setting())
 
     parser = argparse.ArgumentParser(
         description="GUI viewer and manager for GitHub issues and pull requests."

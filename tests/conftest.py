@@ -145,6 +145,10 @@ class FakeMessageDialog:
         self.labels = (yes, no, cancel)
         return True
 
+    def SetYesNoLabels(self, yes, no):
+        self.labels = (yes, no)
+        return True
+
     def ShowModal(self):
         return FakeMessageDialog.answer
 

@@ -70,9 +70,13 @@ was missing (#129).
 gh auth refresh -h github.com -s project,notifications,user:follow
 ```
 
-**Copy Command** puts it on the clipboard. **Run in a Terminal** runs it for you:
-`gh` opens your browser on GitHub to approve, once. The permissions `gh` already
-has are kept. **Check Again** shows what has changed.
+**Copy Command** puts it on the clipboard, and **Run in a Terminal** runs it for
+you. In the terminal, `gh` shows a one-time code and asks you to press `Enter`. Your
+browser then opens on GitHub, where you type the code and approve. The permissions
+`gh` already has are kept. **Check Again** shows what has changed. The command
+changes the account `gh` is using now, which the box names. If `gh` uses a token
+from the `GH_TOKEN` environment variable, the box says to change the token on
+GitHub instead.
 
 If you meet a missing permission anyway, the message now has a **Copy Command**
 button, and an **All Permissions…** button that opens the same list.

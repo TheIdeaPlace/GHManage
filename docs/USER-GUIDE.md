@@ -199,7 +199,11 @@ For example:
 gh auth refresh -h github.com -s project,notifications,user:follow
 ```
 
-`gh` shows a one-time code and opens your browser on GitHub, where you approve it, once for each GitHub account. The permissions `gh` already has are kept.
+In the terminal, `gh` shows a one-time code and asks you to press `Enter`. Your browser then opens on GitHub, where you type the code and approve. When the terminal says it's done, close it and choose **Check Again**. The permissions `gh` already has are kept.
+
+The command changes the account `gh` is using now, which the box names at the top. If you use more than one GitHub account, switch to each and do it again (see [More than one account](#more-than-one-account)).
+
+If `gh` uses a token from the `GH_TOKEN` or `GITHUB_TOKEN` environment variable, `gh` can't change its permissions. The box says so, and doesn't offer the command: change the token's permissions on GitHub instead, at https://github.com/settings/tokens. If `gh` isn't installed or isn't signed in, the box says that instead.
 
 If you haven't added a permission, the feature that needs it says so in a message box when you use it. The box has the command for that permission, a **Copy Command** button, and an **All Permissions…** button that opens the same list as the Help menu.
 

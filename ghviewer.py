@@ -2873,46 +2873,56 @@ class ChecklistDialog(wx.Dialog):
             self._say(said)
 
 
-# The Permission Needed box's buttons (#129).
+# The Permission Needed box's buttons (#129). On a Mac, Escape only works on
+# a button called Cancel (NSAlert), so the third one keeps that name there.
 PERMISSION_COPY, PERMISSION_ALL = "&Copy Command", "&All Permissions…"
+PERMISSION_CLOSE = "Cancel" if sys.platform == "darwin" else "Close"
 
 
 def copy_text(text: str) -> bool:
     """Put ``text`` on the clipboard, left there after GHManage quits."""
-    if not wx.TheClipboard.Open():
+    clip = wx.TheClipboard
+    if not clip.Open():
         return False
     try:
-        if not wx.TheClipboard.SetData(wx.TextDataObject(text)):
+        if not clip.SetData(wx.TextDataObject(text)):
             return False
-        wx.TheClipboard.Flush()
+        clip.Flush()
         return True
     finally:
-        wx.TheClipboard.Close()
+        clip.Close()
+
+
+def terminal_command(args: list[str]) -> str:
+    """The Windows command line that runs ``args`` in a console that stays
+    open: ``cmd /s /k "<command>"``, the whole command quoted once, so a
+    path with spaces or an & in it (a "R&D" profile folder) survives cmd's
+    own parsing."""
+    special = set(' &|<>^()%!,;="')
+    parts = [f'"{a}"' if i == 0 or special & set(a) else a for i, a in enumerate(args)]
+    return 'cmd.exe /s /k "' + " ".join(parts) + '"'
 
 
 def run_in_terminal(args: list[str]) -> bool:
-    """Open a terminal window running ``args`` (gh auth refresh, which asks
-    you to sign in to GitHub in the browser and waits). True if one opened."""
+    """Open a terminal window running ``args`` (gh auth refresh, which
+    shows a one-time code and waits). True if one opened."""
     try:
         if sys.platform == "win32":
-            # /k keeps the window, with what gh said, until you close it.
-            subprocess.Popen(["cmd.exe", "/k", *args],
+            subprocess.Popen(terminal_command(args),
                              creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
             return True
         if sys.platform == "darwin":
-            line = " ".join(_shell_quote(a) for a in args)
-            script = ('tell application "Terminal"\n activate\n do script "%s"\nend tell'
-                      % line.replace("\\", "\\\\").replace('"', '\\"'))
-            subprocess.Popen(["osascript", "-e", script])
-            return True
-    except OSError:
+            # A .command file opened with Terminal, not Apple events: a signed
+            # app without the Apple-events entitlement can't script Terminal.
+            import shlex
+            fd, path = tempfile.mkstemp(prefix="ghmanage-", suffix=".command")
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write("#!/bin/sh\n" + " ".join(shlex.quote(a) for a in args) + "\n")
+            os.chmod(path, 0o700)
+            return subprocess.run(["open", "-a", "Terminal", path], timeout=20).returncode == 0
+    except (OSError, subprocess.SubprocessError):
         return False
     return False
-
-
-def _shell_quote(arg: str) -> str:
-    import shlex
-    return shlex.quote(arg)
 
 
 class PermissionsDialog(wx.Dialog):
@@ -2920,15 +2930,19 @@ class PermissionsDialog(wx.Dialog):
     beyond gh's sign-in, what each is for and whether gh has it, and one
     command for the missing ones: copied, or run in a terminal. Deleting
     repositories is left out unless checked; it isn't one to grant by the
-    way. The text is a read-only box, read a line at a time."""
+    way. The text is a read-only box, read a line at a time.
 
-    def __init__(self, parent: wx.Window, scopes, say: Callable[[str], bool] | None = None,
+    ``recheck`` runs off the UI thread (it asks GitHub); the box stays
+    usable meanwhile and says the result when it is in."""
+
+    def __init__(self, parent: wx.Window, state, say: Callable[[str], bool] | None = None,
                  recheck: Callable[[], object] | None = None) -> None:
         super().__init__(parent, title="GitHub Permissions",
                          style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
-        self._scopes = scopes
+        self._state = state
         self._say = say or (lambda text: False)
         self._recheck = recheck
+        self._checking = False
         outer = wx.BoxSizer(wx.VERTICAL)
         label = "&Permissions GHManage can use"
         outer.Add(wx.StaticText(self, label=label), 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
@@ -2943,11 +2957,16 @@ class PermissionsDialog(wx.Dialog):
         _name(self.command, label.replace("&", ""))
         outer.Add(self.command, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
         row = wx.BoxSizer(wx.HORIZONTAL)
-        for text, action in (("&Copy Command", self.copy), ("&Run in a Terminal", self.run),
-                             ("Check &Again", self.check_again)):
+        self.buttons = {}
+        # Always enabled, so the Tab order never changes; each says why when
+        # there is nothing it can do.
+        for key, text, action in (("copy", "&Copy Command", self.copy),
+                                  ("run", "&Run in a Terminal", self.run),
+                                  ("check", "Check &Again", self.check_again)):
             button = wx.Button(self, label=text)
             button.Bind(wx.EVT_BUTTON, lambda e, act=action: act())
             row.Add(button, 0, wx.RIGHT, 6)
+            self.buttons[key] = button
         row.Add(wx.Button(self, wx.ID_CANCEL, "Close"), 0)
         outer.Add(row, 0, wx.ALL, 10)
         self.SetSizerAndFit(outer)
@@ -2957,42 +2976,71 @@ class PermissionsDialog(wx.Dialog):
         self.CentreOnParent()
         wx.CallAfter(self.text.SetFocus)
 
-    def scopes_to_add(self) -> list[str]:
-        return [p.scope for p in permissions.missing(self._scopes, self.optional.GetValue())]
+    def _command(self) -> str:
+        return permissions.refresh_command(self._state, self.optional.GetValue())
+
+    def _cant(self) -> str:
+        """Why there is no command, said by Copy and Run."""
+        if self._state.error:
+            return "gh can't be asked; the box says why."
+        if self._state.token_var:
+            return (f"gh uses the token in {self._state.token_var}; its permissions are "
+                    "changed on GitHub, not with a command.")
+        return "gh has every permission GHManage uses; there is nothing to add."
 
     def _fill(self) -> None:
-        self.text.ChangeValue(permissions.summary(self._scopes, self.optional.GetValue()))
+        self.text.ChangeValue(permissions.summary(self._state, self.optional.GetValue()))
         self.text.SetInsertionPoint(0)
-        self.command.ChangeValue(permissions.command(self.scopes_to_add())
-                                 or "Nothing to add.")
+        self.command.ChangeValue(self._command() or "None needed.")
 
     def copy(self) -> None:
-        cmd = permissions.command(self.scopes_to_add())
+        cmd = self._command()
         if not cmd:
-            self._say("gh has every permission GHManage uses; there is nothing to copy.")
+            self._say(self._cant())
             return
         self._say("Command copied." if copy_text(cmd) else "Couldn't copy to the clipboard.")
 
     def run(self) -> None:
-        scopes = self.scopes_to_add()
-        if not scopes:
-            self._say("gh has every permission GHManage uses; there is nothing to add.")
+        if not self._command():
+            self._say(self._cant())
             return
+        scopes = [p.scope for p in permissions.missing(self._state.scopes,
+                                                       self.optional.GetValue())]
         args = [gh_data._find_gh(), "auth", "refresh", "-h", "github.com", "-s", ",".join(scopes)]
         if run_in_terminal(args):
-            self._say("A terminal is open running the command. Follow it there, "
-                      "then choose Check Again.")
+            self._say("A terminal is open running the command. There, press Enter, sign in "
+                      "on GitHub with the code it shows, then come back and choose Check Again.")
         else:
             self._say("Couldn't open a terminal. Copy the command and run it yourself.")
 
     def check_again(self) -> None:
-        if self._recheck is not None:
-            self._scopes = self._recheck()
+        if self._recheck is None or self._checking:
+            return
+        self._checking = True
+        self._say("Checking…")
+
+        def worker() -> None:
+            state = self._recheck()
+            wx.CallAfter(self._checked, state)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _checked(self, state) -> None:
+        self._checking = False
+        if not self:  # closed meanwhile
+            return
+        self._state = state
         self._fill()
-        need = self.scopes_to_add()
-        self._say("gh has every permission GHManage uses." if not need
-                  else f"Still missing: {', '.join(need)}.")
-        self.text.SetFocus()
+        need = permissions.missing(state.scopes, self.optional.GetValue())
+        if state.error:
+            said = f"Couldn't ask GitHub: {state.error}"
+        elif state.scopes is None or not need:
+            said = "gh has every permission GHManage uses." if not need else \
+                "GitHub doesn't say which permissions gh has."
+        else:
+            said = f"Still missing: {', '.join(p.scope for p in need)}."
+        # Focus stays on Check Again: moving it would read the box over this.
+        self._say(said)
 
 
 class NewIssueDialog(wx.Dialog):
@@ -7786,16 +7834,7 @@ class GhViewerFrame(wx.Frame):
             self._announce("Couldn't open the clipboard. Try again.")
 
     def _set_clipboard(self, text: str) -> bool:
-        clip = wx.TheClipboard
-        if not clip.Open():
-            return False
-        try:
-            clip.SetData(wx.TextDataObject(text))
-            # Leave it on the clipboard after GHManage quits.
-            clip.Flush()
-        finally:
-            clip.Close()
-        return True
+        return copy_text(text)
 
     def _announce(self, msg: str) -> None:
         """Update status bar (screen reader accessible)."""
@@ -10822,48 +10861,55 @@ class GhViewerFrame(wx.Frame):
 
     def _show_permissions(self) -> None:
         """Help ▸ GitHub Permissions. Which permissions gh has is asked off
-        the UI thread; the box opens when the answer is in."""
-        self._announce("Checking gh's permissions…")
+        the UI thread; the box opens when the answer is in. Once at a time."""
+        if getattr(self, "_permissions_busy", False):
+            return
+        self._permissions_busy = True
+        self._tell("Checking gh's permissions…", announce.STATUS)
 
         def worker() -> None:
-            scopes = permissions.fetch_scopes()
-            wx.CallAfter(self._open_permissions, scopes)
+            state = permissions.fetch_state()
+            wx.CallAfter(self._open_permissions, state)
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _open_permissions(self, scopes) -> None:
+    def _open_permissions(self, state) -> None:
         self._announce("")
-        dlg = PermissionsDialog(self, scopes, say=self._tell, recheck=permissions.fetch_scopes)
+        dlg = PermissionsDialog(self, state, say=self._tell, recheck=permissions.fetch_state)
         try:
             dlg.ShowModal()
         finally:
             dlg.Destroy()
-
-    PERMISSION_COPY, PERMISSION_ALL = PERMISSION_COPY, PERMISSION_ALL
+            self._permissions_busy = False
 
     def _permission_needed(self, title: str, doing: str, exc) -> None:
         """A feature met a permission gh lacks: say which, and offer to copy
         the command that adds it, or to see them all (Help ▸ GitHub
-        Permissions) so the rest needn't be met one box at a time."""
+        Permissions) so the rest needn't be met one box at a time. Where
+        GitHub's answer may not be the permission (a 404 on following
+        someone), what it said is shown instead of claiming it is."""
+        stock = str(gh_data.MissingScope(exc.scope))
+        detail = str(exc) if str(exc) != stock else ""
+        token_var = permissions.env_token()
         self._announce(f"{doing}: it needs gh's \"{exc.scope}\" permission.")
-        lines = [f"{doing}. That needs gh's \"{exc.scope}\" permission, which gh "
-                 "doesn't ask for when you sign in.",
-                 "",
-                 "Add it by running this in a terminal, then try again:",
-                 permissions.command([exc.scope]),
-                 "", "Other features need permissions of their own. All Permissions "
-                      "lists them, with one command for every one gh is missing."]
-        dlg = wx.MessageDialog(self, "\n".join(lines), title,
-                               wx.YES_NO | wx.CANCEL | wx.ICON_INFORMATION)
-        dlg.SetYesNoCancelLabels(PERMISSION_COPY, PERMISSION_ALL, "Close")
+        text = permissions.needed_text(doing, exc.scope, detail, token_var)
+        if token_var:
+            # No command can help: the token's permissions are set on GitHub.
+            dlg = wx.MessageDialog(self, text, title, wx.YES_NO | wx.ICON_INFORMATION)
+            dlg.SetYesNoLabels(PERMISSION_ALL, PERMISSION_CLOSE)
+            yes, copy = wx.ID_YES, None
+        else:
+            dlg = wx.MessageDialog(self, text, title, wx.YES_NO | wx.CANCEL | wx.ICON_INFORMATION)
+            dlg.SetYesNoCancelLabels(PERMISSION_COPY, PERMISSION_ALL, PERMISSION_CLOSE)
+            yes, copy = wx.ID_NO, wx.ID_YES
         try:
             answer = dlg.ShowModal()
         finally:
             dlg.Destroy()
-        if answer == wx.ID_YES:
+        if copy is not None and answer == copy:
             self._tell_after_box("Command copied." if copy_text(permissions.command([exc.scope]))
                                  else "Couldn't copy to the clipboard.")
-        elif answer == wx.ID_NO:
+        elif answer == yes:
             self._show_permissions()
 
     # ── Changing an issue or pull request (#120, #122) ───────────────────
@@ -13369,10 +13415,10 @@ class GhViewerFrame(wx.Frame):
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _on_watch_error(self, repo: str, exc: GhError) -> None:
+    def _on_watch_error(self, repo: str, exc: GhError, verb: str = "check") -> None:
         if isinstance(exc, MissingScope):
             self._permission_needed("Watch Settings",
-                                    f"Couldn't check how you watch {repo}", exc)
+                                    f"Couldn't {verb} how you watch {repo}", exc)
         else:
             self._announce(f"Couldn't check how you watch {repo}: {exc}")
 
@@ -13406,7 +13452,7 @@ class GhViewerFrame(wx.Frame):
             try:
                 set_watch_level(repo, new_level)
             except GhError as exc:
-                wx.CallAfter(self._on_watch_error, repo, exc)
+                wx.CallAfter(self._on_watch_error, repo, exc, "change")
                 return
             wx.CallAfter(self._on_watch_set, repo, name)
 

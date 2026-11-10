@@ -114,13 +114,27 @@ VIEW_SAMPLES = {
     ghviewer.VIEW_GISTS: ghviewer.Gist("abc", "Notes", url="u"),
     ghviewer.VIEW_PEOPLE: ghviewer.Person("alice", name="Alice", url="u"),
     ghviewer.VIEW_USER_REPOS: RepoEntry("o/r", url="u"),
+    # Categories mode (#130): each kind, in a row naming its repository.
+    ghviewer.ACROSS_VIEW_OF["issues"]: Item(1, "T", "open", "u", False, repo="o/r"),
+    ghviewer.ACROSS_VIEW_OF["releases"]: ghviewer.across.Row(
+        "o/r", Release("v1", "One", False, False, "", url="u")),
+    ghviewer.ACROSS_VIEW_OF["runs"]: ghviewer.across.Row(
+        "o/r", WorkflowRun("CI", "", "", "", "", "", url="u", run_id=3)),
+    ghviewer.ACROSS_VIEW_OF["commits"]: ghviewer.across.Row(
+        "o/r", Commit("a" * 40, "aaaaaaa", "m", "me", "", url="u")),
+    ghviewer.ACROSS_VIEW_OF["tags"]: ghviewer.across.Row("o/r", Tag("v1", "s", url="u")),
+    ghviewer.ACROSS_VIEW_OF["milestones"]: ghviewer.across.Row(
+        "o/r", ghviewer.Milestone(3, "v1", url="u")),
+    ghviewer.ACROSS_VIEW_OF["discussions"]: ghviewer.across.Row(
+        "o/r", ghviewer.Discussion(3, "T", url="u")),
 }
 
 
 def test_every_view_has_a_noun():
     assert set(Frame._COPY_IDENT_NOUNS) == set(ghviewer.VIEW_COLUMNS)
     # These three mix kinds of thing, each with its own noun; the menu names them all.
-    mixed = {ghviewer.VIEW_ACTIVITY, ghviewer.VIEW_NOTIFICATIONS, ghviewer.VIEW_SECURITY}
+    mixed = {ghviewer.VIEW_ACTIVITY, ghviewer.VIEW_NOTIFICATIONS, ghviewer.VIEW_SECURITY,
+             ghviewer.ACROSS_VIEW_OF["alerts"]}
     assert set(VIEW_SAMPLES) | mixed == set(ghviewer.VIEW_COLUMNS)
 
 

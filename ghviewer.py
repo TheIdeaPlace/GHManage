@@ -41,6 +41,7 @@ import insightview
 import gistview
 import peopleview
 import milestoneview
+import across
 import permissions
 import settings
 import search_help
@@ -53,6 +54,7 @@ from saved_searches import (
 
 from checklist import Checklist, change_said
 from columns import ColumnSet, LayoutEditor, cell_text, names_cell, row_text
+from gh_columns import ACROSS_SETS
 from gh_columns import (
     COLUMN_SETS, ACTIVITY_SET, ARTIFACT_SET, ASSET_SET, BRANCH_SET, CHANGED_FILE_SET, COMMIT_SET,
     FAVORITES_SET,
@@ -656,6 +658,8 @@ def _commit_branch_label(branch: str) -> str:
 
 def copy_values(item) -> CopyValues | None:
     """The Copy commands' view of ``item``, or None for an unknown kind."""
+    if isinstance(item, across.Row):
+        return copy_values(item.item)  # Categories mode (#130): the item itself
     if isinstance(item, Item):
         # Across repositories (search, My Work) a bare #208 says too little.
         number = f"{item.repo}#{item.number}" if item.repo else f"#{item.number}"
@@ -828,6 +832,11 @@ ID_CLOSE_ITEM = wx.NewIdRef()
 ID_REOPEN = wx.NewIdRef()
 ID_COMMENT = wx.NewIdRef()
 ID_SET_MILESTONE = wx.NewIdRef()
+ID_NAV_REPOS = wx.NewIdRef()
+ID_NAV_CATEGORIES = wx.NewIdRef()
+ID_CHOOSE_ACROSS = wx.NewIdRef()
+ID_LATEST_RELEASE = wx.NewIdRef()
+ID_GROUP_BY_REPO = wx.NewIdRef()
 ID_PERMISSIONS = wx.NewIdRef()
 ID_SET_LABELS = wx.NewIdRef()
 ID_SET_ASSIGNEES = wx.NewIdRef()
@@ -1023,6 +1032,21 @@ SEARCH_VIEWS = (VIEW_SEARCH_ISSUES, VIEW_SEARCH_REPOS)
 # Lists across repositories where G opens the selected row's repository here.
 GO_TO_REPO_VIEWS = (VIEW_ACTIVITY, VIEW_NOTIFICATIONS, VIEW_MY_WORK, VIEW_SEARCH_ISSUES,
                     VIEW_SEARCH_REPOS)
+
+# Categories mode (#130): a view per kind of thing, each listing that kind
+# from the repositories chosen with Choose Repositories. Issues and pull
+# requests are Items and behave as in My Work; the rest are across.Row.
+ACROSS_VIEW_OF = {kind: f"across_{kind}" for kind in across.KINDS}
+ACROSS_KIND_OF = {view: kind for kind, view in ACROSS_VIEW_OF.items()}
+ACROSS_VIEWS = tuple(ACROSS_VIEW_OF.values())
+VIEW_ACROSS_ISSUES = ACROSS_VIEW_OF["issues"]
+ACROSS_ROW_VIEWS = tuple(v for v in ACROSS_VIEWS if v != VIEW_ACROSS_ISSUES)
+ACROSS_ENTRY_PREFIX = "__across__:"
+CHOOSE_REPOS_ENTRY = "__choose_repos__"
+REPOLESS_VIEWS = REPOLESS_VIEWS + ACROSS_VIEWS
+FEED_VIEWS = FEED_VIEWS + ACROSS_VIEWS
+ITEM_VIEWS = ITEM_VIEWS + (VIEW_ACROSS_ISSUES,)
+GO_TO_REPO_VIEWS = GO_TO_REPO_VIEWS + ACROSS_VIEWS
 # A repository's views, as its context menu's Go To lists them (#51).
 REPO_GO_TO = [
     (VIEW_ISSUES, "Issues & PRs"),
@@ -1264,6 +1288,8 @@ OPEN_LABELS = {
     VIEW_GISTS: "Read",
     VIEW_PEOPLE: "List Repositories",
     VIEW_USER_REPOS: "Open Here",
+    # Categories mode (#130): the item, in its own repository.
+    **{view: "Open in Its Repository" for view in ACROSS_VIEWS},
 }
 # Where Enter reads: focus moves into the details panel, at the top, and
 # Backspace there comes back to the row. Enter in the panel itself does
@@ -1395,6 +1421,7 @@ VIEW_COLUMNS = {
     VIEW_GISTS: GIST_SET,
     VIEW_PEOPLE: PEOPLE_SET,
     VIEW_USER_REPOS: REPO_SET,
+    **{view: ACROSS_SETS[kind] for kind, view in ACROSS_VIEW_OF.items()},
 }
 
 
@@ -1414,6 +1441,9 @@ def _row_values(item, columns: list[str]) -> dict[str, str]:
 def is_repo_entry(data) -> bool:
     """Whether a repo-list entry's client data names a repository, rather
     than Favorites, a category or a saved search."""
+    if isinstance(data, str) and (data == CHOOSE_REPOS_ENTRY
+                                  or data.startswith(ACROSS_ENTRY_PREFIX)):
+        return False
     return (
         isinstance(data, str) and bool(data) and data != FAVORITES_ENTRY
         and data not in ENTRY_VIEWS and not data.startswith(SEARCH_ENTRY_PREFIX)
@@ -3556,6 +3586,10 @@ class GhViewerFrame(wx.Frame):
         self.items: list[Item] = []
         self._all_repos: list[dict] = []
         self._pinned_repos: list[str] = load_pinned()
+        # View > Navigate By (#130): the left-hand list shows repositories, or
+        # the categories of Categories mode.
+        self._nav_mode = settings.load_nav_mode()
+        self._across_result = None  # the last Categories mode load, for Backspace
         # Repositories from your account you removed from the list (#2).
         self._hidden_repos: list[str] = load_hidden()
         self._repos_known: bool = False
@@ -3744,10 +3778,8 @@ class GhViewerFrame(wx.Frame):
         # Left panel: repo list
         repo_panel = wx.Panel(self.main_splitter, name="")
         repo_sizer = wx.BoxSizer(wx.VERTICAL)
-        repo_sizer.Add(
-            wx.StaticText(repo_panel, label="Repositories"),
-            flag=wx.LEFT | wx.TOP, border=3,
-        )
+        self._repo_list_title = wx.StaticText(repo_panel, label=self._nav_title())
+        repo_sizer.Add(self._repo_list_title, flag=wx.LEFT | wx.TOP, border=3)
         self.repo_list = wx.ListBox(
             repo_panel,
             name="repo_list",
@@ -3755,7 +3787,7 @@ class GhViewerFrame(wx.Frame):
         )
         # Its label for VoiceOver, which wx's name never reaches (#69). The
         # name stays "repo_list"; Windows reads the StaticText above.
-        speech.set_label(self.repo_list, "Repositories")
+        speech.set_label(self.repo_list, self._nav_title())
         repo_sizer.Add(self.repo_list, proportion=1, flag=wx.EXPAND | wx.ALL, border=3)
         repo_panel.SetSizer(repo_sizer)
 
@@ -4025,6 +4057,15 @@ class GhViewerFrame(wx.Frame):
         # View menu
         view_menu = wx.Menu()
 
+        # Navigate By (#130): what the left-hand list shows.
+        nav_menu = wx.Menu()
+        nav_menu.AppendRadioItem(ID_NAV_REPOS, "Repositories\tCtrl+Shift+1")
+        nav_menu.AppendRadioItem(ID_NAV_CATEGORIES, "Categories\tCtrl+Shift+2")
+        view_menu.AppendSubMenu(nav_menu, "Navigate By")
+        view_menu.Append(ID_CHOOSE_ACROSS, "Choose Repositories…")
+        view_menu.AppendCheckItem(ID_LATEST_RELEASE, "Latest Release Only")
+        view_menu.AppendSeparator()
+
         # View Mode submenu — switch between Issues/PRs and Git views.
         # Ctrl+1..Ctrl+0 jump straight to a view; the numbers follow the order
         # of this menu, so the shortcut is readable off the menu itself.
@@ -4082,6 +4123,9 @@ class GhViewerFrame(wx.Frame):
             self._sort_menu_items[item_id] = order
             sort_menu.AppendRadioItem(item_id, order)
             self.Bind(wx.EVT_MENU, self.on_sort_selected, id=item_id)
+        # Categories mode (#130): all of one repository's, then the next's.
+        sort_menu.AppendSeparator()
+        sort_menu.AppendCheckItem(ID_GROUP_BY_REPO, "Group by Repository")
         view_menu.AppendSubMenu(sort_menu, "Sort Order")
 
         view_menu.AppendSeparator()
@@ -4552,6 +4596,12 @@ class GhViewerFrame(wx.Frame):
         menu_bar.Check(ID_VIEW_FOLLOWERS, self.view_mode == VIEW_PEOPLE
                        and self._people == ("followers", ""))
         menu_bar.Check(ID_VIEW_ORGS, self.view_mode in (VIEW_ORGS, VIEW_ORG))
+        # Categories mode (#130)
+        nav = getattr(self, "_nav_mode", settings.NAV_REPOSITORIES)
+        menu_bar.Check(ID_NAV_REPOS, nav == settings.NAV_REPOSITORIES)
+        menu_bar.Check(ID_NAV_CATEGORIES, nav == settings.NAV_CATEGORIES)
+        menu_bar.Check(ID_LATEST_RELEASE, settings.load_flag("latest_release_only", True))
+        menu_bar.Check(ID_GROUP_BY_REPO, settings.load_flag("group_by_repo", False))
         # State filter
         menu_bar.Check(ID_STATE_OPEN, self.state_filter == "open")
         menu_bar.Check(ID_STATE_CLOSED, self.state_filter == "closed")
@@ -4821,6 +4871,15 @@ class GhViewerFrame(wx.Frame):
         self.Bind(wx.EVT_MENU, self.on_reopen, id=ID_REOPEN)
         self.Bind(wx.EVT_MENU, self.on_comment, id=ID_COMMENT)
         self.Bind(wx.EVT_MENU, lambda e: self._set_milestone_flow(), id=ID_SET_MILESTONE)
+        self.Bind(wx.EVT_MENU, lambda e: self._set_nav_mode(settings.NAV_REPOSITORIES),
+                  id=ID_NAV_REPOS)
+        self.Bind(wx.EVT_MENU, lambda e: self._set_nav_mode(settings.NAV_CATEGORIES),
+                  id=ID_NAV_CATEGORIES)
+        self.Bind(wx.EVT_MENU, lambda e: self._choose_across_repos(), id=ID_CHOOSE_ACROSS)
+        self.Bind(wx.EVT_MENU, lambda e: self._toggle_across_flag("latest_release_only"),
+                  id=ID_LATEST_RELEASE)
+        self.Bind(wx.EVT_MENU, lambda e: self._toggle_across_flag("group_by_repo"),
+                  id=ID_GROUP_BY_REPO)
         self.Bind(wx.EVT_MENU, lambda e: self._show_permissions(), id=ID_PERMISSIONS)
         self.Bind(wx.EVT_MENU, lambda e: self._set_labels_flow(), id=ID_SET_LABELS)
         self.Bind(wx.EVT_MENU, lambda e: self._set_assignees_flow(), id=ID_SET_ASSIGNEES)
@@ -4985,6 +5044,9 @@ class GhViewerFrame(wx.Frame):
                 else:
                     self._category_counts[entry] = n
         self._all_repos = repos
+        if getattr(self, "_nav_mode", settings.NAV_REPOSITORIES) == settings.NAV_CATEGORIES:
+            self._fill_categories()
+            return
         # Remember what was selected so the rebuild puts you back on it,
         # rather than at the top of the list while you are arrowing through.
         old = self.repo_list.GetSelection()
@@ -5164,6 +5226,10 @@ class GhViewerFrame(wx.Frame):
             return
         if name == FAVORITES_ENTRY:
             self._select_favorites()
+        elif name == CHOOSE_REPOS_ENTRY:
+            self._choose_across_repos()
+        elif name.startswith(ACROSS_ENTRY_PREFIX):
+            self._select_across(name[len(ACROSS_ENTRY_PREFIX):])
         elif name in PEOPLE_ENTRIES:
             self._open_my_people(PEOPLE_ENTRIES[name])
         elif name in ENTRY_VIEWS:
@@ -5417,6 +5483,8 @@ class GhViewerFrame(wx.Frame):
             self._on_activity_loaded(token, items, bool(snap["more"]), item)
         elif view == VIEW_MY_WORK:
             self._on_my_work_loaded(token, items, item)
+        elif view in ACROSS_VIEWS and self._across_result is not None:
+            self._on_across_loaded(token, self._across_result, item)
         elif view in SEARCH_VIEWS:
             self._on_search_loaded(token, items, self._search_total, item)
         elif view in REPO_LIST_VIEWS:
@@ -5737,6 +5805,11 @@ class GhViewerFrame(wx.Frame):
             self._set_view_status(f"Loading {self._view_label(self.view_mode, lower=True)}…")
         elif self.view_mode == VIEW_GISTS:
             self._set_view_status("Loading your gists…")
+        elif self.view_mode in ACROSS_VIEWS:
+            n = len(settings.load_across_repos())
+            self._set_view_status(
+                f"Reading {across.LABELS[ACROSS_KIND_OF[self.view_mode]].lower()} from "
+                f"{n} {'repository' if n == 1 else 'repositories'}…")
         else:
             self._set_view_status(f"Loading {view_label} for {self.repo}…")
         self.list_ctrl.DeleteAllItems()
@@ -5758,6 +5831,9 @@ class GhViewerFrame(wx.Frame):
         state = self.state_filter
         include_read = self._include_read
         milestone = getattr(self, "milestone_filter", None)
+        across_repos = settings.load_across_repos()
+        latest_only = settings.load_flag("latest_release_only", True)
+        item_filter = getattr(self, "item_filter", None)
         org = self._org
         org_logins = [o.login for o in self._orgs]
         people = getattr(self, "_people", ("following", ""))
@@ -5772,7 +5848,14 @@ class GhViewerFrame(wx.Frame):
 
         def worker() -> None:
             try:
-                if view == VIEW_ISSUES:
+                if view in ACROSS_VIEWS:
+                    kind = ACROSS_KIND_OF[view]
+                    result = across.fetch(
+                        kind, across_repos, limit, state, latest_only,
+                        item_filter if kind == "issues" else None,
+                        progress=lambda d, n: wx.CallAfter(self._across_progress, token, kind, d, n))
+                    wx.CallAfter(self._on_across_loaded, token, result)
+                elif view == VIEW_ISSUES:
                     issues = []
                     prs = []
                     if self.tab_filter in ("issues", "both"):
@@ -6077,6 +6160,8 @@ class GhViewerFrame(wx.Frame):
         VIEW_GISTS: "Gists",
         VIEW_PEOPLE: "People",
         VIEW_USER_REPOS: "Repositories",
+        **{view: f"{across.LABELS[kind]} Across Repositories"
+           for kind, view in ACROSS_VIEW_OF.items()},
     }
 
     def _view_label(self, view: str, lower: bool = False) -> str:
@@ -6111,6 +6196,8 @@ class GhViewerFrame(wx.Frame):
         if view == VIEW_USER_REPOS or (view == VIEW_ACTIVITY
                                        and getattr(self, "_activity_of", "")):
             return None
+        if view in ACROSS_KIND_OF:
+            return ACROSS_ENTRY_PREFIX + ACROSS_KIND_OF[view]
         return VIEW_ENTRIES.get(view)
 
     def _update_title(self) -> None:
@@ -6986,7 +7073,9 @@ class GhViewerFrame(wx.Frame):
         item = self._row_item(row)
         source = self._view_source()
         idx = next((i for i, it in enumerate(source) if it is item), -1)
-        if self.view_mode in ITEM_VIEWS:
+        if self.view_mode in ACROSS_ROW_VIEWS:
+            self._show_across_details(item)
+        elif self.view_mode in ITEM_VIEWS:
             self._show_issue_details(idx)
         elif self.view_mode == VIEW_FILES:
             self._show_file_details(idx)
@@ -7478,7 +7567,13 @@ class GhViewerFrame(wx.Frame):
         if idx < 0 or idx >= len(self.git_items):
             self.details_text.Clear()
             return
-        item = self.git_items[idx]
+        self.details_text.SetValue(
+            "\n".join(GhViewerFrame._git_detail_lines(self, self.git_items[idx])))
+
+    def _git_detail_lines(self, item) -> list[str]:
+        """The details panel's lines for a branch, commit, tag, release,
+        workflow run and the rest: also used for one from Categories mode
+        (#130), under its repository."""
         lines = []
         if isinstance(item, Branch):
             lines.append(f"Branch: {item.name}")
@@ -7729,7 +7824,7 @@ class GhViewerFrame(wx.Frame):
         # with no note) would read as a gap at the end: leave it off.
         while lines and lines[-1] in ("", "─" * 60):
             lines.pop()
-        self.details_text.SetValue("\n".join(lines))
+        return lines
 
     # ── Helpers ─────────────────────────────────────────────────────────
 
@@ -7799,6 +7894,15 @@ class GhViewerFrame(wx.Frame):
         VIEW_GISTS: "Gist ID",
         VIEW_PEOPLE: "User Name",
         VIEW_USER_REPOS: "Repository Name",
+        # Categories mode (#130): what the same kind copies in its own view.
+        ACROSS_VIEW_OF["issues"]: "Number",
+        ACROSS_VIEW_OF["releases"]: "Tag",
+        ACROSS_VIEW_OF["runs"]: "Run ID",
+        ACROSS_VIEW_OF["commits"]: "SHA",
+        ACROSS_VIEW_OF["tags"]: "Tag",
+        ACROSS_VIEW_OF["milestones"]: "Milestone Title",
+        ACROSS_VIEW_OF["discussions"]: "Number",
+        ACROSS_VIEW_OF["alerts"]: "Advisory, Rule or Secret Type",
     }
 
     _COPY_WHAT = {
@@ -8018,8 +8122,13 @@ class GhViewerFrame(wx.Frame):
         if self.view_mode == VIEW_NOTIFICATIONS and isinstance(item, Notification):
             self._open_notification(item)
             return
+        # Categories mode (#130): the item in its own repository's view.
+        if self.view_mode in ACROSS_ROW_VIEWS and isinstance(item, across.Row):
+            self._open_across_row(item)
+            return
         # Across repositories: open the issue or PR here, Backspace returns
-        if self.view_mode in (VIEW_MY_WORK, VIEW_SEARCH_ISSUES) and isinstance(item, Item):
+        if self.view_mode in (VIEW_MY_WORK, VIEW_SEARCH_ISSUES, VIEW_ACROSS_ISSUES) \
+                and isinstance(item, Item):
             self._open_item_here(item)
             return
         if self.view_mode == VIEW_SEARCH_REPOS and isinstance(item, RepoEntry):
@@ -8525,6 +8634,12 @@ class GhViewerFrame(wx.Frame):
         if key == wx.WXK_INSERT and plain and self.view_mode == VIEW_LABELS:
             self._do_new_label()
             return
+        # ] and [ in Categories mode (#130): the next or previous repository,
+        # from the list or the details panel.
+        if self.view_mode in ACROSS_VIEWS and not event.HasAnyModifiers() \
+                and chr(event.GetUnicodeKey() or 0) in "[]" and event.GetUnicodeKey():
+            self._across_jump(1 if chr(event.GetUnicodeKey()) == "]" else -1)
+            return
         # G here rather than in the list's handler so it also works from the
         # details panel, where the event is read.
         if (key == ord("G") and not event.HasAnyModifiers()
@@ -8861,6 +8976,9 @@ class GhViewerFrame(wx.Frame):
         if isinstance(item, RepoEntry):
             self._open_repo_from_list(item.name, item)
             return
+        if isinstance(item, across.Row):
+            self._open_repo_from_list(item.repo, item)
+            return
         if not isinstance(item, (ActivityEvent, Notification, Item)) or not item.repo:
             self._announce("No repository for this item.")
             return
@@ -8923,6 +9041,8 @@ class GhViewerFrame(wx.Frame):
             self._on_activity_loaded(token, items, more, item)
         elif view == VIEW_MY_WORK:
             self._on_my_work_loaded(token, items, item)
+        elif view in ACROSS_VIEWS and self._across_result is not None:
+            self._on_across_loaded(token, self._across_result, item)
         elif view in SEARCH_VIEWS:
             self._on_search_loaded(token, items, self._search_total, item)
         elif view == VIEW_FAVORITES:
@@ -9023,10 +9143,13 @@ class GhViewerFrame(wx.Frame):
             text = self._item_label(item, self.columns[0])
             self.list_ctrl.SetItem(row, 0, self._favorite_prefix(item) + text)
 
-    def _build_favorite_entry(self, item) -> FavoriteEntry | None:
-        """Build a FavoriteEntry from any item type (Item, Branch, Commit, etc.)."""
+    def _build_favorite_entry(self, item, repo: str = "") -> FavoriteEntry | None:
+        """Build a FavoriteEntry from any item type (Item, Branch, Commit, etc.).
+        A row of Categories mode (#130) is its item, in its repository."""
+        if isinstance(item, across.Row):
+            return GhViewerFrame._build_favorite_entry(self, item.item, item.repo)
         url = getattr(item, "url", "") or ""
-        repo = self.repo or ""
+        repo = repo or self.repo or ""
         if isinstance(item, Item):
             repo = item.repo or repo
             item_type = "PR" if item.is_pr else "issue"
@@ -10559,6 +10682,11 @@ class GhViewerFrame(wx.Frame):
             self._refresh_list_display(focus=self._focused_item())
 
     def on_sort_selected(self, event: wx.CommandEvent) -> None:
+        if self.view_mode in ACROSS_VIEWS:
+            self.sort_order = self._sort_menu_items.get(event.GetId(), SORT_ORDERS[0])
+            self._update_menu_checks()
+            self._reorder_across()
+            return
         if self.view_mode == VIEW_MY_WORK:
             self._update_menu_checks()
             self._announce("My Work is grouped by why it needs you, so it isn't sorted.")
@@ -10753,6 +10881,8 @@ class GhViewerFrame(wx.Frame):
     # ── View mode switching (Show submenu) ──────────────────────────────
 
     def on_view_issues(self, event: wx.CommandEvent) -> None:
+        if GhViewerFrame._across_shortcut(self, 1):
+            return
         # Asking for Issues & PRs by name means all of them: drop any label
         # drill-down, including when that leaves the view mode unchanged.
         if self.view_mode == VIEW_ISSUES:
@@ -10768,24 +10898,38 @@ class GhViewerFrame(wx.Frame):
         self._switch_view(VIEW_ISSUES)
 
     def on_view_branches(self, event: wx.CommandEvent) -> None:
+        if GhViewerFrame._across_shortcut(self, 2):
+            return
         self._switch_view(VIEW_BRANCHES)
 
     def on_view_commits(self, event: wx.CommandEvent) -> None:
+        if GhViewerFrame._across_shortcut(self, 3):
+            return
         self._switch_view(VIEW_COMMITS)
 
     def on_view_tags(self, event: wx.CommandEvent) -> None:
+        if GhViewerFrame._across_shortcut(self, 4):
+            return
         self._switch_view(VIEW_TAGS)
 
     def on_view_releases(self, event: wx.CommandEvent) -> None:
+        if GhViewerFrame._across_shortcut(self, 5):
+            return
         self._switch_view(VIEW_RELEASES)
 
     def on_view_workflows(self, event: wx.CommandEvent) -> None:
+        if GhViewerFrame._across_shortcut(self, 6):
+            return
         self._switch_view(VIEW_WORKFLOWS)
 
     def on_view_workflow(self, event: wx.CommandEvent) -> None:
+        if GhViewerFrame._across_shortcut(self, 7):
+            return
         self._switch_view(VIEW_WORKFLOW)
 
     def on_view_labels(self, event: wx.CommandEvent) -> None:
+        if GhViewerFrame._across_shortcut(self, 8):
+            return
         self._switch_view(VIEW_LABELS)
 
     def on_view_favorites(self, event: wx.CommandEvent) -> None:
@@ -10888,6 +11032,295 @@ class GhViewerFrame(wx.Frame):
                 wx.CallAfter(self._on_action_error, f"Error reopening #{item.number}: {exc}")
 
         threading.Thread(target=worker, daemon=True).start()
+
+    # ── Categories mode: one kind of thing across repositories (#130) ──────
+    #
+    # View ▸ Navigate By switches the left-hand list between repositories and
+    # categories. A category lists its kind from the repositories chosen with
+    # Choose Repositories (settings "across_repos"), read side by side by
+    # across.fetch, newest first or grouped by repository. Enter opens a row
+    # in its own repository's view, on it, with Backspace back here.
+
+    def _nav_title(self) -> str:
+        """The left-hand list's name: what it shows now."""
+        mode = getattr(self, "_nav_mode", settings.NAV_REPOSITORIES)
+        return "Categories" if mode == settings.NAV_CATEGORIES else "Repositories"
+
+    def _fill_categories(self) -> None:
+        """The left-hand list in Categories mode: Choose Repositories, then
+        each category, in the order Ctrl+1 to Ctrl+8 pick them."""
+        old = self.repo_list.GetSelection()
+        previous = self.repo_list.GetClientData(old) if old != wx.NOT_FOUND else None
+        self.repo_list.Clear()
+        n = len(settings.load_across_repos())
+        chosen = f" ({n} chosen)" if n else " (none chosen yet)"
+        self.repo_list.Append(f"Choose Repositories…{chosen}", clientData=CHOOSE_REPOS_ENTRY)
+        for kind, label, *_ in across.CATEGORIES:
+            self.repo_list.Append(label, clientData=ACROSS_ENTRY_PREFIX + kind)
+        self._restore_repo_selection(previous)
+        if not self._repos_loaded_once or self._current_focus() is self.repo_list:
+            self.repo_list.SetFocus()
+        self._repos_loaded_once = True
+
+    def _set_nav_mode(self, mode: str) -> None:
+        """View ▸ Navigate By: Repositories (Ctrl+Shift+1) or Categories
+        (Ctrl+Shift+2). Remembered; says which it is now."""
+        changed = mode != self._nav_mode
+        self._nav_mode = mode
+        settings.save_nav_mode(mode)
+        self._update_menu_checks()
+        title = self._nav_title()
+        if changed:
+            self._repo_list_title.SetLabel(title)
+            speech.set_label(self.repo_list, title)
+            self._on_repos_loaded(self._all_repos)
+        self.repo_list.SetFocus()
+        n = self.repo_list.GetCount()
+        self._tell(f"{title}, {n} {'entry' if n == 1 else 'entries'}.")
+
+    def _select_across(self, kind: str) -> None:
+        """A category: its list from the chosen repositories. With none
+        chosen yet, Choose Repositories first, then the list."""
+        if not settings.load_across_repos():
+            self._choose_across_repos(then=kind)
+            return
+        view = ACROSS_VIEW_OF[kind]
+        self.current_limit = self.page_size
+        if self.view_mode != view:
+            self._switch_view(view)
+        else:
+            self._load_items()
+
+    def _across_shortcut(self, n: int) -> bool:
+        """Ctrl+1 to Ctrl+8 in Categories mode pick the categories in order;
+        in Repositories mode they pick views as always (False)."""
+        if getattr(self, "_nav_mode", settings.NAV_REPOSITORIES) != settings.NAV_CATEGORIES:
+            return False
+        kind = across.KINDS[n - 1]
+        for i in range(self.repo_list.GetCount()):
+            if self.repo_list.GetClientData(i) == ACROSS_ENTRY_PREFIX + kind:
+                self.repo_list.SetSelection(i)
+        self._update_menu_checks()  # the View Mode radio item wx just checked
+        self._select_across(kind)
+        return True
+
+    def _choose_across_repos(self, then: str = "") -> None:
+        """Choose Repositories: which repositories Categories mode reads.
+        The repositories are gathered off the UI thread (an organization's
+        are asked for); ``then`` is a category to open once chosen."""
+        self._announce("Getting your repositories…")
+        pinned = list(self._pinned_repos)
+        own = [r.get("nameWithOwner", "") for r in self._all_repos]
+        orgs = [o.login for o in getattr(self, "_orgs", [])]
+
+        def worker() -> None:
+            names = pinned + own
+            for login in orgs:
+                try:
+                    names += [r.name for r in fetch_org_repos(login)]
+                except GhError:
+                    pass  # an organization that can't be listed: the rest still can
+            wx.CallAfter(self._ask_across_repos, names, then)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    @staticmethod
+    def across_repo_name(typed: str) -> str:
+        """OWNER/NAME from what was typed: itself, or a github.com address."""
+        typed = typed.strip().strip("/")
+        if typed.lower().startswith(("http://", "https://", "github.com/")):
+            target = parse_github_url(typed if "://" in typed else "https://" + typed)
+            return target.repo if target and target.repo else ""
+        parts = typed.split("/")
+        return typed if len(parts) == 2 and all(parts) and " " not in typed else ""
+
+    def _ask_across_repos(self, names: list[str], then: str) -> None:
+        chosen = settings.load_across_repos()
+        seen, options = set(), []
+        for name in sorted((n for n in names if n), key=str.lower):
+            if name.lower() not in seen:
+                seen.add(name.lower())
+                options.append(name)
+        model = Checklist(options, chosen)
+        dlg = ChecklistDialog(
+            self, "Choose Repositories", "Repositories that Categories mode reads", model,
+            say=self._tell, new_label="&Add Repository…",
+            new_prompt="Repository to add, as OWNER/NAME or its address:",
+            note="" if options else "No repositories were found to offer; Add Repository adds one.")
+        try:
+            saved = dlg.ShowModal() == wx.ID_OK
+        finally:
+            dlg.Destroy()
+        if not saved:
+            self._tell_after_box("Repositories unchanged.")
+            return
+        picked, bad = [], []
+        for name in model.chosen():
+            repo = self.across_repo_name(name)
+            (picked if repo else bad).append(repo or name)
+        settings.save_across_repos(picked)
+        if self._nav_mode == settings.NAV_CATEGORIES:
+            self._fill_categories()
+        said = f"{len(picked)} {'repository' if len(picked) == 1 else 'repositories'} chosen."
+        if bad:
+            said += f" Not repository names, so left out: {', '.join(bad)}."
+        self._tell_after_box(said)
+        if then and picked:
+            self._select_across(then)
+        elif self.view_mode in ACROSS_VIEWS and picked:
+            self._load_items()
+
+    def _across_progress(self, token: int, kind: str, done: int, total: int) -> None:
+        if self._fetch_is_current(token) and done < total:
+            self._announce(f"Reading {across.LABELS[kind].lower()}: {done} of {total} "
+                           "repositories…")
+
+    def _across_ordered(self, result) -> list:
+        """The rows in View ▸ Sort Order's order, grouped by repository when
+        that is checked. Number, Created and Updated all mean by date here."""
+        order = self.sort_order or ""
+        by_name = order.startswith("Title")
+        rows = across.order(result.rows, result.repos,
+                            newest="oldest" not in order, by_name=by_name,
+                            grouped=settings.load_flag("group_by_repo", False))
+        if by_name and "Z-A" in order and not settings.load_flag("group_by_repo", False):
+            rows.reverse()
+        return rows
+
+    def _on_across_loaded(self, token: int, result, focus=0) -> None:
+        """A category's list has come in, or is shown again (Backspace)."""
+        if not self._fetch_is_current(token):
+            return
+        self._across_result = result
+        rows = self._across_ordered(result)
+        if self.view_mode == VIEW_ACROSS_ISSUES:
+            self.items, self.git_items = rows, []
+        else:
+            self.git_items, self.items = rows, []
+        filtered = self._populate_filtered_list(rows, use_favorite_prefix=True)
+        message = across.status(result, len(rows))
+        if result.notes:
+            message += " " + " ".join(f"{repo}: {why}." for repo, why in result.notes.items())
+        if result.kind == "releases" and settings.load_flag("latest_release_only", True):
+            message += " Latest release of each."
+        if settings.load_flag("group_by_repo", False):
+            message += " Grouped by repository."
+        edits = ("I=milestone  L=labels  A=assignees  P=projects  E=edit  "
+                 if self.view_mode == VIEW_ACROSS_ISSUES else "")
+        self._set_view_status(message, keys_hint(
+            "Enter=open in its repository", "]=next repository  [=previous repository",
+            edits + "G=go to repository  F=favorite  R=refresh  Ctrl+F=filter"))
+        self._update_title()
+        row = focus if isinstance(focus, int) else max(self._row_of(focus), 0)
+        if filtered:
+            wx.CallLater(100, self._focus_list, row)
+        else:
+            self.details_text.SetValue(message)
+            announce.announce(message, announce.STATUS)
+
+    def _reorder_across(self) -> None:
+        """Sort Order or Group by Repository changed: the list again, in the
+        new order, on the row you were on."""
+        if self._across_result is None or self.view_mode not in ACROSS_VIEWS:
+            return
+        here = self._focused_item()
+        self._on_across_loaded(self._fetch_token, self._across_result, here or 0)
+        self._tell("Grouped by repository." if settings.load_flag("group_by_repo", False)
+                   else f"{self.sort_order}.")
+
+    def _toggle_across_flag(self, name: str) -> None:
+        """View ▸ Latest Release Only, and Sort Order ▸ Group by Repository."""
+        default = name == "latest_release_only"
+        on = not settings.load_flag(name, default)
+        settings.save_flag(name, on)
+        self._update_menu_checks()
+        if name == "group_by_repo":
+            if self.view_mode in ACROSS_VIEWS:
+                self._reorder_across()
+            else:
+                self._tell("Categories mode lists will be grouped by repository." if on
+                           else "Categories mode lists won't be grouped.")
+            return
+        self._tell("Latest release of each repository only." if on else "Every release.")
+        if self.view_mode == ACROSS_VIEW_OF["releases"]:
+            self._load_items()
+
+    def _show_across_details(self, row) -> None:
+        """A row of Categories mode: its repository, then its own details."""
+        if not isinstance(row, across.Row):
+            self.details_text.Clear()
+            return
+        inner = row.item
+        if isinstance(inner, Milestone):
+            body = milestoneview.milestone_details(inner)
+        elif isinstance(inner, Discussion):
+            body = discussionview.discussion_details(inner)[0]
+        elif isinstance(inner, SecurityAlert):
+            body = alertview.alert_details(inner)
+        else:
+            body = "\n".join(GhViewerFrame._git_detail_lines(self, inner))
+        self.details_text.SetValue(f"Repository: {row.repo}\n{body}")
+
+    def _open_across_row(self, row) -> None:
+        """Enter on a row: the item in its repository's own view, on it, with
+        Backspace back to this list."""
+        it = row.item
+        target = None
+        if isinstance(it, Release):
+            target = GitHubTarget(row.repo, "release", it.tag)
+        elif isinstance(it, WorkflowRun):
+            target = GitHubTarget(row.repo, "run", str(it.run_id))
+        elif isinstance(it, Commit):
+            target = GitHubTarget(row.repo, "commit", it.sha)
+        elif isinstance(it, Milestone):
+            target = GitHubTarget(row.repo, "milestone", str(it.number))
+        elif isinstance(it, Discussion):
+            target = GitHubTarget(row.repo, "discussion", str(it.number))
+        elif isinstance(it, (Tag, SecurityAlert)):
+            view, kind, ref = ((VIEW_TAGS, "tag", it.name) if isinstance(it, Tag)
+                               else (VIEW_SECURITY, "alert", it.url))
+            self._open_repo_from_list(row.repo, row, view)
+            self._set_pending_target(view, kind, ref)
+            self._speak_landing = True
+            return
+        if target is None or not self._open_address_here(target, row):
+            self._tell(NO_VIEW_SAID)
+
+    def _across_jump(self, step: int) -> None:
+        """] and [: the first row of the next or previous repository. From
+        the details panel, it shows that row there and stays."""
+        rows = self._shown
+        if not rows:
+            return
+        here = max(self.list_ctrl.GetFirstSelected(), 0)
+        there = across.next_repo(rows, here, step)
+        if there < 0:
+            self._tell("No more repositories after this one." if step > 0
+                       else "No repositories before this one.")
+            return
+        repo = across.repo_of(rows[there])
+        if self._current_focus() is self.details_text:
+            self.list_ctrl.Select(here, on=False)
+            self.list_ctrl.Select(there, on=True)
+            self.list_ctrl.Focus(there)
+            if hasattr(self.list_ctrl, "EnsureVisible"):
+                self.list_ctrl.EnsureVisible(there)
+            self._show_details(there)
+            self.details_text.SetInsertionPoint(0)
+            self._tell(f"{repo}: {self._row_said(there)}")
+            return
+        self._focus_list(there)
+        # The screen reader reads the row it lands on; JAWS doesn't read a
+        # move the app makes, so it is told (as in PR #107).
+        if speech.jaws_running():
+            self._tell(f"{repo}: {self._row_said(there)}")
+
+    def _row_said(self, row: int) -> str:
+        item = self._row_item(row)
+        if item is None:
+            return ""
+        values = _row_values(item, self.columns)
+        return ", ".join(v for c, v in values.items() if v and c != "repo")
 
     # ── GitHub permissions (#129) ─────────────────────────────────────────
 

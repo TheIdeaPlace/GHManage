@@ -1043,6 +1043,7 @@ VIEW_ACROSS_ISSUES = ACROSS_VIEW_OF["issues"]
 ACROSS_ROW_VIEWS = tuple(v for v in ACROSS_VIEWS if v != VIEW_ACROSS_ISSUES)
 ACROSS_ENTRY_PREFIX = "__across__:"
 CHOOSE_REPOS_ENTRY = "__choose_repos__"
+ACROSS_PAGE = 30  # what each repository is asked for, per View More
 REPOLESS_VIEWS = REPOLESS_VIEWS + ACROSS_VIEWS
 FEED_VIEWS = FEED_VIEWS + ACROSS_VIEWS
 ITEM_VIEWS = ITEM_VIEWS + (VIEW_ACROSS_ISSUES,)
@@ -4952,6 +4953,10 @@ class GhViewerFrame(wx.Frame):
         self._repo_token += 1
         token = self._repo_token
         self._announce("Loading your repositories…")
+        if getattr(self, "_nav_mode", settings.NAV_REPOSITORIES) == settings.NAV_CATEGORIES:
+            # Categories mode (#130) lists categories, not repositories: shown
+            # now, not after GitHub has answered (or failed to).
+            self._fill_categories()
 
         def worker() -> None:
             try:
@@ -5832,6 +5837,10 @@ class GhViewerFrame(wx.Frame):
         include_read = self._include_read
         milestone = getattr(self, "milestone_filter", None)
         across_repos = settings.load_across_repos()
+        # Each repository is asked for ACROSS_PAGE, and View More asks each
+        # for that many more: a page of 100 from each of ten repositories
+        # would be a thousand rows, and slow.
+        across_limit = ACROSS_PAGE * max(1, limit // max(getattr(self, "page_size", 100), 1))
         latest_only = settings.load_flag("latest_release_only", True)
         item_filter = getattr(self, "item_filter", None)
         org = self._org
@@ -5851,7 +5860,7 @@ class GhViewerFrame(wx.Frame):
                 if view in ACROSS_VIEWS:
                     kind = ACROSS_KIND_OF[view]
                     result = across.fetch(
-                        kind, across_repos, limit, state, latest_only,
+                        kind, across_repos, across_limit, state, latest_only,
                         item_filter if kind == "issues" else None,
                         progress=lambda d, n: wx.CallAfter(self._across_progress, token, kind, d, n))
                     wx.CallAfter(self._on_across_loaded, token, result)

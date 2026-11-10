@@ -112,6 +112,8 @@ def why_failed(exc: Exception) -> str:
         return "no access"
     if "http 502" in low or "http 504" in low or "timed out" in low:
         return "GitHub didn't answer in time"
+    if "gh auth login" in low or "not logged in" in low:
+        return "gh isn't signed in"
     first = text.splitlines()[0] if text else type(exc).__name__
     for prefix in ("gh: ", "GraphQL: "):
         if first.startswith(prefix):
@@ -243,6 +245,14 @@ def status(result: Result, shown: int) -> str:
     if empty and len(empty) < n:
         text += f" {len(empty)} {'has' if len(empty) == 1 else 'have'} none."
     if result.failed:
-        why = "; ".join(f"{repo}: {reason}" for repo, reason in result.failed.items())
-        text += f" Couldn't read {why}."
+        # In the chosen order, and one reason said once when it's the same
+        # for all (gh signed out, no network), not repeated for each.
+        failed = [(r, result.failed[r]) for r in result.repos if r in result.failed]
+        reasons = {why for _, why in failed}
+        if len(reasons) == 1 and len(failed) > 1:
+            which = (f"any of the {n} repositories" if len(failed) == n
+                     else f"{len(failed)} repositories, {', '.join(r for r, _ in failed)}")
+            text += f" Couldn't read {which}: {reasons.pop()}."
+        else:
+            text += " Couldn't read " + "; ".join(f"{r}: {why}" for r, why in failed) + "."
     return text

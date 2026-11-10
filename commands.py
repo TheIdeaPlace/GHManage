@@ -63,7 +63,9 @@ def hint_words(label: str) -> str:
 REPO_LIST = "Repository list"
 ANY_LIST = "Any list"
 ISSUES = "Issues & PRs list"
-ITEM_LISTS = "Issues & PRs, My Work and issue search results"
+ITEM_LISTS = ("Issues & PRs, My Work, issue search results and Categories mode's "
+              "Issues & PRs")
+CATEGORY_LISTS = "Categories mode lists"
 LABELS = "Labels list"
 RUNS = "Workflow runs and jobs"
 NOTIFICATIONS = "Notifications list"
@@ -112,6 +114,11 @@ LIST_KEYS: list[Command] = [
     Command("Pull request checks", "K", ISSUES),
     Command("Review the pull request", "V", ISSUES),
     Command("Ready for review, or back to draft", "D", ISSUES),
+    Command("Next repository", "]", CATEGORY_LISTS),
+    Command("Previous repository", "[", CATEGORY_LISTS),
+    Command("Open the item in its repository; Backspace comes back", "Enter", CATEGORY_LISTS),
+    Command("Go to the item's repository", "G", CATEGORY_LISTS),
+    Command("Pick a category, in Categories mode", "Ctrl+1 to Ctrl+8", CATEGORY_LISTS),
     Command("Set the milestone", "I", ITEM_LISTS),
     Command("Set the labels", "L", ITEM_LISTS),
     Command("Set the assignees", "A", ITEM_LISTS),

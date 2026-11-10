@@ -27,6 +27,7 @@ GHManage is a keyboard-driven desktop app for your GitHub repositories, built fo
 - [GitHub Pages](#github-pages)
 - [Notifications](#notifications)
 - [My Work](#my-work)
+- [Categories Mode](#categories-mode)
 - [Searching GitHub](#searching-github)
 - [Activity](#activity)
 - [Starred and Watched Repositories](#starred-and-watched-repositories)
@@ -1055,6 +1056,53 @@ Each row reads why it is on the list, whether it is an issue or a pull request, 
 | `G` or `Ctrl+Shift+G` | Open its repository here |
 | `Ctrl+O` | Open it on GitHub |
 | `F` | Add it to favorites, or remove it |
+
+---
+
+## Categories Mode
+
+Normally you pick a repository, then look at its issues, releases, runs and so on. **Categories mode** works the other way round: you pick the kind of thing, and GHManage lists it from every repository you've chosen, in one list. For example, it can show the latest release of each of your projects together.
+
+### Switching modes
+
+**View → Navigate By** switches what the list on the left shows:
+
+- **Repositories** (`Ctrl+Shift+1`) is the usual repository list.
+- **Categories** (`Ctrl+Shift+2`) shows **Choose Repositories…**, then **Issues & PRs**, **Releases**, **Workflow Runs**, **Commits**, **Tags**, **Milestones**, **Discussions** and **Security Alerts**.
+
+GHManage says which mode you're in, for example "Categories, 9 entries", and names the list to match. It also remembers the mode and opens in it next time. **View → Categories** lists the categories by name. In Categories mode, `Ctrl+1` to `Ctrl+8` pick them, in that order. The menu shows those keys on the Categories items and takes them off the View Mode items, so each key does what its menu item says. In Repositories mode the keys pick views, as always.
+
+### Choosing the repositories
+
+**Choose Repositories…**, at the top of Categories mode or on the View menu, lists your repositories, your organizations' repositories, and any you opened by address. Each row says whether it is checked. `Space` checks a row, and `Enter` saves. **Add Repository…** takes another repository, as `OWNER/NAME` or its address. Categories mode reads only the repositories you check. Repositories you've removed from the repository list aren't offered. The first entry says how many you've chosen. If you open a category before choosing any, Choose Repositories opens first.
+
+### The lists
+
+Enter on a category lists that kind of thing from each chosen repository, newest first. The Repository column comes first, so every row says where it's from. While the repositories are read, the status bar counts them, for example "Reading releases: 4 of 6 repositories…". When they're all in, it says what came back: "Releases from 6 repositories: 6 releases. 1 has none." Each repository gives up to 30 at first, or 30 issues and 30 pull requests for Issues & PRs. View More (`Ctrl++`) asks each one for 30 more, up to 100, which is what GitHub gives at once. `R` reads them all again. After either, you're back on the item you were on.
+
+A repository that couldn't be read is named on the status bar and said aloud after the first row, with the reason. For example: "Couldn't read TheIdeaPlace/Old: not found, or no access." A repository whose discussions are turned off says so too. A fork whose upstream is also chosen lists nothing for Issues & PRs, since the fork shows its upstream's issues, and says so. Otherwise each would be listed twice.
+
+- **Releases** shows only each repository's latest release while **View → Latest Release Only** is checked, which it is to begin with. Uncheck it to see every release.
+- **View → Sort Order** applies: Number, Created or Updated, newest or oldest first, or Title. **Group by Repository**, at the bottom of that menu, lists all of one repository's items, then the next repository's, in the order the Choose Repositories list shows them.
+- Tags have no dates, so each repository's tags stay in the order GitHub gives them.
+- **View → State**, and for Issues & PRs **View → Filter**, including Issues Only and PRs Only, apply as they do anywhere else.
+
+### Moving between repositories
+
+| Key | Action |
+|-----|--------|
+| `]` or **Actions → Next Repository** | The first item from the next repository |
+| `[` or **Actions → Previous Repository** | The first item from the previous repository |
+| `Enter` | Open the item in its own repository, on it: Releases on that release, Workflow Runs on that run, and so on. `Backspace` comes back here, on the same row |
+| `G` or `Ctrl+Shift+G` | Open the item's repository, on its Issues & PRs, as in My Work |
+| `Ctrl+O` | Open it on GitHub |
+| `F` | Add it to favorites, or remove it |
+
+`]` and `[` work from the details panel too. There, the panel shows the new item and GHManage says its repository and what it is. The details panel always starts with "Repository:". On a keyboard where `[` and `]` need `AltGr`, use the Actions menu items.
+
+The keys for a pull request (`K`, `V`, `D`) and for a workflow run (`J`, `L`, `E`, `X`) work once you've opened it with `Enter`.
+
+In Issues & PRs, the edit keys work as in My Work: `I` milestone, `L` labels, `A` assignees, `P` projects and `E` title and description.
 
 ---
 

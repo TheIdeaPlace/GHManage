@@ -233,6 +233,31 @@ PEOPLE_SET = _set("people", "People", PEOPLE_COLUMNS, PEOPLE_DEFAULT_COLUMNS,
 FAVORITES_SET = _set("favorites", "Favorites", FAVORITES_COLUMNS,
                      FAVORITES_DEFAULT_COLUMNS)
 
+
+# Categories mode (#130): each kind's own columns with the Repository first,
+# shown by default, since every row may be from a different one.
+def _across(kind: str, name: str, base: ColumnSet, defaults: list[str]) -> ColumnSet:
+    ids = ["repo"] + [c.id for c in base.columns if c.id != "repo"]
+    overrides = {c.id: {"heading": c.heading, "width": c.width, "kind": c.kind}
+                 for c in base.columns}
+    overrides["repo"] = {"width": 200}
+    return _set(f"across_{kind}", f"{name} across repositories", ids,
+                ["repo"] + defaults, overrides)
+
+
+ACROSS_SETS = {
+    "issues": _across("issues", "Issues and pull requests", ISSUE_SET,
+                      ["type", "number", "title", "updated"]),
+    "releases": _across("releases", "Releases", RELEASE_SET, RELEASE_DEFAULT_COLUMNS),
+    "runs": _across("runs", "Workflow runs", WORKFLOW_RUN_SET, WORKFLOW_DEFAULT_COLUMNS),
+    "commits": _across("commits", "Commits", COMMIT_SET, COMMIT_DEFAULT_COLUMNS),
+    "tags": _across("tags", "Tags", TAG_SET, TAG_DEFAULT_COLUMNS),
+    "milestones": _across("milestones", "Milestones", MILESTONE_SET, MILESTONE_DEFAULT_COLUMNS),
+    "discussions": _across("discussions", "Discussions", DISCUSSION_SET,
+                           DISCUSSION_DEFAULT_COLUMNS),
+    "alerts": _across("alerts", "Security alerts", SECURITY_SET, SECURITY_DEFAULT_COLUMNS),
+}
+
 COLUMN_SETS: list[ColumnSet] = [
     ISSUE_SET, LABEL_SET, ORG_SET, REPO_SET, BRANCH_SET, COMMIT_SET, TAG_SET,
     ASSET_SET, RELEASE_SET, WORKFLOW_RUN_SET, ARTIFACT_SET, WORKFLOW_SET,
@@ -240,3 +265,6 @@ COLUMN_SETS: list[ColumnSet] = [
     MY_WORK_SET, JOB_SET, FAVORITES_SET, CHANGED_FILE_SET, REPO_FILE_SET, SECURITY_SET,
     DISCUSSION_SET, MILESTONE_SET, INSIGHT_SET, GIST_SET, PEOPLE_SET,
 ]
+
+# Categories mode lists, in the Columns dialog too.
+COLUMN_SETS += list(ACROSS_SETS.values())

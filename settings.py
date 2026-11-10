@@ -155,6 +155,44 @@ def save_columns(column_set: ColumnSet, columns: list[str]) -> None:
     _save()
 
 
+NAV_REPOSITORIES, NAV_CATEGORIES = "repositories", "categories"
+
+
+def load_nav_mode() -> str:
+    """View > Navigate By (#130): what the left-hand list shows."""
+    mode = load_settings().get("nav_mode")
+    return mode if mode in (NAV_REPOSITORIES, NAV_CATEGORIES) else NAV_REPOSITORIES
+
+
+def save_nav_mode(mode: str) -> None:
+    _session["nav_mode"] = mode
+    _save()
+
+
+def load_across_repos() -> list[str]:
+    """Choose Repositories (#130): the repositories Categories mode reads,
+    in the order chosen. None until chosen."""
+    saved = load_settings().get("across_repos")
+    return [r for r in saved if isinstance(r, str) and r.count("/") == 1] \
+        if isinstance(saved, list) else []
+
+
+def save_across_repos(repos: list[str]) -> None:
+    _session["across_repos"] = list(dict.fromkeys(repos))
+    _save()
+
+
+def load_flag(name: str, default: bool) -> bool:
+    """An on/off setting by name: "latest_release_only", "group_by_repo"."""
+    saved = load_settings().get(name)
+    return saved if isinstance(saved, bool) else default
+
+
+def save_flag(name: str, on: bool) -> None:
+    _session[name] = bool(on)
+    _save()
+
+
 def load_auto_update() -> bool:
     """Help > Automatic Updates: whether GHManage looks for updates when it
     starts and installs them by itself. On until turned off."""

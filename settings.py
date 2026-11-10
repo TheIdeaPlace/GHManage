@@ -178,7 +178,13 @@ def load_across_repos() -> list[str]:
 
 
 def save_across_repos(repos: list[str]) -> None:
-    _session["across_repos"] = list(dict.fromkeys(repos))
+    # Once each: GitHub names aren't case-sensitive, so o/r and O/R are one.
+    seen, kept = set(), []
+    for repo in repos:
+        if repo.lower() not in seen:
+            seen.add(repo.lower())
+            kept.append(repo)
+    _session["across_repos"] = kept
     _save()
 
 

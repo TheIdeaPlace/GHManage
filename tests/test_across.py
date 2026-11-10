@@ -154,3 +154,67 @@ def test_status_says_what_came_back_and_from_where():
                                    "Couldn't read o/x: no access.")
     one = across.Result("releases", rows=ROWS[:1], repos=["o/a"])
     assert across.status(one, 1) == "Releases from 1 repository: 1 release."
+
+
+# ── Review fixes ────────────────────────────────────────────────────────
+
+
+def _issues(monkeypatch, upstream_of=None):
+    upstream_of = upstream_of or {}
+    monkeypatch.setattr(gh_data, "resolve_issue_repo", lambda r: upstream_of.get(r, r))
+    monkeypatch.setattr(gh_data, "fetch_issues", lambda repo, state, limit, item_filter=None:
+                        [Item(1, f"I {repo}", "OPEN", "u", False, updated_at="2026-11-01")])
+    monkeypatch.setattr(gh_data, "fetch_prs", lambda repo, state, limit, item_filter=None:
+                        [Item(2, f"P {repo}", "OPEN", "u", True, updated_at="2026-11-02")])
+
+
+def test_a_fork_with_its_upstream_chosen_is_not_listed_twice(monkeypatch):
+    _issues(monkeypatch, {"me/nvda": "nv/nvda"})
+    r = across.fetch("issues", ["me/nvda", "nv/nvda"])
+    assert [i.repo for i in r.rows] == ["nv/nvda", "nv/nvda"]
+    assert "listed under nv/nvda" in r.notes["me/nvda"]
+    assert r.empty_repos() == []          # a note, not "has none"
+
+
+def test_a_fork_alone_groups_and_counts_under_itself(monkeypatch):
+    _issues(monkeypatch, {"me/nvda": "nv/nvda"})
+    r = across.fetch("issues", ["o/a", "me/nvda"])
+    assert r.empty_repos() == []
+    grouped = across.order(r.rows, r.repos, grouped=True)
+    assert [across.source_of(x) for x in grouped] == ["o/a", "o/a", "me/nvda", "me/nvda"]
+    assert [x.repo for x in grouped][2:] == ["nv/nvda", "nv/nvda"]   # still opens upstream
+    assert across.next_repo(grouped, 0, 1) == 2
+
+
+def test_issues_only_or_prs_only(monkeypatch):
+    _issues(monkeypatch)
+    assert [i.is_pr for i in across.fetch("issues", ["o/a"], tabs="issues").rows] == [False]
+    assert [i.is_pr for i in across.fetch("issues", ["o/a"], tabs="prs").rows] == [True]
+
+
+def test_names_are_compared_without_case(monkeypatch):
+    monkeypatch.setattr(gh_data, "fetch_milestones", lambda repo, state, limit:
+                        [gh_data.Milestone(1, "1.0", updated_at="x", repo="TheIdeaPlace/GHManage")])
+    r = across.fetch("milestones", ["theideaplace/ghmanage"])
+    assert r.empty_repos() == []
+
+
+def test_a_repository_is_never_asked_for_more_than_github_gives(monkeypatch):
+    asked = []
+    monkeypatch.setattr(gh_data, "fetch_tags", lambda repo, limit: asked.append(limit) or [])
+    across.fetch("tags", ["o/a"], limit=150)
+    assert asked == [across.MAX_PER_REPO]
+
+
+def test_title_z_to_a_grouped_or_not():
+    rows = [Row("o/a", rel("b", "x")), Row("o/a", rel("a", "x")), Row("o/b", rel("c", "x"))]
+    assert [r.item.tag for r in across.order(rows, ["o/a", "o/b"], by_name=True,
+                                             descending=True)] == ["c", "b", "a"]
+    assert [r.item.tag for r in across.order(rows, ["o/a", "o/b"], by_name=True, grouped=True,
+                                             descending=True)] == ["b", "a", "c"]
+
+
+def test_the_choice_is_saved_once_per_repository_whatever_the_case():
+    import settings
+    settings.save_across_repos(["O/A", "o/a", "o/b"])
+    assert settings.load_across_repos() == ["O/A", "o/b"]

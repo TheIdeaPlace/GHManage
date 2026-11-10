@@ -38,6 +38,8 @@ NOUNS = {c[0]: (c[2], c[3]) for c in CATEGORIES}
 # Repositories read at once: enough to be quick, few enough not to trip
 # GitHub's limit on requests at a time.
 WORKERS = 6
+# What GitHub gives in one page; View More can't ask a repository for more.
+MAX_PER_REPO = 100
 
 
 @dataclass
@@ -47,6 +49,7 @@ class Row:
     repo: str
     item: object
     when: str = ""        # ISO date the list is ordered by; "" for none
+    source: str = ""      # the chosen repository it was read for, when not ``repo``
 
     @property
     def url(self) -> str:
@@ -66,13 +69,23 @@ class Result:
     notes: dict = field(default_factory=dict)      # repo -> why it has none (off, no rights)
 
     def empty_repos(self) -> list[str]:
-        """Repositories that answered with nothing."""
-        have = {repo_of(r) for r in self.rows}
-        return [r for r in self.repos if r not in have and r not in self.failed]
+        """Repositories that answered with nothing (names compared without
+        case, as GitHub does)."""
+        have = {source_of(r).lower() for r in self.rows}
+        noted = {r.lower() for r in self.notes}
+        return [r for r in self.repos
+                if r.lower() not in have and r not in self.failed and r.lower() not in noted]
 
 
 def repo_of(row) -> str:
+    """The repository the row's item is in: what it says, and opens in."""
     return getattr(row, "repo", "") or ""
+
+
+def source_of(row) -> str:
+    """The chosen repository the row was read for. Usually ``repo_of``; for a
+    fork, whose issues and milestones are its upstream's, the fork."""
+    return getattr(row, "source", "") or getattr(row, "across_source", "") or repo_of(row)
 
 
 def when_of(row) -> str:
@@ -122,15 +135,23 @@ def why_failed(exc: Exception) -> str:
 
 
 def _one(kind: str, repo: str, limit: int, state: str, latest_only: bool,
-         item_filter) -> tuple[list, str]:
+         item_filter, tabs: str = "both", chosen: frozenset = frozenset()) -> tuple[list, str]:
     """(rows, note) for one repository. A note says why there are none
     when that isn't simply "none" (discussions off, no rights)."""
     if kind == "issues":
         where = gh_data.resolve_issue_repo(repo) or repo
-        items = (gh_data.fetch_issues(where, state, limit, item_filter=item_filter)
-                 + gh_data.fetch_prs(where, state, limit, item_filter=item_filter))
+        if where.lower() != repo.lower() and where.lower() in chosen:
+            # A fork lists its upstream's issues, and the upstream is chosen
+            # too: listing them under both would show each one twice.
+            return [], f"a fork; its issues are listed under {where}"
+        items = []
+        if tabs in ("issues", "both"):
+            items += gh_data.fetch_issues(where, state, limit, item_filter=item_filter)
+        if tabs in ("prs", "both"):
+            items += gh_data.fetch_prs(where, state, limit, item_filter=item_filter)
         for it in items:
             it.repo = where
+            it.across_source = repo
         return items, ""
     if kind == "releases":
         rel = gh_data.fetch_releases(repo, limit)
@@ -145,7 +166,8 @@ def _one(kind: str, repo: str, limit: int, state: str, latest_only: bool,
         return [Row(repo, t, "") for t in gh_data.fetch_tags(repo, limit)], ""
     if kind == "milestones":
         ms = gh_data.fetch_milestones(repo, state, limit)
-        return [Row(m.repo or repo, m, m.updated_at or m.created_at or "") for m in ms], ""
+        return [Row(m.repo or repo, m, m.updated_at or m.created_at or "", source=repo)
+                for m in ms], ""
     if kind == "discussions":
         found = gh_data.fetch_discussions(repo, state, limit)
         if not found.enabled:
@@ -161,16 +183,19 @@ def _one(kind: str, repo: str, limit: int, state: str, latest_only: bool,
 def fetch(kind: str, repos: list[str], limit: int = 30, state: str = "open",
           latest_only: bool = False, item_filter=None,
           progress: Optional[Callable[[int, int], None]] = None,
-          workers: int = WORKERS) -> Result:
+          workers: int = WORKERS, tabs: str = "both") -> Result:
     """``kind`` from each of ``repos``, read side by side. ``progress(done,
     total)`` is called from worker threads as each repository answers."""
     result = Result(kind, repos=list(repos))
     found: dict[str, list] = {}
     done = 0
+    limit = min(limit, MAX_PER_REPO)
+    chosen = frozenset(r.lower() for r in repos)
 
     def read(repo: str):
         try:
-            return repo, _one(kind, repo, limit, state, latest_only, item_filter), None
+            return repo, _one(kind, repo, limit, state, latest_only, item_filter,
+                              tabs, chosen), None
         except Exception as exc:  # noqa: BLE001 - one repository mustn't sink the rest
             return repo, ([], ""), why_failed(exc)
 
@@ -193,7 +218,7 @@ def fetch(kind: str, repos: list[str], limit: int = 30, state: str = "open",
 
 
 def order(rows: list, repos: list[str], newest: bool = True, by_name: bool = False,
-          grouped: bool = False) -> list:
+          grouped: bool = False, descending: bool = False) -> list:
     """Rows newest first (or oldest, or by name), across repositories, or
     ``grouped`` by repository in ``repos`` order with that order inside each.
     Rows with no date (tags) keep the order their repository gave them."""
@@ -201,7 +226,7 @@ def order(rows: list, repos: list[str], newest: bool = True, by_name: bool = Fal
 
     def within(seq: list) -> list:
         if by_name:
-            return sorted(seq, key=name_of)
+            return sorted(seq, key=name_of, reverse=descending)
         dated = [r for r in seq if when_of(r)]
         undated = [r for r in seq if not when_of(r)]
         dated = sorted(dated, key=when_of, reverse=newest)
@@ -210,9 +235,12 @@ def order(rows: list, repos: list[str], newest: bool = True, by_name: bool = Fal
     if not grouped:
         return within(rows)
     out = []
-    for repo in sorted({repo_of(r) for r in rows},
-                       key=lambda name: position.get(name.lower(), len(position))):
-        out.extend(within([r for r in rows if repo_of(r) == repo]))
+    # By the chosen repository each came from, in the chosen order; ties (none
+    # should remain) by name, so the order never changes between runs.
+    sources = sorted({source_of(r).lower() for r in rows},
+                     key=lambda name: (position.get(name, len(position)), name))
+    for source in sources:
+        out.extend(within([r for r in rows if source_of(r).lower() == source]))
     return out
 
 
@@ -222,15 +250,15 @@ def next_repo(rows: list, index: int, step: int) -> int:
     row of that repository's run. -1 when there is none."""
     if not rows or not (0 <= index < len(rows)):
         return -1
-    here = repo_of(rows[index])
+    here = source_of(rows[index]).lower()
     i = index + step
-    while 0 <= i < len(rows) and repo_of(rows[i]) == here:
+    while 0 <= i < len(rows) and source_of(rows[i]).lower() == here:
         i += step
     if not (0 <= i < len(rows)):
         return -1
     if step < 0:
-        there = repo_of(rows[i])
-        while i - 1 >= 0 and repo_of(rows[i - 1]) == there:
+        there = source_of(rows[i]).lower()
+        while i - 1 >= 0 and source_of(rows[i - 1]).lower() == there:
             i -= 1
     return i
 
@@ -245,14 +273,21 @@ def status(result: Result, shown: int) -> str:
     if empty and len(empty) < n:
         text += f" {len(empty)} {'has' if len(empty) == 1 else 'have'} none."
     if result.failed:
-        # In the chosen order, and one reason said once when it's the same
-        # for all (gh signed out, no network), not repeated for each.
-        failed = [(r, result.failed[r]) for r in result.repos if r in result.failed]
-        reasons = {why for _, why in failed}
-        if len(reasons) == 1 and len(failed) > 1:
-            which = (f"any of the {n} repositories" if len(failed) == n
-                     else f"{len(failed)} repositories, {', '.join(r for r, _ in failed)}")
-            text += f" Couldn't read {which}: {reasons.pop()}."
-        else:
-            text += " Couldn't read " + "; ".join(f"{r}: {why}" for r, why in failed) + "."
+        text += " " + failed_text(result)
     return text
+
+
+def failed_text(result: Result) -> str:
+    """The repositories that couldn't be read, in the chosen order, with one
+    reason said once when it's the same for all (gh signed out, no
+    network), not repeated for each. "" when none failed."""
+    failed = [(r, result.failed[r]) for r in result.repos if r in result.failed]
+    if not failed:
+        return ""
+    reasons = {why for _, why in failed}
+    if len(reasons) == 1 and len(failed) > 1:
+        n = len(result.repos)
+        which = (f"any of the {n} repositories" if len(failed) == n
+                 else f"{len(failed)} repositories, {', '.join(r for r, _ in failed)}")
+        return f"Couldn't read {which}: {reasons.pop()}."
+    return "Couldn't read " + "; ".join(f"{r}: {why}" for r, why in failed) + "."

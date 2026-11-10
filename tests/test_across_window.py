@@ -91,6 +91,7 @@ def test_the_mode_is_remembered_and_said(monkeypatch):
     f = _left_frame(_nav_mode=settings.NAV_REPOSITORIES)
     f._repo_list_title = SimpleNamespace(SetLabel=lambda t: rebuilt.append(("title", t)))
     f._update_menu_checks = lambda: None
+    f._apply_nav_keys = lambda: None
     f._nav_title = lambda: Frame._nav_title(f)
     f._on_repos_loaded = lambda repos: Frame._fill_categories(f)
     Frame._set_nav_mode(f, settings.NAV_CATEGORIES)
@@ -184,16 +185,43 @@ def test_a_category_with_none_chosen_asks_first():
 # ── Ctrl+1 to Ctrl+8 ────────────────────────────────────────────────────
 
 
-def test_ctrl_numbers_pick_categories_only_in_categories_mode():
+def test_a_categories_menu_item_opens_its_category_in_either_mode():
     picked = []
     f = _left_frame()
     Frame._fill_categories(f)
-    f._update_menu_checks = lambda: None
     f._select_across = picked.append
-    assert Frame._across_shortcut(f, 2) is True and picked == ["releases"]
+    Frame._across_shortcut(f, 2)
+    assert picked == ["releases"]
     assert f.repo_list.GetClientData(f.repo_list.sel) == V.ACROSS_ENTRY_PREFIX + "releases"
     f._nav_mode = settings.NAV_REPOSITORIES
-    assert Frame._across_shortcut(f, 2) is False and picked == ["releases"]
+    Frame._across_shortcut(f, 3)
+    assert picked == ["releases", "runs"]
+
+
+class FakeMenuBar:
+    def __init__(self):
+        self.labels = {}
+    def SetLabel(self, item_id, label): self.labels[int(item_id)] = label
+
+
+@pytest.mark.parametrize("mode, view_label, kind_label", [
+    (settings.NAV_REPOSITORIES, "Branches\tCtrl+2", "Releases"),
+    (settings.NAV_CATEGORIES, "Branches", "Releases\tCtrl+2"),
+])
+def test_ctrl_numbers_belong_to_one_set_of_items_at_a_time(mode, view_label, kind_label):
+    # The View Mode items never do what they don't say: in Categories mode
+    # their Ctrl+number moves to the Categories items.
+    bar = FakeMenuBar()
+    f = SimpleNamespace(_nav_mode=mode, GetMenuBar=lambda: bar)
+    Frame._apply_nav_keys(f)
+    assert bar.labels[int(V.ID_VIEW_BRANCHES)] == view_label
+    assert bar.labels[int(V.ID_ACROSS_KINDS[1])] == kind_label
+    assert len(bar.labels) == 16
+
+
+def test_view_mode_handlers_have_no_category_detour():
+    import inspect
+    assert "_across_shortcut" not in inspect.getsource(Frame.on_view_branches)
 
 
 # ── A category's list ───────────────────────────────────────────────────
@@ -418,3 +446,96 @@ def test_keys_and_views_are_registered():
     for view in V.ACROSS_VIEWS:
         assert view in V.REPOLESS_VIEWS and view in V.FEED_VIEWS and view in V.GO_TO_REPO_VIEWS
         assert V._view_columns(view).columns[0].id == "repo"
+
+
+# ── Review fixes ────────────────────────────────────────────────────────
+
+
+def _more_frame(view, limit=100):
+    loads, said = [], []
+    f = SimpleNamespace(view_mode=view, repo=None, current_limit=limit, page_size=100,
+                        _tell=said.append, _announce=said.append, said=said, loads=loads)
+    f._load_items = lambda: loads.append(f.current_limit)
+    return f
+
+
+def test_view_more_works_before_any_repository_is_open():
+    settings.save_flag("latest_release_only", True)
+    f = _more_frame(V.ACROSS_VIEW_OF["runs"])
+    Frame.on_view_more(f, None)
+    assert f.loads == [200]
+
+
+def test_view_more_says_when_there_can_be_no_more():
+    f = _more_frame(V.ACROSS_VIEW_OF["releases"])
+    Frame.on_view_more(f, None)
+    assert f.loads == [] and "Latest Release Only" in f.said[0]
+    f = _more_frame(V.ACROSS_VIEW_OF["runs"], limit=400)   # 4 pages: 120 per repository
+    Frame.on_view_more(f, None)
+    assert f.loads == [] and "at most 100" in f.said[0]
+
+
+def test_state_and_filter_reload_a_category_list():
+    f = _more_frame(V.VIEW_ACROSS_ISSUES)
+    Frame._reload_after_filter(f)
+    assert f.loads == [100]
+    f = _more_frame(V.VIEW_ACROSS_ISSUES)
+    f._update_menu_checks = lambda: None
+    f._reload_after_filter = lambda: Frame._reload_after_filter(f)
+    Frame._set_item_filter(f, V.ItemFilter(assignee="@me"))
+    assert f.loads == [100] and f.said == []
+
+
+def test_a_result_for_another_category_is_never_drawn():
+    drawn = []
+    f = SimpleNamespace(view_mode=V.VIEW_ACROSS_ISSUES, _fetch_token=1,
+                        _across_result=across.Result("releases", rows=list(ROWS)),
+                        _focused_item=lambda: None, _tell=lambda m: None,
+                        _on_across_loaded=lambda *a: drawn.append(a))
+    f._across_matches = lambda v: Frame._across_matches(f, v)
+    Frame._reorder_across(f)
+    assert drawn == []
+
+
+def test_delete_on_a_category_entry_removes_nothing(monkeypatch):
+    said = []
+    f = _left_frame()
+    Frame._fill_categories(f)
+    f.repo_list.sel = 2
+    f._announce = said.append
+    Frame.on_remove_repo(f, None)
+    assert said == ["That entry is always in the list."]
+    assert Frame._selected_repository(SimpleNamespace(repo_list=f.repo_list,
+                                                      _announce=said.append)) is None
+
+
+def test_ctrl_o_on_a_row_names_the_item():
+    url, name = Frame._web_target(SimpleNamespace(), ROWS[0])
+    assert url == "ua2" and name == "Two"   # the release, by its title; not "it"
+
+
+def test_choose_offers_the_chosen_names_as_the_list_spells_them(chooser):
+    settings.save_across_repos(["theideaplace/ghmanage"])
+    Frame._ask_across_repos(chooser, ["TheIdeaPlace/GHManage"], "")
+    assert FakeChooser.seen[2] == ["TheIdeaPlace/GHManage, checked"]
+
+
+def test_after_view_more_you_land_on_the_row_you_were_on(monkeypatch):
+    later = []
+    monkeypatch.setattr(V.wx, "CallLater", lambda ms, fn, *a: later.append((fn, a)))
+    f = _list_frame(V.ACROSS_VIEW_OF["releases"])
+    Frame._on_across_loaded(f, 1, across.Result("releases", rows=list(ROWS),
+                                                repos=["o/a", "o/b"]), "ua2")
+    fn, args = later[0]
+    assert args == (1,)   # o/b's v9 first, newest; o/a's v2, where you were, second
+
+
+def test_a_repository_that_couldnt_be_read_is_said_behind_the_row(monkeypatch):
+    later = []
+    monkeypatch.setattr(V.wx, "CallLater", lambda ms, fn, *a: later.append((ms, fn, a)))
+    f = _list_frame(V.ACROSS_VIEW_OF["releases"])
+    Frame._on_across_loaded(f, 1, across.Result("releases", rows=list(ROWS),
+                                                repos=["o/a", "o/b", "o/x"],
+                                                failed={"o/x": "no access"}))
+    spoken = [a for ms, fn, a in later if fn is V.announce.announce]
+    assert spoken and spoken[0][0] == "Couldn't read o/x: no access."

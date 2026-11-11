@@ -949,10 +949,12 @@ class FakeListBox:
     def GetSelection(self): return 0
     def SetString(self, i, s): self.strings[i] = s
     def SetSelection(self, i): pass
+    def Set(self, rows): pass
+    def SetFocus(self): pass
 
 
-def test_space_doesnt_reselect_a_row_that_stayed_selected(monkeypatch):
-    # Selecting it again would give the screen reader another reason to read it.
+def test_space_doesnt_select_the_row_again(monkeypatch):
+    # SetString keeps it selected; selecting it again is another reading.
     monkeypatch.setattr(ghviewer.wx, "Platform", "__WXMSW__")
     selected = []
     box = FakeListBox()
@@ -961,6 +963,51 @@ def test_space_doesnt_reselect_a_row_that_stayed_selected(monkeypatch):
                           summary=SimpleNamespace(SetLabel=lambda s: None), _say=lambda s: None)
     ghviewer.ChecklistDialog.toggle(dlg)
     assert selected == []
+
+
+def _adding(monkeypatch, platform, typed, focus_on_list):
+    """ChecklistDialog.add_new, with ``typed`` entered: what's said at once,
+    and what's said once the row has been read."""
+    monkeypatch.setattr(ghviewer.wx, "Platform", platform)
+    entry = SimpleNamespace(ShowModal=lambda: ghviewer.wx.ID_OK, GetValue=lambda: typed,
+                            Destroy=lambda: None)
+    monkeypatch.setattr(ghviewer.wx, "TextEntryDialog", lambda *a: entry)
+    box = FakeListBox()
+    monkeypatch.setattr(ghviewer.wx.Window, "FindFocus",
+                        staticmethod(lambda: box if focus_on_list else None))
+    now, later = [], []
+    dlg = SimpleNamespace(model=Checklist(["bug"], []), list=box, note=None,
+                          summary=SimpleNamespace(SetLabel=lambda s: None),
+                          _say=now.append, _say_later=later.append,
+                          _new_prompt="", _same_as=lambda typed: [],
+                          GetTitle=lambda: "Set Labels")
+    ghviewer.ChecklistDialog.add_new(dlg)
+    return now, later
+
+
+@pytest.mark.parametrize("focus_on_list", [True, False])
+def test_a_new_row_isnt_said_on_windows_the_screen_reader_reads_it(monkeypatch, focus_on_list):
+    assert _adding(monkeypatch, "__WXMSW__", "triage", focus_on_list) == ([], [])
+
+
+def test_a_new_row_is_said_on_a_mac_when_focus_wont_move(monkeypatch):
+    assert _adding(monkeypatch, "__WXMAC__", "triage", True) == (["triage added, checked"], [])
+    assert _adding(monkeypatch, "__WXMAC__", "triage", False) == ([], [])
+
+
+@pytest.mark.parametrize("platform", ["__WXMSW__", "__WXMAC__"])
+@pytest.mark.parametrize("focus_on_list", [True, False])
+def test_already_listed_is_said_after_the_row(monkeypatch, platform, focus_on_list):
+    # The row alone can't say it was there already.
+    assert _adding(monkeypatch, platform, "BUG", focus_on_list) == (
+        [], ["bug is already listed, now checked"])
+
+
+def test_a_checklists_only_answer_is_said_whatever_speak_results_is(monkeypatch):
+    told = []
+    frame = SimpleNamespace(_tell=lambda msg, force=False: told.append((msg, force)) or True)
+    assert ghviewer.GhViewerFrame._say_always(frame, "bug checked") is True
+    assert told == [("bug checked", True)]
 
 
 @pytest.mark.parametrize("platform, jaws, spoken", [

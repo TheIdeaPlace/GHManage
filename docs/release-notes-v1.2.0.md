@@ -40,8 +40,8 @@ newest first, and every row starts with its repository.
 
 ## Fixed
 
-- With JAWS, pressing `Space` in Set Labels, Set Assignees, Set Projects or Choose
-  Repositories read the row twice. It now reads once.
+- Pressing `Space` in Set Labels, Set Assignees or Set Projects could read the row
+  twice with a screen reader. It now reads once.
 
 ## Before you start
 

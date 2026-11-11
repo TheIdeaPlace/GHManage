@@ -2799,14 +2799,16 @@ class ChecklistDialog(wx.Dialog):
     and OK to save. The rules are ``checklist.Checklist``'s.
 
     A plain list box rather than wx's CheckListBox, whose check boxes are
-    drawn by wx on Windows and not always reported to a screen reader. What
-    Space did is said through ``say``, and the row's new name is announced
-    to the screen reader as well; the summary under the list shows what is
-    checked."""
+    drawn by wx on Windows and not always reported to a screen reader. On
+    Windows a rewritten row is read by the screen reader by itself, so what
+    Space did is said through ``say`` only on a Mac; the summary under the
+    list shows what is checked. ``say_later`` is for words that have to wait
+    until the row has been read."""
 
     def __init__(self, parent: wx.Window, title: str, prompt: str, model: Checklist,
                  say: Callable[[str], bool] | None = None, new_label: str = "",
-                 new_prompt: str = "", note: str = "", same_as=None) -> None:
+                 new_prompt: str = "", note: str = "", same_as=None,
+                 say_later: Callable[[str], object] | None = None) -> None:
         """``new_label`` ("&New Label…") adds a button that asks for a name
         (``new_prompt``) and adds it checked, to be created on save; without
         it, nothing can be added. With nothing listed, focus starts on it,
@@ -2816,6 +2818,7 @@ class ChecklistDialog(wx.Dialog):
         super().__init__(parent, title=title, style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
         self.model = model
         self._say = say or (lambda text: False)
+        self._say_later = say_later or self._say
         self._new_prompt = new_prompt
         self._same_as = same_as or (lambda typed: [])
         outer = wx.BoxSizer(wx.VERTICAL)
@@ -2873,15 +2876,20 @@ class ChecklistDialog(wx.Dialog):
             self._say(f"There are {len(same)} called {name.strip()}; check the one you want.")
             self.list.SetFocus()
             return
+        rows_before = len(self.model)
         row, said = self.model.add(same[0] if same else name)
         self.list.Set(self.model.rows())
         self.list.SetSelection(row)
         self.summary.SetLabel(self.model.summary())
         if self.note is not None:
             self.note.SetLabel("")  # no longer true
-        # Focus on the row reads it ("triage, checked, new"); said as well
-        # only when focus was there already and won't move.
-        if wx.Window.FindFocus() is self.list:
+        # The row is read as it's selected or focused ("triage, checked, new"),
+        # so that isn't said too. "Already listed" isn't in the row, so it is
+        # said once the row has been read. VoiceOver isn't told of a selection
+        # made here, so on a Mac it's said if focus won't move to read it.
+        if len(self.model) == rows_before:
+            self._say_later(said)
+        elif wx.Platform != "__WXMSW__" and wx.Window.FindFocus() is self.list:
             self._say(said)
         self.list.SetFocus()
 
@@ -2897,9 +2905,7 @@ class ChecklistDialog(wx.Dialog):
             wx.Bell()
             return
         said = self.model.toggle(row)
-        self.list.SetString(row, self.model.row(row))
-        if self.list.GetSelection() != row:  # selecting it again would be read again
-            self.list.SetSelection(row)
+        self.list.SetString(row, self.model.row(row))  # keeps the row selected
         self.summary.SetLabel(self.model.summary())
         # On Windows SetString removes and re-adds the row, and the screen
         # reader reads it: NVDA and JAWS both say "bug, checked" by themselves,
@@ -11226,7 +11232,8 @@ class GhViewerFrame(wx.Frame):
         model = Checklist(options, chosen)
         dlg = ChecklistDialog(
             self, "Choose Repositories", "Repositories that Categories mode reads", model,
-            say=self._tell, new_label="&Add Repository…",
+            say=self._say_always, say_later=self._tell_after_box,
+            new_label="&Add Repository…",
             new_prompt="Repository to add, as OWNER/NAME or its address:",
             note="" if options else "No repositories were found to offer; Add Repository adds one.")
         try:
@@ -11626,7 +11633,8 @@ class GhViewerFrame(wx.Frame):
         "unchanged" otherwise, and lets the next change start. ``note``: why
         the list is empty. ``same_as(typed)``: the rows a typed new name
         means already."""
-        dlg = ChecklistDialog(self, title, prompt, model, say=self._tell,
+        dlg = ChecklistDialog(self, title, prompt, model, say=self._say_always,
+                              say_later=self._tell_after_box,
                               new_label=new_label, new_prompt=new_prompt, note=note,
                               same_as=same_as)
         try:
@@ -12375,6 +12383,11 @@ class GhViewerFrame(wx.Frame):
             return False
         self._announce(msg)
         return announce.announce(msg, category, force)
+
+    def _say_always(self, msg: str) -> bool:
+        """``_tell`` whatever Speak Results is: for words that are the only
+        answer to a key, such as Space in a checklist on a Mac."""
+        return self._tell(msg, force=True)
 
     # ── Changed files ───────────────────────────────────────────────────
     #

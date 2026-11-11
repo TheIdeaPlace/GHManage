@@ -2823,8 +2823,10 @@ class ChecklistRows(wx.ListView):
         return self.GetFirstSelected()
 
     def SetSelection(self, row: int) -> None:
-        self.Select(row)
-        self.Focus(row)
+        # One change: selecting and then focusing it was read twice.
+        both = wx.LIST_STATE_SELECTED | wx.LIST_STATE_FOCUSED
+        self.SetItemState(row, both, both)
+        self.EnsureVisible(row)
 
     def SetString(self, row: int, text: str) -> None:
         self._rows[row] = text
@@ -2938,8 +2940,13 @@ class ChecklistDialog(wx.Dialog):
         self.list.SetFocus()
 
     def _on_list_key(self, event: wx.KeyEvent) -> None:
-        if event.GetKeyCode() == wx.WXK_SPACE and not event.HasAnyModifiers():
+        key = event.GetKeyCode()
+        if key == wx.WXK_SPACE and not event.HasAnyModifiers():
             self.toggle()
+            return
+        if (wx.Platform == "__WXMSW__" and key in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER)
+                and not event.HasAnyModifiers()):
+            self.EndModal(wx.ID_OK)  # a list view keeps Enter from the Save button
             return
         event.Skip()
 

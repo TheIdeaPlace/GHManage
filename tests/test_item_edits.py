@@ -1028,6 +1028,33 @@ def test_space_speaks_once_whatever_the_screen_reader(monkeypatch, platform, jaw
     assert said == ["bug checked"]
 
 
+@pytest.mark.parametrize("platform, code, mods, ended", [
+    ("__WXMSW__", ghviewer.wx.WXK_RETURN, False, [ghviewer.wx.ID_OK]),
+    ("__WXMSW__", ghviewer.wx.WXK_NUMPAD_ENTER, False, [ghviewer.wx.ID_OK]),
+    ("__WXMSW__", ghviewer.wx.WXK_RETURN, True, []),      # left to the system
+    ("__WXMAC__", ghviewer.wx.WXK_RETURN, False, []),     # a list box leaves it to Save
+    ("__WXMSW__", ghviewer.wx.WXK_DOWN, False, []),
+])
+def test_enter_in_the_rows_saves_on_windows(monkeypatch, platform, code, mods, ended):
+    monkeypatch.setattr(ghviewer.wx, "Platform", platform)
+    closed, skipped = [], []
+    dlg = SimpleNamespace(EndModal=closed.append, toggle=lambda: pytest.fail("not Space"))
+    event = SimpleNamespace(GetKeyCode=lambda: code, HasAnyModifiers=lambda: mods,
+                            Skip=lambda: skipped.append(True))
+    ghviewer.ChecklistDialog._on_list_key(dlg, event)
+    assert closed == ended
+    assert skipped == ([] if ended else [True])
+
+
+def test_selecting_a_windows_row_is_one_change():
+    # Selecting and then focusing it was read twice.
+    states, shown = [], []
+    rows = SimpleNamespace(SetItemState=lambda *a: states.append(a), EnsureVisible=shown.append)
+    ghviewer.ChecklistRows.SetSelection(rows, 3)
+    both = ghviewer.wx.LIST_STATE_SELECTED | ghviewer.wx.LIST_STATE_FOCUSED
+    assert states == [(3, both, both)] and shown == [3]
+
+
 def test_windows_rows_change_without_rewriting_a_row():
     redrawn, counted = [], []
     rows = SimpleNamespace(_rows=[], SetItemCount=counted.append, Refresh=lambda: None,

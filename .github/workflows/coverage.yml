@@ -1,0 +1,130 @@
+name: Coverage
+
+# Once a week, measures how much of the app the tests run on Windows and macOS
+# (where ghmanage.yml runs them), combines the two, and compares the result
+# with scripts/coverage-baseline.json (scripts/coverage_check.py has the
+# rules). If a file's coverage dropped, it files an issue labelled
+# coverage-regression, or comments on the one already open, rather than a new
+# issue every week (#135). A run can also be started by hand (Actions,
+# Coverage, Run workflow). Its coverage.json is what a new baseline is
+# accepted from (COPILOT.md, "Test coverage").
+
+on:
+  schedule:
+    - cron: '0 13 * * 1'   # Mondays, 13:00 UTC
+  workflow_dispatch:
+  push:
+    branches: [coverage-weekly]   # TEMPORARY: trial runs on this branch
+
+permissions:
+  contents: read
+
+concurrency:
+  group: coverage-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  measure:
+    name: measure (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+          - name: macOS
+            os: macos-latest
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    env:
+      COVERAGE_FILE: .coverage.${{ matrix.name }}
+    steps:
+      # The same actions, Python and installs as the test steps in ghmanage.yml.
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install "pytest>=8,<10" pytest-cov==7.1.0 coverage==7.17.2
+
+      - name: Test
+        run: python -m pytest -q -rs --cov
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: coverage-data-${{ matrix.name }}
+          path: .coverage.${{ matrix.name }}
+          include-hidden-files: true
+          retention-days: 7
+
+  # Only after both measured: a platform whose tests failed would look like a
+  # drop everywhere. A failed test fails the run, which GitHub reports.
+  compare:
+    needs: measure
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: coverage-data-*
+          merge-multiple: true
+
+      - name: Combine
+        run: |
+          python -m pip install coverage==7.17.2
+          python -m coverage combine
+          python -m coverage json -q -o coverage.json
+          python -m coverage html -q -d coverage-html
+
+      - name: Compare with the baseline
+        id: check
+        run: |
+          set +e
+          python scripts/coverage_check.py coverage.json --report coverage-report.md \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          code=$?
+          # 3 is a drop (coverage_check.EXIT_DROPPED); anything else but 0 is
+          # the check itself failing.
+          [ "$code" -eq 0 ] || [ "$code" -eq 3 ] || exit "$code"
+          echo "dropped=$([ "$code" -eq 3 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          cat coverage-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      # Kept even when the check fails, to see why.
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: coverage-report
+          path: |
+            coverage.json
+            coverage-report.md
+            coverage-html
+          if-no-files-found: ignore
+
+      - name: File or update the coverage issue
+        if: steps.check.outputs.dropped == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          open=$(gh issue list --label coverage-regression --state open --json number -q '.[0].number')
+          if [ -n "$open" ]; then
+            gh issue comment "$open" --body-file coverage-report.md
+          else
+            gh issue create --label coverage-regression \
+              --title "Test coverage dropped ($(date -u +%Y-%m-%d))" --body-file coverage-report.md
+          fi

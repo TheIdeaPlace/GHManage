@@ -2793,17 +2793,56 @@ def login_from_choice(text: str) -> str:
     return text.split(" — ", 1)[0].strip().lstrip("@").strip()
 
 
+class ChecklistRows(wx.ListView):
+    """A checklist's rows on Windows, with the calls of the list box it stands
+    in for. Virtual, so a row is redrawn from ``_rows`` and no text changes
+    for a screen reader to see: JAWS read a selected row twice however its
+    text was rewritten (list box, frozen, or a list view's SetItemText)."""
+
+    def __init__(self, parent: wx.Window, rows: list[str], size: tuple[int, int]) -> None:
+        super().__init__(parent, size=size, style=wx.LC_REPORT | wx.LC_VIRTUAL
+                         | wx.LC_SINGLE_SEL | wx.LC_NO_HEADER)
+        self.InsertColumn(0, "", width=size[0])
+        self._rows: list[str] = []
+        self.Set(rows)
+        self.Bind(wx.EVT_SIZE, self._on_size)
+
+    def _on_size(self, event: wx.SizeEvent) -> None:
+        self.SetColumnWidth(0, self.GetClientSize().width)
+        event.Skip()
+
+    def OnGetItemText(self, item: int, column: int) -> str:
+        return self._rows[item] if 0 <= item < len(self._rows) else ""
+
+    def Set(self, rows: list[str]) -> None:
+        self._rows = list(rows)
+        self.SetItemCount(len(self._rows))
+        self.Refresh()
+
+    def GetSelection(self) -> int:
+        return self.GetFirstSelected()
+
+    def SetSelection(self, row: int) -> None:
+        self.Select(row)
+        self.Focus(row)
+
+    def SetString(self, row: int, text: str) -> None:
+        self._rows[row] = text
+        self.RefreshItem(row)
+
+
 class ChecklistDialog(wx.Dialog):
     """Set Labels, Set Assignees and Set Projects (#122): a list where each
     row says whether it is checked ("bug, checked"), Space to change one,
     and OK to save. The rules are ``checklist.Checklist``'s.
 
-    A plain list box rather than wx's CheckListBox, whose check boxes are
-    drawn by wx on Windows and not always reported to a screen reader. On
-    Windows a rewritten row is read by the screen reader by itself, so what
-    Space did is said through ``say`` only on a Mac; the summary under the
-    list shows what is checked. ``say_later`` is for words that have to wait
-    until the row has been read."""
+    The state is in the row's text rather than a CheckListBox's box: JAWS
+    says a native box's state on Space but not on arrowing to the row. Space
+    changes the row without the screen reader seeing it (``ChecklistRows``;
+    VoiceOver isn't told of a list box's change either), so what it did is
+    said once, through ``say``; the summary under the list shows what is
+    checked. ``say_later`` is for words that have to wait until the row has
+    been read."""
 
     def __init__(self, parent: wx.Window, title: str, prompt: str, model: Checklist,
                  say: Callable[[str], bool] | None = None, new_label: str = "",
@@ -2831,7 +2870,13 @@ class ChecklistDialog(wx.Dialog):
             self.note = wx.StaticText(self, label=note.replace("&", "&&"))
             self.note.Wrap(420)
             outer.Add(self.note, 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
-        self.list = wx.ListBox(self, choices=model.rows(), style=wx.LB_SINGLE, size=(420, 280))
+        if wx.Platform == "__WXMSW__":
+            self.list = ChecklistRows(self, model.rows(), (420, 280))
+            self.list.Bind(wx.EVT_LEFT_DCLICK, lambda e: self.toggle())
+        else:
+            self.list = wx.ListBox(self, choices=model.rows(), style=wx.LB_SINGLE,
+                                   size=(420, 280))
+            self.list.Bind(wx.EVT_LISTBOX_DCLICK, lambda e: self.toggle())
         _name(self.list, prompt)
         if len(model):
             self.list.SetSelection(0)
@@ -2853,7 +2898,6 @@ class ChecklistDialog(wx.Dialog):
         self.SetSizerAndFit(outer)
         self.SetEscapeId(wx.ID_CANCEL)
         self.list.Bind(wx.EVT_CHAR_HOOK, self._on_list_key)
-        self.list.Bind(wx.EVT_LISTBOX_DCLICK, lambda e: self.toggle())
         self.CentreOnParent()
         # An empty list reads as nothing at all; start where something can be done.
         first = self.list if len(model) or self.new_button is None else self.new_button
@@ -2907,12 +2951,7 @@ class ChecklistDialog(wx.Dialog):
         said = self.model.toggle(row)
         self.list.SetString(row, self.model.row(row))  # keeps the row selected
         self.summary.SetLabel(self.model.summary())
-        # On Windows SetString removes and re-adds the row, and the screen
-        # reader reads it: NVDA and JAWS both say "bug, checked" by themselves,
-        # so saying it as well is heard twice. VoiceOver isn't told of the
-        # change, so on a Mac it is said.
-        if wx.Platform != "__WXMSW__":
-            self._say(said)
+        self._say(said)  # the only reading: the change itself isn't read
 
 
 # The Permission Needed box's buttons (#129). On a Mac, Escape only works on

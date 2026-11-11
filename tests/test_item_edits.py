@@ -417,7 +417,7 @@ class FakeChecklistDialog:
     shown: list = []
 
     def __init__(self, parent, title, prompt, model, say=None, new_label="", new_prompt="",
-                 note="", same_as=None):
+                 note="", same_as=None, say_later=None):
         FakeChecklistDialog.note = note
         same_as = same_as or (lambda typed: [])
         FakeChecklistDialog.new = (new_label, new_prompt)
@@ -1010,12 +1010,11 @@ def test_a_checklists_only_answer_is_said_whatever_speak_results_is(monkeypatch)
     assert told == [("bug checked", True)]
 
 
-@pytest.mark.parametrize("platform, jaws, spoken", [
-    ("__WXMSW__", False, False),   # NVDA reads the changed row itself
-    ("__WXMSW__", True, False),    # so does JAWS: said as well, it was heard twice
-    ("__WXMAC__", False, True),    # VoiceOver isn't told
-])
-def test_space_speaks_once_whatever_the_screen_reader(monkeypatch, platform, jaws, spoken):
+@pytest.mark.parametrize("platform", ["__WXMSW__", "__WXMAC__"])
+@pytest.mark.parametrize("jaws", [False, True])
+def test_space_speaks_once_whatever_the_screen_reader(monkeypatch, platform, jaws):
+    # The rows change without a screen reader seeing it, so the words are the
+    # one reading (ChecklistRows; a list box's text was read twice by JAWS).
     monkeypatch.setattr(ghviewer.wx, "Platform", platform)
     monkeypatch.setattr(ghviewer.speech, "jaws_running", lambda: jaws)
     monkeypatch.setattr(ghviewer.wx.Accessible, "NotifyEvent",
@@ -1026,7 +1025,21 @@ def test_space_speaks_once_whatever_the_screen_reader(monkeypatch, platform, jaw
                           summary=SimpleNamespace(SetLabel=lambda s: None), _say=said.append)
     ghviewer.ChecklistDialog.toggle(dlg)
     assert dlg.list.strings[0] == "bug, checked"
-    assert said == (["bug checked"] if spoken else [])
+    assert said == ["bug checked"]
+
+
+def test_windows_rows_change_without_rewriting_a_row():
+    redrawn, counted = [], []
+    rows = SimpleNamespace(_rows=[], SetItemCount=counted.append, Refresh=lambda: None,
+                           RefreshItem=redrawn.append, GetFirstSelected=lambda: -1)
+    Rows = ghviewer.ChecklistRows
+    Rows.Set(rows, ["bug, not checked", "docs, checked"])
+    assert counted == [2]
+    Rows.SetString(rows, 0, "bug, checked")
+    assert redrawn == [0]
+    assert Rows.OnGetItemText(rows, 0, 0) == "bug, checked"
+    assert Rows.OnGetItemText(rows, 9, 0) == ""
+    assert Rows.GetSelection(rows) == ghviewer.wx.NOT_FOUND
 
 
 # ── A column for everything that can be set ────────────────────────────

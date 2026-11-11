@@ -2898,13 +2898,14 @@ class ChecklistDialog(wx.Dialog):
             return
         said = self.model.toggle(row)
         self.list.SetString(row, self.model.row(row))
-        self.list.SetSelection(row)
+        if self.list.GetSelection() != row:  # selecting it again would be read again
+            self.list.SetSelection(row)
         self.summary.SetLabel(self.model.summary())
-        # NVDA reads the changed row by itself, from SetString (an NVDA run
-        # heard it three times when a name-change event and this were added).
-        # JAWS ignores a change the app makes, and VoiceOver isn't told of
-        # it, so for those it is said, as the details panel does (PR #107).
-        if wx.Platform != "__WXMSW__" or speech.jaws_running():
+        # On Windows SetString removes and re-adds the row, and the screen
+        # reader reads it: NVDA and JAWS both say "bug, checked" by themselves,
+        # so saying it as well is heard twice. VoiceOver isn't told of the
+        # change, so on a Mac it is said.
+        if wx.Platform != "__WXMSW__":
             self._say(said)
 
 

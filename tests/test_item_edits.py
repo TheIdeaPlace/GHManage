@@ -951,9 +951,21 @@ class FakeListBox:
     def SetSelection(self, i): pass
 
 
+def test_space_doesnt_reselect_a_row_that_stayed_selected(monkeypatch):
+    # Selecting it again would give the screen reader another reason to read it.
+    monkeypatch.setattr(ghviewer.wx, "Platform", "__WXMSW__")
+    selected = []
+    box = FakeListBox()
+    box.SetSelection = selected.append
+    dlg = SimpleNamespace(model=Checklist(["bug"], []), list=box,
+                          summary=SimpleNamespace(SetLabel=lambda s: None), _say=lambda s: None)
+    ghviewer.ChecklistDialog.toggle(dlg)
+    assert selected == []
+
+
 @pytest.mark.parametrize("platform, jaws, spoken", [
     ("__WXMSW__", False, False),   # NVDA reads the changed row itself
-    ("__WXMSW__", True, True),     # JAWS doesn't
+    ("__WXMSW__", True, False),    # so does JAWS: said as well, it was heard twice
     ("__WXMAC__", False, True),    # VoiceOver isn't told
 ])
 def test_space_speaks_once_whatever_the_screen_reader(monkeypatch, platform, jaws, spoken):

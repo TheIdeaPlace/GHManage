@@ -38,6 +38,11 @@ newest first, and every row starts with its repository.
 - In Issues & PRs, the edit keys work as in My Work: `I` milestone, `L` labels,
   `A` assignees, `P` projects and `E` title and description.
 
+## Fixed
+
+- With JAWS, pressing `Space` in Set Labels, Set Assignees, Set Projects or Choose
+  Repositories read the row twice. It now reads once.
+
 ## Before you start
 
 GHManage drives the [GitHub CLI](https://cli.github.com/), so install it and sign

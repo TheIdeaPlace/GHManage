@@ -2793,29 +2793,84 @@ def login_from_choice(text: str) -> str:
     return text.split(" — ", 1)[0].strip().lstrip("@").strip()
 
 
+class ChecklistRows(wx.ListView):
+    """A checklist's rows on Windows, with the calls of the list box it stands
+    in for. Virtual, so a row is redrawn from ``_rows`` and no text changes
+    for a screen reader to see: JAWS read a selected row twice however its
+    text was rewritten (list box, frozen, or a list view's SetItemText)."""
+
+    def __init__(self, parent: wx.Window, rows: list[str], size: tuple[int, int]) -> None:
+        super().__init__(parent, size=size, style=wx.LC_REPORT | wx.LC_VIRTUAL
+                         | wx.LC_SINGLE_SEL | wx.LC_NO_HEADER)
+        self.InsertColumn(0, "", width=size[0])
+        self._rows: list[str] = []
+        self.Bind(wx.EVT_SIZE, self._on_size)
+        self.Set(rows)
+
+    def _on_size(self, event: wx.SizeEvent) -> None:
+        self.fit_column()
+        event.Skip()
+
+    def OnGetItemText(self, item: int, column: int) -> str:
+        return self._rows[item] if 0 <= item < len(self._rows) else ""
+
+    def Set(self, rows: list[str]) -> None:
+        self._rows = list(rows)
+        self.SetItemCount(len(self._rows))
+        self.Refresh()
+
+    def GetSelection(self) -> int:
+        """The selected row, or the focused one: unlike a list box, clicking
+        below the rows leaves nothing selected."""
+        row = self.GetFirstSelected()
+        return row if row != wx.NOT_FOUND else self.GetFocusedItem()
+
+    def fit_column(self) -> None:
+        self.SetColumnWidth(0, self.GetClientSize().width)
+
+    def SetSelection(self, row: int) -> None:
+        # One change: selecting and then focusing it was read twice.
+        both = wx.LIST_STATE_SELECTED | wx.LIST_STATE_FOCUSED
+        self.SetItemState(row, both, both)
+        self.EnsureVisible(row)
+
+    def SetString(self, row: int, text: str) -> None:
+        self._rows[row] = text
+        self.RefreshItem(row)
+
+
 class ChecklistDialog(wx.Dialog):
     """Set Labels, Set Assignees and Set Projects (#122): a list where each
     row says whether it is checked ("bug, checked"), Space to change one,
     and OK to save. The rules are ``checklist.Checklist``'s.
 
-    A plain list box rather than wx's CheckListBox, whose check boxes are
-    drawn by wx on Windows and not always reported to a screen reader. What
-    Space did is said through ``say``, and the row's new name is announced
-    to the screen reader as well; the summary under the list shows what is
-    checked."""
+    The state is in the row's text rather than a CheckListBox's box: JAWS
+    says a native box's state on Space but not on arrowing to the row. Space
+    changes the row without the screen reader seeing it (``ChecklistRows``;
+    VoiceOver isn't told of a list box's change either), so what it did is
+    said once, through ``say``; the summary under the list shows what is
+    checked. ``say_later`` is for words that have to wait until the row has
+    been read."""
 
     def __init__(self, parent: wx.Window, title: str, prompt: str, model: Checklist,
                  say: Callable[[str], bool] | None = None, new_label: str = "",
-                 new_prompt: str = "", note: str = "", same_as=None) -> None:
+                 new_prompt: str = "", note: str = "", same_as=None,
+                 say_later: Callable[[str], object] | None = None,
+                 before_close: Callable[[], object] | None = None) -> None:
         """``new_label`` ("&New Label…") adds a button that asks for a name
         (``new_prompt``) and adds it checked, to be created on save; without
         it, nothing can be added. With nothing listed, focus starts on it,
         and ``note`` (why there is nothing) is shown under the prompt and
         said as the box opens. ``same_as(typed)`` names the rows a typed
-        name already means, when they read differently from it."""
+        name already means, when they read differently from it.
+        ``before_close`` runs on saving, while the box is still open: a list
+        behind it changed then is read once as focus returns, not again as
+        it changes."""
         super().__init__(parent, title=title, style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
         self.model = model
         self._say = say or (lambda text: False)
+        self._say_later = say_later or self._say
+        self._before_close = before_close
         self._new_prompt = new_prompt
         self._same_as = same_as or (lambda typed: [])
         outer = wx.BoxSizer(wx.VERTICAL)
@@ -2823,13 +2878,21 @@ class ChecklistDialog(wx.Dialog):
         text = wx.StaticText(self, label=label)
         text.Wrap(420)
         outer.Add(text, 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
+        if wx.Platform == "__WXMSW__":
+            self.list = ChecklistRows(self, model.rows(), (420, 280))
+            self.list.Bind(wx.EVT_LIST_ITEM_ACTIVATED, lambda e: self.toggle())
+        else:
+            self.list = wx.ListBox(self, choices=model.rows(), style=wx.LB_SINGLE,
+                                   size=(420, 280))
+            self.list.Bind(wx.EVT_LISTBOX_DCLICK, lambda e: self.toggle())
+        _name(self.list, prompt)
         self.note = None
         if note:
+            # Made after the list, though shown above it: Windows names a list
+            # from the text made just before it, which has to be the prompt.
             self.note = wx.StaticText(self, label=note.replace("&", "&&"))
             self.note.Wrap(420)
             outer.Add(self.note, 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
-        self.list = wx.ListBox(self, choices=model.rows(), style=wx.LB_SINGLE, size=(420, 280))
-        _name(self.list, prompt)
         if len(model):
             self.list.SetSelection(0)
         outer.Add(self.list, 1, wx.EXPAND | wx.ALL, 10)
@@ -2843,14 +2906,16 @@ class ChecklistDialog(wx.Dialog):
         buttons = wx.StdDialogButtonSizer()
         ok = wx.Button(self, wx.ID_OK, "&Save")
         ok.SetDefault()
+        ok.Bind(wx.EVT_BUTTON, lambda e: self._finish())
         buttons.AddButton(ok)
         buttons.AddButton(wx.Button(self, wx.ID_CANCEL, "Cancel"))
         buttons.Realize()
         outer.Add(buttons, 0, wx.EXPAND | wx.ALL, 10)
         self.SetSizerAndFit(outer)
+        if isinstance(self.list, ChecklistRows):
+            self.list.fit_column()  # no size event comes if the fit changes nothing
         self.SetEscapeId(wx.ID_CANCEL)
         self.list.Bind(wx.EVT_CHAR_HOOK, self._on_list_key)
-        self.list.Bind(wx.EVT_LISTBOX_DCLICK, lambda e: self.toggle())
         self.CentreOnParent()
         # An empty list reads as nothing at all; start where something can be done.
         first = self.list if len(model) or self.new_button is None else self.new_button
@@ -2870,26 +2935,42 @@ class ChecklistDialog(wx.Dialog):
             dlg.Destroy()
         same = self._same_as(name)
         if len(same) > 1:
-            self._say(f"There are {len(same)} called {name.strip()}; check the one you want.")
+            self._say_later(f"There are {len(same)} called {name.strip()}; "
+                            "check the one you want.")
             self.list.SetFocus()
             return
+        rows_before = len(self.model)
         row, said = self.model.add(same[0] if same else name)
         self.list.Set(self.model.rows())
         self.list.SetSelection(row)
         self.summary.SetLabel(self.model.summary())
         if self.note is not None:
             self.note.SetLabel("")  # no longer true
-        # Focus on the row reads it ("triage, checked, new"); said as well
-        # only when focus was there already and won't move.
-        if wx.Window.FindFocus() is self.list:
+        # The row is read as it's selected or focused ("triage, checked, new"),
+        # so that isn't said too. "Already listed" isn't in the row, so it is
+        # said once the row has been read. VoiceOver isn't told of a selection
+        # made here, so on a Mac it's said if focus won't move to read it.
+        if len(self.model) == rows_before:
+            self._say_later(said)
+        elif wx.Platform != "__WXMSW__" and wx.Window.FindFocus() is self.list:
             self._say(said)
         self.list.SetFocus()
 
     def _on_list_key(self, event: wx.KeyEvent) -> None:
-        if event.GetKeyCode() == wx.WXK_SPACE and not event.HasAnyModifiers():
+        key = event.GetKeyCode()
+        if key == wx.WXK_SPACE and not event.HasAnyModifiers():
             self.toggle()
             return
+        if (wx.Platform == "__WXMSW__" and key in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER)
+                and not event.HasAnyModifiers()):
+            self._finish()  # a list view keeps Enter from the Save button
+            return
         event.Skip()
+
+    def _finish(self) -> None:
+        if self._before_close is not None:
+            self._before_close()
+        self.EndModal(wx.ID_OK)
 
     def toggle(self) -> None:
         row = self.list.GetSelection()
@@ -2897,15 +2978,9 @@ class ChecklistDialog(wx.Dialog):
             wx.Bell()
             return
         said = self.model.toggle(row)
-        self.list.SetString(row, self.model.row(row))
-        self.list.SetSelection(row)
+        self.list.SetString(row, self.model.row(row))  # keeps the row selected
         self.summary.SetLabel(self.model.summary())
-        # NVDA reads the changed row by itself, from SetString (an NVDA run
-        # heard it three times when a name-change event and this were added).
-        # JAWS ignores a change the app makes, and VoiceOver isn't told of
-        # it, so for those it is said, as the details panel does (PR #107).
-        if wx.Platform != "__WXMSW__" or speech.jaws_running():
-            self._say(said)
+        self._say(said)  # the only reading: the change itself isn't read
 
 
 # The Permission Needed box's buttons (#129). On a Mac, Escape only works on
@@ -11223,9 +11298,23 @@ class GhViewerFrame(wx.Frame):
         spelled = {o.lower(): o for o in options}
         chosen = [spelled.get(c.lower(), c) for c in settings.load_across_repos()]
         model = Checklist(options, chosen)
+        picked, bad = [], []
+
+        def keep_chosen() -> None:
+            """Saved, and the left-hand list's count changed, before the box
+            closes; changed after it, that row was read again."""
+            for name in model.chosen():
+                repo = self.across_repo_name(name)
+                (picked if repo else bad).append(repo or name)
+            settings.save_across_repos(picked)
+            if self._nav_mode == settings.NAV_CATEGORIES:
+                self._fill_categories()
+
         dlg = ChecklistDialog(
             self, "Choose Repositories", "Repositories that Categories mode reads", model,
-            say=self._tell, new_label="&Add Repository…",
+            say=self._say_always, before_close=keep_chosen,
+            say_later=lambda msg: self._tell_after_box(msg, force=True),
+            new_label="&Add Repository…",
             new_prompt="Repository to add, as OWNER/NAME or its address:",
             note="" if options else "No repositories were found to offer; Add Repository adds one.")
         try:
@@ -11235,13 +11324,6 @@ class GhViewerFrame(wx.Frame):
         if not saved:
             self._tell_after_box("Repositories unchanged.")
             return
-        picked, bad = [], []
-        for name in model.chosen():
-            repo = self.across_repo_name(name)
-            (picked if repo else bad).append(repo or name)
-        settings.save_across_repos(picked)
-        if self._nav_mode == settings.NAV_CATEGORIES:
-            self._fill_categories()
         said = f"{len(picked)} {'repository' if len(picked) == 1 else 'repositories'} chosen."
         if bad:
             said += f" Not repository names, so left out: {', '.join(bad)}."
@@ -11547,11 +11629,11 @@ class GhViewerFrame(wx.Frame):
     # This was the silence on TheIdeaPlace/AIChat#575.
     AFTER_BOX_MS = 300
 
-    def _tell_after_box(self, msg: str) -> None:
+    def _tell_after_box(self, msg: str, force: bool = False) -> None:
         """The status bar now; said a moment later, behind the row the
         screen reader reads as focus returns rather than over it."""
         self._announce(msg)
-        wx.CallLater(self.AFTER_BOX_MS, announce.announce, msg, announce.RESULT, False, True)
+        wx.CallLater(self.AFTER_BOX_MS, announce.announce, msg, announce.RESULT, force, True)
 
     def _item_edit_failed(self, msg: str, exc: Exception) -> None:
         """In a box as well as the status bar: it answers a key pressed or a
@@ -11625,7 +11707,8 @@ class GhViewerFrame(wx.Frame):
         "unchanged" otherwise, and lets the next change start. ``note``: why
         the list is empty. ``same_as(typed)``: the rows a typed new name
         means already."""
-        dlg = ChecklistDialog(self, title, prompt, model, say=self._tell,
+        dlg = ChecklistDialog(self, title, prompt, model, say=self._say_always,
+                              say_later=lambda msg: self._tell_after_box(msg, force=True),
                               new_label=new_label, new_prompt=new_prompt, note=note,
                               same_as=same_as)
         try:
@@ -12374,6 +12457,11 @@ class GhViewerFrame(wx.Frame):
             return False
         self._announce(msg)
         return announce.announce(msg, category, force)
+
+    def _say_always(self, msg: str) -> bool:
+        """``_tell`` whatever Speak Results is: for words that are the only
+        answer to a key, such as Space in a checklist."""
+        return self._tell(msg, force=True)
 
     # ── Changed files ───────────────────────────────────────────────────
     #

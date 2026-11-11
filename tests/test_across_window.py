@@ -50,6 +50,7 @@ def _left_frame(**kw):
     f._view_entry = lambda v: Frame._view_entry(f, v)
     f._restore_repo_selection = lambda prev: Frame._restore_repo_selection(f, prev)
     f._tell = lambda m, *a, **k: f.said.append(m)
+    f._say_always = f._tell_after_box = f._tell
     return f
 
 
@@ -118,13 +119,17 @@ class FakeChooser:
     seen = None
 
     def __init__(self, parent, title, prompt, model, say=None, new_label="", new_prompt="",
-                 note="", same_as=None):
+                 note="", same_as=None, say_later=None, before_close=None):
         FakeChooser.seen = (title, prompt, model.rows(), new_label, note)
+        self.before_close = before_close
         for n in FakeChooser.add:
             model.add(n)
         for n in FakeChooser.toggle:
             model.toggle(model.names.index(n))
-    def ShowModal(self): return FakeChooser.answer
+    def ShowModal(self):
+        if FakeChooser.answer == V.wx.ID_OK:
+            self.before_close()  # as the Save button and Enter do
+        return FakeChooser.answer
     def Destroy(self): pass
 
 

@@ -23,6 +23,7 @@ else:
 import bugreport  # noqa: E402
 import ghviewer  # noqa: E402
 import speech  # noqa: E402
+from checklist import Checklist  # noqa: E402
 from commands import Command  # noqa: E402
 from gh_columns import COMMIT_SET, TAG_SET  # noqa: E402
 from gh_data import WorkflowInput  # noqa: E402
@@ -164,6 +165,8 @@ def _dialogs(frame):
             frame, "Command Palette", [Command("Quit", "Ctrl+Q", "File", 1)],
             (("Command", 330), ("Shortcut", 150)), lambda c: (c.name, c.keys), palette=True),
         "Delete Repository": lambda: ghviewer.DeleteRepoDialog(frame, "owner/name"),
+        "Checklist": lambda: ghviewer.ChecklistDialog(
+            frame, "Set Labels", "Labels", Checklist(["bug"], [])),
         "Report a Bug": lambda: ghviewer.BugReportDialog(
             frame, "App: GHManage", [bugreport.Attachment("the log", "Log", "line")],
             relay=("", "")),

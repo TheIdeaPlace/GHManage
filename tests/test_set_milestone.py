@@ -161,6 +161,7 @@ def fake_frame(item, view=ghviewer.VIEW_ISSUES, selected=0, repo="o/r"):
     f._current_focus = lambda: None
     f._announce = f.announced.append
     f._tell = lambda msg, *a, **k: f.said.append(msg) or False
+    f._say_always = f._tell
     f._tell_after_box = f.said.append  # the real one waits AFTER_BOX_MS
     f._focused_item = lambda: item
     f._shown = [item]

@@ -41,7 +41,9 @@ newest first, and every row starts with its repository.
 ## Fixed
 
 - Pressing `Space` in Set Labels, Set Assignees or Set Projects could read the row
-  twice with a screen reader. It now reads once.
+  twice with a screen reader. It now reads once, for example "bug checked", and
+  is said even with **View → Speak Results** off, since it's the only answer to
+  the key. Adding a label or project reads its row once as well.
 
 ## Before you start
 
@@ -58,7 +60,8 @@ through `gh`.
 ## Updating
 
 If you already have GHManage installed you do not need to download anything; this
-version will arrive on its own.
+version will arrive on its own. If you've turned off **Help → Automatic Updates**,
+choose **Help → Check for Updates…** to get it.
 
 ## Downloads
 

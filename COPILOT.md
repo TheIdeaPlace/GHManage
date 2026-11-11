@@ -625,7 +625,7 @@ the repository root; `tests/`, `scripts/` and `assets/` are left out (`[tool.cov
 
 A drop files an issue labelled `coverage-regression`, or comments on the one already open. Each
 run's summary page shows the report, and its `coverage-report` download has the per-line HTML.
-Run to run the numbers don't move (three runs of the same code measured the same to the line),
+Run to run the numbers don't move (two runs of the same code measured the same to the line),
 so any change is a real one.
 
 The baseline changes only when it's accepted, so a slow slide is still caught. When a drop is

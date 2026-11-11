@@ -13,8 +13,6 @@ on:
   schedule:
     - cron: '0 13 * * 1'   # Mondays, 13:00 UTC
   workflow_dispatch:
-  push:
-    branches: [coverage-weekly]   # TEMPORARY: trial runs on this branch
 
 permissions:
   contents: read

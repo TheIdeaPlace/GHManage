@@ -610,9 +610,41 @@ in `tests/` talks to GitHub:
 
 Add tests alongside any change; CI runs them before building.
 
+### Test coverage
+
+The **Coverage** workflow (`.github/workflows/coverage.yml`) runs every Monday at 13:00 UTC, or by
+hand (Actions, Coverage, Run workflow). It measures how much of the app the tests run on Windows
+and macOS, lines and branches, and combines the two (#135). What's measured is every module at
+the repository root; `tests/`, `scripts/` and `assets/` are left out (`[tool.coverage]` in
+`pyproject.toml`). `scripts/coverage_check.py` compares the result with
+`scripts/coverage-baseline.json` and flags:
+
+- the whole app falling more than 1 point;
+- a file of 50 statements or more falling more than 5 points;
+- any file, a new one included, with 25 or more statements more that no test runs.
+
+A drop files an issue labelled `coverage-regression`, or comments on the one already open. Each
+run's summary page shows the report, and its `coverage-report` download has the per-line HTML.
+Run to run the numbers don't move (three runs of the same code measured the same to the line),
+so any change is a real one.
+
+The baseline changes only when it's accepted, so a slow slide is still caught. When a drop is
+expected (code moved, tests removed on purpose), or coverage rose and the bar should rise with
+it, download `coverage.json` from a run's `coverage-report` and accept it in a pull request:
+
+```
+gh run download RUN_ID -n coverage-report -D cov
+python scripts/coverage_check.py cov/coverage.json --accept --measured "main at SHA, DATE, run RUN_ID"
+```
+
+To measure locally: `pip install pytest-cov`, then `python -m pytest -q --cov
+--cov-report=term-missing`. One platform alone reads lower than the combined figure, because
+each skips the other's platform-only tests.
+
 ## CI/CD
 
 - `.github/workflows/ghmanage.yml` — runs the tests on Windows and on macOS, then builds `ghmanage.exe` and the Mac app with PyInstaller.
+- `.github/workflows/coverage.yml` — weekly test coverage on Windows and macOS, compared with a baseline (see "Test coverage" above).
 - Triggers on push to `main`, `v*` tags, and PRs to `main`.
 - On tag push: creates a GitHub Release with `ghmanage.exe` attached.
 - Release notes read from `docs/release-notes-<tag>.md`.

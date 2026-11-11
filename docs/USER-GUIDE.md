@@ -473,7 +473,7 @@ The details panel names an item's milestone on a "Milestone:" line and its proje
 
 ### Labels, assignees and projects
 
-`L`, `A` and `P`, or **Actions → Set Labels…**, **Set Assignees…** and **Set Projects…**, each open a list where every row says whether it is checked, for example "bug, checked" or "docs, not checked". Press `Space` to check or uncheck the selected row. You hear the row as it is now, such as "bug, checked", and the line under the list sums up what is checked. Press `Enter` to save, or `Escape` to leave everything as it was. Typing a letter moves to the next row that starts with it.
+`L`, `A` and `P`, or **Actions → Set Labels…**, **Set Assignees…** and **Set Projects…**, each open a list where every row says whether it is checked, for example "bug, checked" or "docs, not checked". Press `Space` to check or uncheck the selected row. You hear its name and what it is now, such as "bug checked", and the line under the list sums up what is checked. Press `Enter` to save, or `Escape` to leave everything as it was. Typing a letter moves to the next row that starts with it.
 
 - **Set Labels** lists the repository's labels, A to Z. The **New Label…** button asks for a name and adds it to the list, checked and marked "new". It is created in light grey when you save, if it is still checked. A name already in the list is checked instead of added twice.
 - **Set Assignees** lists everyone who can be assigned in the repository. Anyone assigned who can no longer be assigned is listed at the end, checked, so you can see them and take them off.

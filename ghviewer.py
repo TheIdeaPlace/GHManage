@@ -2804,11 +2804,11 @@ class ChecklistRows(wx.ListView):
                          | wx.LC_SINGLE_SEL | wx.LC_NO_HEADER)
         self.InsertColumn(0, "", width=size[0])
         self._rows: list[str] = []
-        self.Set(rows)
         self.Bind(wx.EVT_SIZE, self._on_size)
+        self.Set(rows)
 
     def _on_size(self, event: wx.SizeEvent) -> None:
-        self.SetColumnWidth(0, self.GetClientSize().width)
+        self.fit_column()
         event.Skip()
 
     def OnGetItemText(self, item: int, column: int) -> str:
@@ -2820,7 +2820,13 @@ class ChecklistRows(wx.ListView):
         self.Refresh()
 
     def GetSelection(self) -> int:
-        return self.GetFirstSelected()
+        """The selected row, or the focused one: unlike a list box, clicking
+        below the rows leaves nothing selected."""
+        row = self.GetFirstSelected()
+        return row if row != wx.NOT_FOUND else self.GetFocusedItem()
+
+    def fit_column(self) -> None:
+        self.SetColumnWidth(0, self.GetClientSize().width)
 
     def SetSelection(self, row: int) -> None:
         # One change: selecting and then focusing it was read twice.
@@ -2849,17 +2855,22 @@ class ChecklistDialog(wx.Dialog):
     def __init__(self, parent: wx.Window, title: str, prompt: str, model: Checklist,
                  say: Callable[[str], bool] | None = None, new_label: str = "",
                  new_prompt: str = "", note: str = "", same_as=None,
-                 say_later: Callable[[str], object] | None = None) -> None:
+                 say_later: Callable[[str], object] | None = None,
+                 before_close: Callable[[], object] | None = None) -> None:
         """``new_label`` ("&New Label…") adds a button that asks for a name
         (``new_prompt``) and adds it checked, to be created on save; without
         it, nothing can be added. With nothing listed, focus starts on it,
         and ``note`` (why there is nothing) is shown under the prompt and
         said as the box opens. ``same_as(typed)`` names the rows a typed
-        name already means, when they read differently from it."""
+        name already means, when they read differently from it.
+        ``before_close`` runs on saving, while the box is still open: a list
+        behind it changed then is read once as focus returns, not again as
+        it changes."""
         super().__init__(parent, title=title, style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
         self.model = model
         self._say = say or (lambda text: False)
         self._say_later = say_later or self._say
+        self._before_close = before_close
         self._new_prompt = new_prompt
         self._same_as = same_as or (lambda typed: [])
         outer = wx.BoxSizer(wx.VERTICAL)
@@ -2867,19 +2878,21 @@ class ChecklistDialog(wx.Dialog):
         text = wx.StaticText(self, label=label)
         text.Wrap(420)
         outer.Add(text, 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
-        self.note = None
-        if note:
-            self.note = wx.StaticText(self, label=note.replace("&", "&&"))
-            self.note.Wrap(420)
-            outer.Add(self.note, 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
         if wx.Platform == "__WXMSW__":
             self.list = ChecklistRows(self, model.rows(), (420, 280))
-            self.list.Bind(wx.EVT_LEFT_DCLICK, lambda e: self.toggle())
+            self.list.Bind(wx.EVT_LIST_ITEM_ACTIVATED, lambda e: self.toggle())
         else:
             self.list = wx.ListBox(self, choices=model.rows(), style=wx.LB_SINGLE,
                                    size=(420, 280))
             self.list.Bind(wx.EVT_LISTBOX_DCLICK, lambda e: self.toggle())
         _name(self.list, prompt)
+        self.note = None
+        if note:
+            # Made after the list, though shown above it: Windows names a list
+            # from the text made just before it, which has to be the prompt.
+            self.note = wx.StaticText(self, label=note.replace("&", "&&"))
+            self.note.Wrap(420)
+            outer.Add(self.note, 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
         if len(model):
             self.list.SetSelection(0)
         outer.Add(self.list, 1, wx.EXPAND | wx.ALL, 10)
@@ -2893,11 +2906,14 @@ class ChecklistDialog(wx.Dialog):
         buttons = wx.StdDialogButtonSizer()
         ok = wx.Button(self, wx.ID_OK, "&Save")
         ok.SetDefault()
+        ok.Bind(wx.EVT_BUTTON, lambda e: self._finish())
         buttons.AddButton(ok)
         buttons.AddButton(wx.Button(self, wx.ID_CANCEL, "Cancel"))
         buttons.Realize()
         outer.Add(buttons, 0, wx.EXPAND | wx.ALL, 10)
         self.SetSizerAndFit(outer)
+        if isinstance(self.list, ChecklistRows):
+            self.list.fit_column()  # no size event comes if the fit changes nothing
         self.SetEscapeId(wx.ID_CANCEL)
         self.list.Bind(wx.EVT_CHAR_HOOK, self._on_list_key)
         self.CentreOnParent()
@@ -2919,7 +2935,8 @@ class ChecklistDialog(wx.Dialog):
             dlg.Destroy()
         same = self._same_as(name)
         if len(same) > 1:
-            self._say(f"There are {len(same)} called {name.strip()}; check the one you want.")
+            self._say_later(f"There are {len(same)} called {name.strip()}; "
+                            "check the one you want.")
             self.list.SetFocus()
             return
         rows_before = len(self.model)
@@ -2946,9 +2963,14 @@ class ChecklistDialog(wx.Dialog):
             return
         if (wx.Platform == "__WXMSW__" and key in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER)
                 and not event.HasAnyModifiers()):
-            self.EndModal(wx.ID_OK)  # a list view keeps Enter from the Save button
+            self._finish()  # a list view keeps Enter from the Save button
             return
         event.Skip()
+
+    def _finish(self) -> None:
+        if self._before_close is not None:
+            self._before_close()
+        self.EndModal(wx.ID_OK)
 
     def toggle(self) -> None:
         row = self.list.GetSelection()
@@ -11276,9 +11298,22 @@ class GhViewerFrame(wx.Frame):
         spelled = {o.lower(): o for o in options}
         chosen = [spelled.get(c.lower(), c) for c in settings.load_across_repos()]
         model = Checklist(options, chosen)
+        picked, bad = [], []
+
+        def keep_chosen() -> None:
+            """Saved, and the left-hand list's count changed, before the box
+            closes; changed after it, that row was read again."""
+            for name in model.chosen():
+                repo = self.across_repo_name(name)
+                (picked if repo else bad).append(repo or name)
+            settings.save_across_repos(picked)
+            if self._nav_mode == settings.NAV_CATEGORIES:
+                self._fill_categories()
+
         dlg = ChecklistDialog(
             self, "Choose Repositories", "Repositories that Categories mode reads", model,
-            say=self._say_always, say_later=self._tell_after_box,
+            say=self._say_always, before_close=keep_chosen,
+            say_later=lambda msg: self._tell_after_box(msg, force=True),
             new_label="&Add Repository…",
             new_prompt="Repository to add, as OWNER/NAME or its address:",
             note="" if options else "No repositories were found to offer; Add Repository adds one.")
@@ -11289,13 +11324,6 @@ class GhViewerFrame(wx.Frame):
         if not saved:
             self._tell_after_box("Repositories unchanged.")
             return
-        picked, bad = [], []
-        for name in model.chosen():
-            repo = self.across_repo_name(name)
-            (picked if repo else bad).append(repo or name)
-        settings.save_across_repos(picked)
-        if self._nav_mode == settings.NAV_CATEGORIES:
-            self._fill_categories()
         said = f"{len(picked)} {'repository' if len(picked) == 1 else 'repositories'} chosen."
         if bad:
             said += f" Not repository names, so left out: {', '.join(bad)}."
@@ -11601,11 +11629,11 @@ class GhViewerFrame(wx.Frame):
     # This was the silence on TheIdeaPlace/AIChat#575.
     AFTER_BOX_MS = 300
 
-    def _tell_after_box(self, msg: str) -> None:
+    def _tell_after_box(self, msg: str, force: bool = False) -> None:
         """The status bar now; said a moment later, behind the row the
         screen reader reads as focus returns rather than over it."""
         self._announce(msg)
-        wx.CallLater(self.AFTER_BOX_MS, announce.announce, msg, announce.RESULT, False, True)
+        wx.CallLater(self.AFTER_BOX_MS, announce.announce, msg, announce.RESULT, force, True)
 
     def _item_edit_failed(self, msg: str, exc: Exception) -> None:
         """In a box as well as the status bar: it answers a key pressed or a
@@ -11680,7 +11708,7 @@ class GhViewerFrame(wx.Frame):
         the list is empty. ``same_as(typed)``: the rows a typed new name
         means already."""
         dlg = ChecklistDialog(self, title, prompt, model, say=self._say_always,
-                              say_later=self._tell_after_box,
+                              say_later=lambda msg: self._tell_after_box(msg, force=True),
                               new_label=new_label, new_prompt=new_prompt, note=note,
                               same_as=same_as)
         try:
@@ -12432,7 +12460,7 @@ class GhViewerFrame(wx.Frame):
 
     def _say_always(self, msg: str) -> bool:
         """``_tell`` whatever Speak Results is: for words that are the only
-        answer to a key, such as Space in a checklist on a Mac."""
+        answer to a key, such as Space in a checklist."""
         return self._tell(msg, force=True)
 
     # ── Changed files ───────────────────────────────────────────────────

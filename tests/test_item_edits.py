@@ -965,7 +965,7 @@ def test_space_doesnt_select_the_row_again(monkeypatch):
     assert selected == []
 
 
-def _adding(monkeypatch, platform, typed, focus_on_list):
+def _adding(monkeypatch, platform, typed, focus_on_list, same=()):
     """ChecklistDialog.add_new, with ``typed`` entered: what's said at once,
     and what's said once the row has been read."""
     monkeypatch.setattr(ghviewer.wx, "Platform", platform)
@@ -979,7 +979,7 @@ def _adding(monkeypatch, platform, typed, focus_on_list):
     dlg = SimpleNamespace(model=Checklist(["bug"], []), list=box, note=None,
                           summary=SimpleNamespace(SetLabel=lambda s: None),
                           _say=now.append, _say_later=later.append,
-                          _new_prompt="", _same_as=lambda typed: [],
+                          _new_prompt="", _same_as=lambda typed: list(same),
                           GetTitle=lambda: "Set Labels")
     ghviewer.ChecklistDialog.add_new(dlg)
     return now, later
@@ -1003,6 +1003,11 @@ def test_already_listed_is_said_after_the_row(monkeypatch, platform, focus_on_li
         [], ["bug is already listed, now checked"])
 
 
+def test_a_name_two_rows_share_is_said_after_the_row(monkeypatch):
+    assert _adding(monkeypatch, "__WXMSW__", "Board", True, ["Board #1", "Board #2"]) == (
+        [], ["There are 2 called Board; check the one you want."])
+
+
 def test_a_checklists_only_answer_is_said_whatever_speak_results_is(monkeypatch):
     told = []
     frame = SimpleNamespace(_tell=lambda msg, force=False: told.append((msg, force)) or True)
@@ -1011,15 +1016,10 @@ def test_a_checklists_only_answer_is_said_whatever_speak_results_is(monkeypatch)
 
 
 @pytest.mark.parametrize("platform", ["__WXMSW__", "__WXMAC__"])
-@pytest.mark.parametrize("jaws", [False, True])
-def test_space_speaks_once_whatever_the_screen_reader(monkeypatch, platform, jaws):
+def test_space_speaks_once_whatever_the_screen_reader(monkeypatch, platform):
     # The rows change without a screen reader seeing it, so the words are the
     # one reading (ChecklistRows; a list box's text was read twice by JAWS).
     monkeypatch.setattr(ghviewer.wx, "Platform", platform)
-    monkeypatch.setattr(ghviewer.speech, "jaws_running", lambda: jaws)
-    monkeypatch.setattr(ghviewer.wx.Accessible, "NotifyEvent",
-                        lambda *a: pytest.fail("no name-change event: NVDA spoke it twice"),
-                        raising=False)
     said = []
     dlg = SimpleNamespace(model=Checklist(["bug"], []), list=FakeListBox(),
                           summary=SimpleNamespace(SetLabel=lambda s: None), _say=said.append)
@@ -1038,12 +1038,23 @@ def test_space_speaks_once_whatever_the_screen_reader(monkeypatch, platform, jaw
 def test_enter_in_the_rows_saves_on_windows(monkeypatch, platform, code, mods, ended):
     monkeypatch.setattr(ghviewer.wx, "Platform", platform)
     closed, skipped = [], []
-    dlg = SimpleNamespace(EndModal=closed.append, toggle=lambda: pytest.fail("not Space"))
+    dlg = SimpleNamespace(_finish=lambda: closed.append(ghviewer.wx.ID_OK),
+                          toggle=lambda: pytest.fail("not Space"))
     event = SimpleNamespace(GetKeyCode=lambda: code, HasAnyModifiers=lambda: mods,
                             Skip=lambda: skipped.append(True))
     ghviewer.ChecklistDialog._on_list_key(dlg, event)
     assert closed == ended
     assert skipped == ([] if ended else [True])
+
+
+def test_saving_runs_before_close_while_the_box_is_open():
+    order = []
+    dlg = SimpleNamespace(_before_close=lambda: order.append("kept"), EndModal=order.append)
+    ghviewer.ChecklistDialog._finish(dlg)
+    assert order == ["kept", ghviewer.wx.ID_OK]
+    dlg = SimpleNamespace(_before_close=None, EndModal=order.append)
+    ghviewer.ChecklistDialog._finish(dlg)  # most boxes have nothing to do first
+    assert order[-1] == ghviewer.wx.ID_OK
 
 
 def test_selecting_a_windows_row_is_one_change():
@@ -1058,7 +1069,8 @@ def test_selecting_a_windows_row_is_one_change():
 def test_windows_rows_change_without_rewriting_a_row():
     redrawn, counted = [], []
     rows = SimpleNamespace(_rows=[], SetItemCount=counted.append, Refresh=lambda: None,
-                           RefreshItem=redrawn.append, GetFirstSelected=lambda: -1)
+                           RefreshItem=redrawn.append, GetFirstSelected=lambda: -1,
+                           GetFocusedItem=lambda: -1)
     Rows = ghviewer.ChecklistRows
     Rows.Set(rows, ["bug, not checked", "docs, checked"])
     assert counted == [2]

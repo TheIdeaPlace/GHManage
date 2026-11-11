@@ -13,3 +13,10 @@ installer/Releases/
 .DS_Store
 # The bug-report relay's address and key, written for release builds only.
 /_relay_config.py
+# Test coverage output (pytest --cov, and the Coverage workflow's report).
+.coverage
+.coverage.*
+coverage.json
+coverage-report.md
+coverage-html/
+htmlcov/

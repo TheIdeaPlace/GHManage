@@ -454,7 +454,9 @@ The build is `--onedir`, not `--onefile`, and that is not optional — see
 test an upgrade locally, and the code-signing setup.
 
 Tests run with `python -m pytest` (install it with `pip install pytest`). They
-fake the `gh` CLI, so they need no network and no sign-in.
+fake the `gh` CLI, so they need no network and no sign-in. A weekly Coverage
+workflow measures how much of the app they run and flags any file whose coverage
+drops; COPILOT.md, "Test coverage", says how it works.
 
 `assets\` holds the icon stamped into the app, the Start menu shortcut, and
 Setup.exe, plus the two scripts that generate it and the exe's version resource.

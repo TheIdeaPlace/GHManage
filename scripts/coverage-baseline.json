@@ -1,0 +1,145 @@
+{
+ "measured": "main at c063acd, 2026-11-11, run 43017243677",
+ "total": {
+  "statements": 15139,
+  "missing": 3254,
+  "percent": 77.64
+ },
+ "files": {
+  "across.py": {
+   "statements": 186,
+   "missing": 14,
+   "percent": 91.11
+  },
+  "alertview.py": {
+   "statements": 142,
+   "missing": 3,
+   "percent": 94.5
+  },
+  "announce.py": {
+   "statements": 40,
+   "missing": 0,
+   "percent": 100.0
+  },
+  "bugreport.py": {
+   "statements": 432,
+   "missing": 50,
+   "percent": 87.12
+  },
+  "checklist.py": {
+   "statements": 62,
+   "missing": 0,
+   "percent": 100.0
+  },
+  "codeview.py": {
+   "statements": 111,
+   "missing": 0,
+   "percent": 99.36
+  },
+  "columns.py": {
+   "statements": 119,
+   "missing": 0,
+   "percent": 100.0
+  },
+  "commands.py": {
+   "statements": 61,
+   "missing": 0,
+   "percent": 100.0
+  },
+  "compareview.py": {
+   "statements": 78,
+   "missing": 4,
+   "percent": 92.73
+  },
+  "diffview.py": {
+   "statements": 188,
+   "missing": 0,
+   "percent": 100.0
+  },
+  "discussionview.py": {
+   "statements": 110,
+   "missing": 1,
+   "percent": 97.5
+  },
+  "favorites.py": {
+   "statements": 63,
+   "missing": 2,
+   "percent": 97.33
+  },
+  "gh_columns.py": {
+   "statements": 53,
+   "missing": 0,
+   "percent": 100.0
+  },
+  "gh_data.py": {
+   "statements": 3072,
+   "missing": 106,
+   "percent": 94.77
+  },
+  "ghviewer.py": {
+   "statements": 9368,
+   "missing": 2995,
+   "percent": 67.83
+  },
+  "gistview.py": {
+   "statements": 66,
+   "missing": 0,
+   "percent": 100.0
+  },
+  "insightview.py": {
+   "statements": 51,
+   "missing": 1,
+   "percent": 96.0
+  },
+  "milestoneview.py": {
+   "statements": 33,
+   "missing": 0,
+   "percent": 100.0
+  },
+  "peopleview.py": {
+   "statements": 137,
+   "missing": 3,
+   "percent": 96.31
+  },
+  "permissions.py": {
+   "statements": 92,
+   "missing": 3,
+   "percent": 97.41
+  },
+  "pinned_repos.py": {
+   "statements": 53,
+   "missing": 1,
+   "percent": 96.72
+  },
+  "saved_searches.py": {
+   "statements": 41,
+   "missing": 2,
+   "percent": 91.84
+  },
+  "search_help.py": {
+   "statements": 36,
+   "missing": 0,
+   "percent": 100.0
+  },
+  "settings.py": {
+   "statements": 134,
+   "missing": 4,
+   "percent": 96.88
+  },
+  "speech.py": {
+   "statements": 286,
+   "missing": 39,
+   "percent": 84.09
+  },
+  "updater.py": {
+   "statements": 124,
+   "missing": 26,
+   "percent": 78.87
+  },
+  "version.py": {
+   "statements": 1,
+   "missing": 0,
+   "percent": 100.0
+  }
+ }
+}

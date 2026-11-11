@@ -41,3 +41,32 @@ version = { attr = "version.__version__" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+# Test coverage settings, for the weekly Coverage workflow (#135) and for
+# `pytest --cov` by hand. The app is flat modules at the repository root, so
+# the root is measured and everything that isn't the app is left out.
+# relative_files lets the Windows and macOS runs combine into one report.
+# Every measured module is at the root, so their names already agree. A
+# package folder, if the app gains one, needs its two spellings added to
+# [paths] ("pkg/" and "pkg\\"), or Windows' backslash names for its files
+# won't combine with macOS's.
+[tool.coverage.run]
+source = ["."]
+omit = [
+    "tests/*",
+    "scripts/*",
+    "assets/*",
+    "build/*",
+    "dist/*",
+    ".venv/*",
+    ".claude/*",
+    "_relay_config.py",
+]
+branch = true
+relative_files = true
+
+[tool.coverage.paths]
+source = [
+    "./",
+    ".\\",
+]

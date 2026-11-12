@@ -132,6 +132,6 @@ finds it through the catalog, so it says no installed package matches, even with
    Kelly's hands to change; the job runs nothing but checkout, the runner's own `gh`, and
    code-owned scripts; and no step prints it.
 3. The first submission: run **Submit to winget** with the newest version and dry_run off.
-   For a version without the winget copy (1.2.0) the manifest uses `GHManage-win-Setup.exe`.
+   1.2.0 has the winget copy, so its manifest points at `GHManage-1.2.0-win-winget-Setup.exe`.
    The first pull request is a new package, so expect a moderator's review to take longer
    than an update's.

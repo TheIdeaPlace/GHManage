@@ -21,7 +21,7 @@
     winget-only copy, or GHManage-win-Setup.exe for a release that predates the copy.
 
 .EXAMPLE
-    pwsh scripts/winget-manifest.ps1 -Version 1.2.0 -InstallerAsset GHManage-win-Setup.exe -Sha256 4bed... -ReleaseDate 2026-11-11 -OutDir out/1.2.0
+    pwsh scripts/winget-manifest.ps1 -Version 1.2.0 -InstallerAsset GHManage-1.2.0-win-winget-Setup.exe -Sha256 4bed... -ReleaseDate 2026-11-11 -OutDir out/1.2.0
 #>
 [CmdletBinding()]
 param(

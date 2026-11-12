@@ -1,0 +1,111 @@
+name: Add winget copy to a release
+
+# Attaches GHManage-<version>-win-winget-Setup.exe, a byte-identical copy of the release's own
+# GHManage-win-Setup.exe, to a release that was published without it (1.2.0 was the first,
+# issue #137). ghmanage.yml makes the copy itself for every full release, so this is only for
+# filling one in afterwards. Runs on GitHub, so nothing large is uploaded from anyone's PC.
+# Only ever adds a file; it never replaces or deletes one.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release to add the copy to, e.g. 1.2.0'
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  copy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # upload one asset to an existing release
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check the version
+        id: v
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          v="${INPUT_VERSION#v}"
+          if ! [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::The version given is not a release version (X.Y.Z)."
+            exit 1
+          fi
+          # Releases before 1.2.0 deliberately stay without a copy (installer/winget/README.md).
+          if [ "$(printf '%s\n%s\n' 1.2.0 "$v" | sort -V | head -n1)" != "1.2.0" ]; then
+            echo "::error::$v is older than 1.2.0; those releases stay without a winget copy."
+            exit 1
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Download the release's Setup.exe and check it
+        id: src
+        env:
+          V: ${{ steps.v.outputs.version }}
+        run: |
+          copy="GHManage-$V-win-winget-Setup.exe"
+          # Only full releases carry the copy (ghmanage.yml's release check treats one on a
+          # pre-release as an error), and drafts are not on the releases/tags endpoint.
+          kind=$(gh release view "v$V" -R "$GITHUB_REPOSITORY" --json isDraft,isPrerelease \
+            --jq 'if .isDraft then "draft" elif .isPrerelease then "pre-release" else "full" end')
+          if [ "$kind" != "full" ]; then
+            echo "::error::v$V is a $kind; only full releases get a winget copy."
+            exit 1
+          fi
+          digest_of() {
+            gh api "repos/$GITHUB_REPOSITORY/releases/tags/v$V" \
+              --jq ".assets[] | select(.name==\"$1\") | .digest // \"\""
+          }
+          want=$(digest_of GHManage-win-Setup.exe)
+          if [ -z "$want" ]; then
+            echo "::error::v$V has no GHManage-win-Setup.exe digest to copy from."
+            exit 1
+          fi
+          # Already there: fine only if it really is the same bytes. A bad or half-finished
+          # asset is left for a person to remove; this never replaces one.
+          assets=$(gh release view "v$V" -R "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
+          if grep -qxF "$copy" <<< "$assets"; then
+            have=$(digest_of "$copy")
+            if [ "$have" = "$want" ]; then
+              echo "::notice::v$V already has $copy ($have); nothing to do."
+              echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0
+            fi
+            echo "::error::v$V already has $copy, but its digest '$have' is not GHManage-win-Setup.exe's $want. Delete that asset and run this again."
+            exit 1
+          fi
+          gh release download "v$V" -R "$GITHUB_REPOSITORY" -p GHManage-win-Setup.exe -D src
+          got="sha256:$(sha256sum src/GHManage-win-Setup.exe | cut -d' ' -f1)"
+          if [ -z "$want" ] || [ "$want" != "$got" ]; then
+            echo "::error::Downloaded Setup.exe ($got) does not match the release's digest ($want)."
+            exit 1
+          fi
+          mkdir out
+          cp src/GHManage-win-Setup.exe "out/$copy"
+          cmp src/GHManage-win-Setup.exe "out/$copy"
+          echo "copy=$copy" >> "$GITHUB_OUTPUT"
+          echo "digest=$got" >> "$GITHUB_OUTPUT"
+
+      - name: Attach the copy
+        if: steps.src.outputs.skip != 'true'
+        env:
+          V: ${{ steps.v.outputs.version }}
+          COPY: ${{ steps.src.outputs.copy }}
+          WANT: ${{ steps.src.outputs.digest }}
+        run: |
+          gh release upload "v$V" "out/$COPY" -R "$GITHUB_REPOSITORY"
+          # GitHub may fill in the digest a moment after the upload returns.
+          got=""
+          for i in 1 2 3 4 5 6; do
+            got=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/v$V" \
+              --jq ".assets[] | select(.name==\"$COPY\") | .digest // \"\"")
+            [ -n "$got" ] && break
+            sleep 10
+          done
+          if [ "$got" != "$WANT" ]; then
+            echo "::error::Uploaded $COPY has digest '$got', expected $WANT."
+            exit 1
+          fi
+          echo "::notice::Attached $COPY to v$V ($got)."

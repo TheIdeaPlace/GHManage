@@ -18,7 +18,7 @@ Description: |-
   with a screen reader. Browse issues, pull requests, notifications, branches, commits,
   releases, workflow runs, discussions, security alerts and more across your repositories,
   read changed files and code as text, and comment, review and merge without a browser.
-  It works through the GitHub CLI (gh), which winget installs with it if it is missing.
+  It works through the GitHub CLI (gh), which is installed separately (winget install GitHub.cli).
   GHManage itself installs per user without administrator rights and keeps itself up to date.
 Moniker: ghmanage
 Tags:

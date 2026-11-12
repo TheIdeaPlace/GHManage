@@ -32,21 +32,24 @@ Velopack's Setup.exe.
   Setup.exe is an x86 PE image whatever it installs (measured for QuickMail), so the
   architecture is stated, never inferred from the binary, which is one reason this does not
   use wingetcreate, Komac or winget-releaser.
-- **The installer is `GHManage-<version>-win-winget-Setup.exe`.** From the release after
-  1.2.0 on, every full release carries this byte-identical copy of `GHManage-win-Setup.exe`
+- **The installer is `GHManage-<version>-win-winget-Setup.exe`.** Every full release from
+  1.2.0 on carries this byte-identical copy of `GHManage-win-Setup.exe`
   (`ghmanage.yml` makes it; the release job checks the two with `cmp`). Only the winget
   manifest points at it, so its download count on the release is the number of winget
   installs; the website keeps linking `GHManage-win-Setup.exe`. Same bytes, same signature.
   The URL carries the tag, so it stays valid for as long as the release exists, which
   winget-pkgs needs: it keeps older versions' manifests.
-- **Releases from before the copy (1.2.0 and earlier) use `GHManage-win-Setup.exe`.**
+  (1.2.0 was published before that, so its copy is added afterwards by
+  `.github/workflows/winget-copy.yml`, which attaches the copy to an existing release on
+  GitHub's side and checks its digest. Run it before submitting a 1.2.0-or-later full
+  release that is missing its copy; it refuses older versions, drafts and pre-releases.)
+- **Releases without the copy (1.1.0 and earlier) use `GHManage-win-Setup.exe`.**
   `scripts/winget-release.ps1` falls back to it when the copy is missing and says so in the
   log. Their URL is just as stable; their winget installs just are not counted separately.
-- **`Dependencies: GitHub.cli`.** GHManage does everything through `gh` and is no use
-  without it, so winget installs the GitHub CLI first if it is not already there. `gh`'s own
-  package installs machine-wide from an MSI, so on a machine without it the install should
-  ask for elevation once, for `gh`, not for GHManage. Not yet tested: the CI runner already
-  has `gh`. Check it on a clean machine, as a standard user, before relying on it.
+- **No `Dependencies: GitHub.cli`, by decision.** GHManage does everything through `gh`,
+  but declaring it would make winget install the GitHub CLI first, whose package installs
+  machine-wide and so may ask for elevation, and could add a second `gh` beside one from
+  scoop or a zip. Users install `gh` themselves, as the user guide already says.
 - **`Moniker: ghmanage`**, so `winget install ghmanage` works without the full id.
 - **No `PrivacyUrl`.** GHManage has no privacy page; the field is optional.
 
@@ -132,6 +135,6 @@ finds it through the catalog, so it says no installed package matches, even with
    Kelly's hands to change; the job runs nothing but checkout, the runner's own `gh`, and
    code-owned scripts; and no step prints it.
 3. The first submission: run **Submit to winget** with the newest version and dry_run off.
-   For a version without the winget copy (1.2.0) the manifest uses `GHManage-win-Setup.exe`.
+   1.2.0 has the winget copy, so its manifest points at `GHManage-1.2.0-win-winget-Setup.exe`.
    The first pull request is a new package, so expect a moderator's review to take longer
    than an update's.

@@ -8,10 +8,10 @@
     Needs `gh` signed in (GH_TOKEN in CI) with read access to the repository.
 
     The installer is GHManage-<version>-win-winget-Setup.exe, the winget-only copy that
-    ghmanage.yml publishes from the release after 1.2.0 on, so its download count measures
-    winget installs. A release without that copy (1.2.0 and earlier) uses
-    GHManage-win-Setup.exe, the same bytes, whose URL is just as stable because the tag is in
-    it. When both are present they must be byte-identical (their GitHub digests are
+    every full release carries from 1.2.0 on (ghmanage.yml makes it; 1.2.0's is added
+    afterwards by winget-copy.yml), so its download count measures winget installs. A
+    release without that copy (1.1.0 and earlier) uses GHManage-win-Setup.exe, the same
+    bytes, whose URL is just as stable because the tag is in it. When both are present they must be byte-identical (their GitHub digests are
     compared, and the one downloaded is hashed) or nothing is written.
 
     Refuses a draft or a pre-release: only published releases go to winget.

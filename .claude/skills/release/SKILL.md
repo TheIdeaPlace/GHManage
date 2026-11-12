@@ -83,12 +83,17 @@ or deleting a release, needs the user's go-ahead.
 `gh release view vX.Y.Z --json name,isDraft,assets --jq '.name, .isDraft, [.assets[].name]'`
 
 - Name is `GHManage vX.Y.Z`, not a draft, and marked Latest.
-- Assets include `GHManage-win-Setup.exe`, `GHManage-win-Portable.zip`,
+- Assets include `GHManage-win-Setup.exe`, `GHManage-X.Y.Z-win-winget-Setup.exe` (the
+  winget-only copy, full releases only), `GHManage-win-Portable.zip`,
   `GHManage-osx.dmg`, `GHManage-osx-Portable.zip`, and the update feed (`*.nupkg`,
   `RELEASES`, `releases.win.json`, `assets.win.json`, `releases.osx.json`,
   `assets.osx.json`).
 - Nothing else — no files from the repository itself (v0.7.1 once shipped its `assets/`
   folder by accident).
+- The tag run's `winget` job opened a winget-pkgs pull request for `TheIdeaPlace.GHManage`
+  (its log ends with "Opened https://github.com/microsoft/winget-pkgs/pull/…"), or said why
+  it skipped. A moderator merges it later; nothing to do unless validation fails there.
+  See `installer/winget/README.md`.
 
 ## 7. Finish
 

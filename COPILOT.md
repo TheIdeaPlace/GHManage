@@ -649,6 +649,15 @@ each skips the other's platform-only tests.
 - On tag push: creates a GitHub Release with `ghmanage.exe` attached.
 - Release notes read from `docs/release-notes-<tag>.md`.
 - Uses `softprops/action-gh-release@v3`.
+- winget (`TheIdeaPlace.GHManage`, #137): a full release also carries
+  `GHManage-<version>-win-winget-Setup.exe`, a byte-identical copy of the Setup.exe that only
+  the winget manifest points at, so its download count is winget's. After the release, the
+  `winget` job calls `.github/workflows/winget-submit.yml`, which writes the manifests
+  (`scripts/winget-release.ps1` → `scripts/winget-manifest.ps1`, template in
+  `installer/winget/`) and opens the winget-pkgs pull request (`scripts/winget-submit.ps1`,
+  `WINGET_TOKEN` in the `winget` environment). `scripts/winget-manifest.tests.ps1` runs on every
+  push; `.github/workflows/winget-install-test.yml` installs, upgrades and uninstalls the real
+  releases with winget on a runner. `installer/winget/README.md` explains every choice.
 
 ## Release process
 

@@ -182,6 +182,15 @@ jobs:
           # the release does not carry. v0.4.0 shipped that way and its feed
           # still points at GHManage-0.3.0-full.nupkg; harmless for the delta
           # path, but not something to keep doing.
+          #
+          # The winget package installs this copy, never GHManage-win-Setup.exe,
+          # so the copy's download count is the number of winget installs (the
+          # website keeps linking the ordinary one). Same bytes, so the same
+          # signature; versioned, because winget-pkgs keeps every version's URL.
+          # Full releases only: a pre-release is never submitted to winget.
+          if ($version -match '^\d+\.\d+\.\d+$') {
+            Copy-Item installer/Releases/GHManage-win-Setup.exe "installer/Releases/GHManage-$version-win-winget-Setup.exe"
+          }
           Get-ChildItem installer/Releases | Select-Object Name, Length
 
       - name: Upload build artifact
@@ -203,6 +212,7 @@ jobs:
           name: release-windows
           path: |
             installer/Releases/GHManage-win-Setup.exe
+            installer/Releases/GHManage-*-win-winget-Setup.exe
             installer/Releases/GHManage-win-Portable.zip
             installer/Releases/*.nupkg
             installer/Releases/RELEASES
@@ -598,10 +608,26 @@ jobs:
       - name: List assets
         run: |
           ls -la release-assets
-          unexpected=$(ls release-assets | grep -vE '^(GHManage-win-Setup\.exe|GHManage-win-Portable\.zip|GHManage-osx\.dmg|GHManage-osx-Portable\.zip|.*\.nupkg|RELEASES|releases\.(win|osx)\.json|assets\.(win|osx)\.json)$' || true)
+          unexpected=$(ls release-assets | grep -vE '^(GHManage-win-Setup\.exe|GHManage-[0-9]+\.[0-9]+\.[0-9]+-win-winget-Setup\.exe|GHManage-win-Portable\.zip|GHManage-osx\.dmg|GHManage-osx-Portable\.zip|.*\.nupkg|RELEASES|releases\.(win|osx)\.json|assets\.(win|osx)\.json)$' || true)
           if [ -n "$unexpected" ]; then
             echo "ERROR: unexpected files staged for the release:"
             echo "$unexpected"
+            exit 1
+          fi
+
+      # A full release must carry the winget-only installer, and it must be the
+      # very same file as GHManage-win-Setup.exe (installer/winget/README.md).
+      - name: Check the winget installer copy
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          v="${TAG#v}"
+          copy="release-assets/GHManage-$v-win-winget-Setup.exe"
+          if [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            cmp release-assets/GHManage-win-Setup.exe "$copy"
+            echo "$copy is byte-identical to GHManage-win-Setup.exe."
+          elif ls release-assets/*-win-winget-Setup.exe >/dev/null 2>&1; then
+            echo "ERROR: a pre-release carries a winget installer copy."
             exit 1
           fi
 
@@ -627,3 +653,30 @@ jobs:
       pages: write
       id-token: write
     uses: ./.github/workflows/publish-user-guide.yml
+
+  # The winget manifest generator and its template, checked on every pull
+  # request and push, so a change that would break the submission fails here,
+  # not after a release is out.
+  winget-manifest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Test scripts/winget-manifest.ps1 against the template
+        shell: pwsh
+        run: ./scripts/winget-manifest.tests.ps1
+
+  # Submit the release to the winget catalog (TheIdeaPlace.GHManage, #137).
+  # Like publish-guide, a direct call because a GITHUB_TOKEN-made release starts
+  # no workflow. It runs after the release is published, so the installer it
+  # hashes is the one people download. Full releases only: a tag with a
+  # pre-release suffix (v1.3.0-beta.1) is never submitted, and winget-submit.yml
+  # also skips a release marked draft or pre-release. A failure here leaves the
+  # release itself untouched; rerun the job, or run "Submit to winget" by hand.
+  winget:
+    needs: [release, winget-manifest]
+    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
+    uses: ./.github/workflows/winget-submit.yml
+    # No secrets passed: WINGET_TOKEN is an environment secret, which the called
+    # job reads itself through `environment: winget`.
+    permissions:
+      contents: read

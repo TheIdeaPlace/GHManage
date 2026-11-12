@@ -1,0 +1,44 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.28.0.schema.json
+# Installer manifest. See README.md in this folder for why each choice is what it is.
+PackageIdentifier: TheIdeaPlace.GHManage
+PackageVersion: <VERSION>
+# Velopack's Setup.exe, the only Windows installer GHManage ships. `Setup.exe --silent`
+# installs per user to %LocalAppData%\GHManage with no elevation and no UI, does not launch
+# the app, and writes one Add/Remove Programs row. Run over an existing install it overwrites
+# it in place (no uninstall hook runs), which is the upgrade.
+InstallerType: exe
+Scope: user
+InstallModes:
+- silent
+- silentWithProgress
+InstallerSwitches:
+  Silent: --silent
+  SilentWithProgress: --silent
+UpgradeBehavior: install
+ReleaseDate: <RELEASE-DATE>
+# GHManage reads everything through the GitHub CLI and does nothing without it.
+Dependencies:
+  PackageDependencies:
+  - PackageIdentifier: GitHub.cli
+# How winget recognises an installed copy: Velopack's row is
+# HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\GHManage, named after the
+# --packId, with DisplayName from --packTitle and Publisher from --packAuthors
+# (ghmanage.yml's `vpk pack`). For a non-MSI row winget's ProductCode is the key name, so
+# winget lists it as ARP\User\X64\GHManage. Self-updates keep its DisplayVersion current, so
+# winget only offers an upgrade to a copy that really is behind.
+AppsAndFeaturesEntries:
+- DisplayName: GHManage
+  Publisher: Kelly Ford
+  ProductCode: GHManage
+Installers:
+# x64 only: GHManage is built for x64 Windows. Velopack's Setup.exe is itself an x86 PE
+# image whatever it installs, so the architecture is stated here, not inferred.
+# The asset is GHManage-<version>-win-winget-Setup.exe, a byte-identical copy of
+# GHManage-win-Setup.exe published only for winget, so its download count is winget's.
+# Releases before the copy existed fall back to GHManage-win-Setup.exe. (Comments stay at
+# column 0: scripts/winget-manifest.ps1 strips only those.)
+- Architecture: x64
+  InstallerUrl: https://github.com/TheIdeaPlace/GHManage/releases/download/v<VERSION>/<INSTALLER-ASSET>
+  InstallerSha256: <SHA256>
+ManifestType: installer
+ManifestVersion: 1.28.0

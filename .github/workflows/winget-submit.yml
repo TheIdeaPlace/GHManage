@@ -1,0 +1,163 @@
+name: Submit to winget
+
+# Opens the winget-pkgs pull request that adds a GHManage release to the Windows Package
+# Manager catalog (TheIdeaPlace.GHManage, issue #137). Modelled on QuickMail's.
+#
+# The manifests come from scripts/winget-release.ps1, which picks the release's installer
+# (the winget-only copy GHManage-<version>-win-winget-Setup.exe, or GHManage-win-Setup.exe
+# for a release from before the copy existed), hashes it, and has
+# scripts/winget-manifest.ps1 fill the template in installer/winget/, refusing to write one
+# that breaks its rules. Deliberately not wingetcreate, Komac or winget-releaser: they infer
+# the architecture from the binary (Velopack's Setup.exe is an x86 image that installs an
+# x64 app), add codes the package must not have, and would need a release-event trigger
+# that never fires for a release made with GITHUB_TOKEN. scripts/winget-submit.ps1 then
+# opens the pull request through the GitHub API.
+#
+# A moderator at microsoft/winget-pkgs still reviews every pull request, so nothing reaches
+# the catalog from here alone.
+#
+# Secret: WINGET_TOKEN, a classic personal access token of Kelly's with the public_repo
+# scope, in the `winget` environment (deployment branches: main and v* tags only). The pull
+# request comes from his fork of winget-pkgs, so it is his, under the CLA he signed. A
+# fine-grained token cannot open a pull request on a repository its owner does not belong to.
+# See installer/winget/README.md, "Setup".
+
+on:
+  # From ghmanage.yml once a v* tag's release is published. GitHub starts no workflow from a
+  # release made with GITHUB_TOKEN, so a `release` trigger would never fire.
+  workflow_call:
+  # By hand: to submit a release whose automatic submission failed (or the first one), or
+  # with dry_run on, to see the manifests a release would get without submitting anything.
+  # Only the repository owner's account can run it for real: the pull request is opened in
+  # Kelly's name.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release to submit, e.g. 1.2.0 (must already be released)'
+        required: true
+        type: string
+      dry_run:
+        description: 'Only generate and show the manifests; submit nothing'
+        type: boolean
+        default: true
+
+permissions: {}
+
+jobs:
+  submit:
+    runs-on: ubuntu-latest
+    environment: winget
+    permissions:
+      contents: read   # checkout, and download the release's installer
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PACKAGE_ID: TheIdeaPlace.GHManage
+      PACKAGE_DIR: manifests/t/TheIdeaPlace/GHManage
+    steps:
+      - uses: actions/checkout@v7
+
+      # Decided by the input, not the event: in a called workflow github.event_name is the
+      # caller's, and ghmanage.yml can itself be dispatched on a tag, where there is no
+      # `version` input and the tag is the version.
+      - name: Work out the version
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          ACTOR: ${{ github.triggering_actor }}
+        run: |
+          dry=false
+          if [ -n "$INPUT_VERSION" ]; then
+            v="$INPUT_VERSION"
+            [ "$INPUT_DRY_RUN" = "true" ] && dry=true
+            # The repository belongs to an organization, so the owner is not a person; the
+            # pull request is opened with Kelly's token, so only he submits by hand.
+            if [ "$dry" = "false" ] && [ "$ACTOR" != "kellylford" ]; then
+              echo "::error::Only kellylford can submit by hand: the pull request is opened in his name. Run it with dry_run on to see the manifests."
+              exit 1
+            fi
+          elif [ "$REF_TYPE" = "tag" ]; then
+            v="$REF_NAME"
+          else
+            echo "::error::No version: give one, or run on a v* tag."
+            exit 1
+          fi
+          v="${v#v}"
+          if ! [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::'$v' is not a release version (X.Y.Z); pre-releases are not submitted."
+            exit 1
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "dry_run=$dry" >> "$GITHUB_OUTPUT"
+          echo "Version $v, dry run: $dry"
+
+      # Only a published, full release goes to winget. A draft or a pre-release is skipped,
+      # not failed: ghmanage.yml calls this for every v* tag.
+      - name: Check the release
+        id: release
+        env:
+          V: ${{ steps.version.outputs.version }}
+        run: |
+          state=$(gh release view "v$V" -R "$GITHUB_REPOSITORY" --json isDraft,isPrerelease --jq '"\(.isDraft) \(.isPrerelease)"')
+          if [ "$state" != "false false" ]; then
+            echo "::notice::v$V is a draft or a pre-release (isDraft isPrerelease: $state); not submitted to winget."
+            echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      # A version already in the catalog, or already waiting in a pull request, is done: a
+      # second pull request would only be closed as a duplicate. Only a 404 counts as "not
+      # there"; a rate limit or an outage fails the step instead of submitting twice.
+      - name: Check winget-pkgs for this version
+        id: existing
+        if: steps.release.outputs.skip != 'true'
+        env:
+          V: ${{ steps.version.outputs.version }}
+        run: |
+          if err=$(gh api "repos/microsoft/winget-pkgs/contents/$PACKAGE_DIR/$V" --silent 2>&1); then
+            echo "::notice::$PACKAGE_ID $V is already in winget-pkgs; nothing to submit."
+            echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0
+          elif [[ "$err" != *"HTTP 404"* ]]; then
+            echo "::error::Could not check winget-pkgs: $err"
+            exit 1
+          fi
+          # Search is fuzzy, so the title's last word must be exactly this version.
+          open=$(gh pr list -R microsoft/winget-pkgs --state open --search "$PACKAGE_ID $V in:title" \
+              --json url,title --jq '.[] | "\(.title)\t\(.url)"' \
+            | awk -F'\t' -v v="$V" -v id="$PACKAGE_ID" 'index($1, id) { n = split($1, w, " "); if (w[n] == v) { print $2; exit } }')
+          if [ -n "$open" ]; then
+            echo "::notice::A pull request for $PACKAGE_ID $V is already open: $open"
+            echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - name: Write the manifests
+        if: steps.release.outputs.skip != 'true' && steps.existing.outputs.skip != 'true'
+        shell: pwsh
+        env:
+          V: ${{ steps.version.outputs.version }}
+        run: |
+          ./scripts/winget-release.ps1 -Version $env:V -OutDir "out/$env:V" -Repo $env:GITHUB_REPOSITORY
+          Get-ChildItem "out/$env:V" | ForEach-Object { "----- $($_.Name)"; Get-Content $_.FullName }
+
+      - name: Open the winget-pkgs pull request
+        if: steps.release.outputs.skip != 'true' && steps.existing.outputs.skip != 'true' && steps.version.outputs.dry_run != 'true'
+        shell: pwsh
+        env:
+          V: ${{ steps.version.outputs.version }}
+          GH_TOKEN: ${{ secrets.WINGET_TOKEN }}
+          BY_HAND: ${{ inputs.version != '' }}
+        run: |
+          # Until the token exists, a release's automatic run only shows the manifests and
+          # stays green; a submission by hand without it is an error.
+          if (-not $env:GH_TOKEN) {
+            if ($env:BY_HAND -eq 'true') {
+              "::error::WINGET_TOKEN is not set in the winget environment. See installer/winget/README.md, 'Setup'."
+              exit 1
+            }
+            "::warning::WINGET_TOKEN is not set in the winget environment, so $env:V was not submitted to winget. Add it, then run Submit to winget with this version. See installer/winget/README.md, 'Setup'."
+            exit 0
+          }
+          ./scripts/winget-submit.ps1 -Version $env:V -ManifestDir "out/$env:V"

@@ -90,6 +90,14 @@ Each build job, on a `v*` tag:
 The `release` job then downloads both artifacts into one directory and creates
 the GitHub release from them.
 
+**winget.** A full release (`vX.Y.Z`, no pre-release suffix) also carries
+`GHManage-X.Y.Z-win-winget-Setup.exe`, a byte-identical copy of
+`GHManage-win-Setup.exe` (the `release` job checks with `cmp`). Only the winget
+manifest points at it, so its download count is the number of winget installs;
+the website keeps linking the ordinary Setup.exe. The `winget` job then submits
+the release to the winget catalog as `TheIdeaPlace.GHManage`. See
+`installer/winget/README.md`.
+
 **The macOS job does not publish its `RELEASES` file.** `vpk pack` writes that
 legacy Squirrel index on both platforms and its name carries no channel, so the
 two would collide as release assets and whichever uploaded second would replace

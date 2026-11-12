@@ -1,0 +1,119 @@
+name: winget install test
+
+# Installs, upgrades and uninstalls GHManage with winget on a throwaway Windows runner, from
+# the manifests the release pipeline would submit for real releases (issue #137). The
+# checks and the report are in scripts/winget-install-test.ps1; the report is the run's
+# summary and an artifact.
+#
+# Runs on every pull request that changes the winget template or scripts; from ghmanage.yml
+# on every full release, before that release is submitted, so the manifest a submission
+# would send (the winget-only installer copy included) has been installed first; and by hand
+# for any two releases. With no versions given it takes the latest full release and the one
+# before it.
+
+on:
+  workflow_call:
+    inputs:
+      new_version:
+        description: 'Release to install fresh and upgrade to, e.g. 1.2.0 or v1.2.0'
+        type: string
+        required: true
+  pull_request:
+    branches: [main]
+    paths:
+      - 'installer/winget/**'
+      - 'scripts/winget-*.ps1'
+      - '.github/workflows/winget-install-test.yml'
+  workflow_dispatch:
+    inputs:
+      new_version:
+        description: 'Release to install fresh and upgrade to, e.g. 1.2.0 (empty = latest)'
+        required: false
+        default: ''
+      old_version:
+        description: 'Older release to upgrade from, e.g. 1.1.0 (empty = the one before)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Pick the releases
+        id: versions
+        shell: pwsh
+        env:
+          NEW: ${{ inputs.new_version }}
+          OLD: ${{ inputs.old_version }}
+        run: |
+          # Full releases only, highest version first: by version, not date, so a hotfix
+          # on an older line is upgraded from the release just below it, never downgraded.
+          $all = @(gh release list -R $env:GITHUB_REPOSITORY --exclude-drafts --exclude-pre-releases -L 50 --json tagName |
+            ConvertFrom-Json | ForEach-Object { $_.tagName.TrimStart('v') } | Where-Object { $_ -match '^\d+\.\d+\.\d+$' } |
+            Sort-Object { [version]$_ } -Descending)
+          $new = if ($env:NEW) { $env:NEW.TrimStart('v') } else { $all[0] }
+          $at = [array]::IndexOf($all, $new)
+          if ($at -lt 0) { throw "$new is not a published full release." }
+          $old = if ($env:OLD) { $env:OLD.TrimStart('v') } else { $all[$at + 1] }
+          if ($old -eq $new) { throw 'The two releases are the same.' }
+          if (-not $new -or -not $old) { throw "Could not pick two releases (new '$new', old '$old')." }
+          foreach ($v in $new, $old) { if ($v -notmatch '^\d+\.\d+\.\d+$') { throw "'$v' is not a release version (X.Y.Z)." } }
+          "new=$new" >> $env:GITHUB_OUTPUT
+          "old=$old" >> $env:GITHUB_OUTPUT
+          "Upgrade test: $old -> $new"
+
+      # winget is on recent Windows images; if this one lacks it, register or install App
+      # Installer. The same best-effort steps as QuickMail's install matrix.
+      - name: Make winget available
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $wa = "$env:LOCALAPPDATA\Microsoft\WindowsApps"
+          if (Test-Path $wa) { $env:PATH = "$wa;$env:PATH"; "$wa" | Out-File $env:GITHUB_PATH -Append -Encoding utf8 }
+          if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+            Get-AppxPackage -AllUsers Microsoft.DesktopAppInstaller -ErrorAction SilentlyContinue | ForEach-Object {
+              Add-AppxPackage -DisableDevelopmentMode -Register "$($_.InstallLocation)\AppXManifest.xml" -ErrorAction SilentlyContinue
+            }
+          }
+          if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+            $rel = Invoke-RestMethod https://api.github.com/repos/microsoft/winget-cli/releases/latest -Headers @{ 'User-Agent' = 'ghmanage-ci' }
+            $bundle = ($rel.assets | Where-Object name -like '*.msixbundle')[0]
+            $deps = ($rel.assets | Where-Object name -like 'DesktopAppInstaller_Dependencies.zip')[0]
+            if ($deps) {
+              Invoke-WebRequest $deps.browser_download_url -OutFile deps.zip
+              Expand-Archive deps.zip -DestinationPath deps -Force
+              Get-ChildItem deps/x64 -Filter *.appx -ErrorAction SilentlyContinue | ForEach-Object { Add-AppxPackage $_.FullName -ErrorAction SilentlyContinue }
+            }
+            Invoke-WebRequest $bundle.browser_download_url -OutFile winget.msixbundle
+            Add-AppxPackage winget.msixbundle
+          }
+          winget --version
+          if ($LASTEXITCODE -ne 0) { throw 'winget is not available.' }
+          # Installing from a local manifest is off by default and needs an administrator,
+          # which the runner is.
+          winget settings --enable LocalManifestFiles
+          if ($LASTEXITCODE -ne 0) { throw 'Could not enable LocalManifestFiles.' }
+
+      - name: Install, upgrade and uninstall with winget
+        shell: pwsh
+        env:
+          NEW: ${{ steps.versions.outputs.new }}
+          OLD: ${{ steps.versions.outputs.old }}
+        run: ./scripts/winget-install-test.ps1 -NewVersion $env:NEW -OldVersion $env:OLD -Report winget-install-test.md
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: winget-install-test
+          path: winget-install-test.md
+          if-no-files-found: warn
+          retention-days: 30

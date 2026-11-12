@@ -16,10 +16,7 @@ InstallerSwitches:
   SilentWithProgress: --silent
 UpgradeBehavior: install
 ReleaseDate: <RELEASE-DATE>
-# GHManage reads everything through the GitHub CLI and does nothing without it.
-Dependencies:
-  PackageDependencies:
-  - PackageIdentifier: GitHub.cli
+# No Dependencies on GitHub.cli, by decision: see README.md.
 # How winget recognises an installed copy: Velopack's row is
 # HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\GHManage, named after the
 # --packId, with DisplayName from --packTitle and Publisher from --packAuthors

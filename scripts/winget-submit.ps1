@@ -34,10 +34,18 @@ $pkgRoot = 'manifests/t/TheIdeaPlace/GHManage'
 $pkgDir = "$pkgRoot/$Version"
 $branch = "$id-$Version"
 
+# Returns gh's stdout as one string. stderr is kept apart: merged in, a warning on a call
+# that succeeded would end up inside a sha or a URL.
 function Invoke-Gh {
-    $out = & gh @args 2>&1
-    if ($LASTEXITCODE -ne 0) { throw "gh $($args -join ' ') failed: $out" }
-    return $out
+    $errFile = New-TemporaryFile
+    try {
+        $out = & gh @args 2>$errFile
+        $code = $LASTEXITCODE
+        $err = "$(Get-Content -Raw -LiteralPath $errFile)".Trim()
+        if ($code -ne 0) { throw "gh $($args -join ' ') failed: $err $out" }
+        if ($err) { Write-Host "gh $($args[0]) said on stderr: $err" }
+        return (@($out) -join "`n").Trim()
+    } finally { Remove-Item $errFile -ErrorAction SilentlyContinue }
 }
 
 # True if the API path exists, false on 404, and an error for anything else, so a rate
@@ -71,9 +79,13 @@ $fork = "$login/winget-pkgs"
 # and the branch may since carry fixes a moderator asked for. Never push over it. An exact
 # check on the head branch, unlike the workflow's title search, which lags behind pull
 # requests opened minutes ago.
-# --head alone is a prefix search (1.2.1 finds 1.2.10's), so compare the name exactly.
-$existing = Invoke-Gh pr list -R $upstream --author $login --head $branch --state open --json url,headRefName `
-    --jq "[.[] | select(.headRefName == `"$branch`")][0].url // empty"
+# No --author: with it gh switches to the search API, which lags the same way and matches
+# --head as a prefix. --head alone queries pullRequests(headRefName:) directly; the owner
+# is matched here, since other forks can use the same branch name.
+# The --json list must stay quoted: unquoted it is a PowerShell array, which Invoke-Gh's
+# @args hands to gh as the text "System.Object[]".
+$existing = Invoke-Gh pr list -R $upstream --head $branch --state open --json 'url,headRefName,headRepositoryOwner' `
+    --jq "[.[] | select(.headRefName == `"$branch`" and .headRepositoryOwner.login == `"$login`")][0].url // empty"
 if ($existing) {
     Write-Host "::notice::A pull request is already open for ${branch}: $existing"
     return
@@ -81,7 +93,13 @@ if ($existing) {
 
 if (-not (Test-GhPath "repos/$fork")) {
     Invoke-Gh repo fork $upstream --clone=false --default-branch-only | Out-Null
-    foreach ($i in 1..30) { if (Test-GhPath "repos/$fork") { break }; Start-Sleep -Seconds 5 }
+    # A new fork answers on repos/<fork> before its git data is ready, so wait on a ref.
+    $ready = $false
+    foreach ($i in 1..30) {
+        if (Test-GhPath "repos/$fork/git/ref/heads/master") { $ready = $true; break }
+        Start-Sleep -Seconds 5
+    }
+    if (-not $ready) { throw "The fork $fork was created but its master branch is not there yet. Run this again in a few minutes." }
 }
 
 $base = Invoke-Gh api "repos/$upstream/git/ref/heads/master" --jq .object.sha
@@ -108,12 +126,13 @@ $commit = Send-GhJson POST "repos/$fork/git/commits" @{
     message = "$(if ($isNew) { 'New package' } else { 'New version' }): $id version $Version"; tree = $tree; parents = @($base) } 'sha'
 
 # The branch is new, or left over from a run that failed before opening its pull request
-# (checked above), so moving it is safe.
+# (checked above). A leftover is deleted, not moved: moving it from an older upstream base
+# changes every workflow file upstream changed in between, which GitHub refuses without the
+# `workflow` scope this token lacks. Creating a ref on upstream's current commit is fine.
 if (Test-GhPath "repos/$fork/git/ref/heads/$branch") {
-    Send-GhJson PATCH "repos/$fork/git/refs/heads/$branch" @{ sha = $commit; force = $true } | Out-Null
-} else {
-    Send-GhJson POST "repos/$fork/git/refs" @{ ref = "refs/heads/$branch"; sha = $commit } | Out-Null
+    Invoke-Gh api -X DELETE "repos/$fork/git/refs/heads/$branch" --silent | Out-Null
 }
+Send-GhJson POST "repos/$fork/git/refs" @{ ref = "refs/heads/$branch"; sha = $commit } | Out-Null
 Write-Host "Pushed $commit to ${fork}:$branch"
 
 if ($NoPullRequest) { return }

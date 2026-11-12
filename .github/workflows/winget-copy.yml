@@ -1,0 +1,78 @@
+name: Add winget copy to a release
+
+# Attaches GHManage-<version>-win-winget-Setup.exe, a byte-identical copy of the release's own
+# GHManage-win-Setup.exe, to a release that was published without it (1.2.0 was the first,
+# issue #137). ghmanage.yml makes the copy itself for every full release, so this is only for
+# filling one in afterwards. Runs on GitHub, so nothing large is uploaded from anyone's PC.
+# Only ever adds a file; it never replaces or deletes one.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release to add the copy to, e.g. 1.2.0'
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  copy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # upload one asset to an existing release
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check the version
+        id: v
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          v="${INPUT_VERSION#v}"
+          if ! [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::'$INPUT_VERSION' is not a release version (X.Y.Z)."
+            exit 1
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Download the release's Setup.exe and check it
+        id: src
+        env:
+          V: ${{ steps.v.outputs.version }}
+        run: |
+          copy="GHManage-$V-win-winget-Setup.exe"
+          assets=$(gh release view "v$V" -R "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
+          if grep -qxF "$copy" <<< "$assets"; then
+            echo "::notice::v$V already has $copy; nothing to do."
+            echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          gh release download "v$V" -R "$GITHUB_REPOSITORY" -p GHManage-win-Setup.exe -D src
+          want=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/v$V" \
+            --jq '.assets[] | select(.name=="GHManage-win-Setup.exe") | .digest')
+          got="sha256:$(sha256sum src/GHManage-win-Setup.exe | cut -d' ' -f1)"
+          if [ -z "$want" ] || [ "$want" != "$got" ]; then
+            echo "::error::Downloaded Setup.exe ($got) does not match the release's digest ($want)."
+            exit 1
+          fi
+          mkdir out
+          cp src/GHManage-win-Setup.exe "out/$copy"
+          cmp src/GHManage-win-Setup.exe "out/$copy"
+          echo "copy=$copy" >> "$GITHUB_OUTPUT"
+          echo "digest=$got" >> "$GITHUB_OUTPUT"
+
+      - name: Attach the copy
+        if: steps.src.outputs.skip != 'true'
+        env:
+          V: ${{ steps.v.outputs.version }}
+          COPY: ${{ steps.src.outputs.copy }}
+          WANT: ${{ steps.src.outputs.digest }}
+        run: |
+          gh release upload "v$V" "out/$COPY" -R "$GITHUB_REPOSITORY"
+          got=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/v$V" \
+            --jq ".assets[] | select(.name==\"$COPY\") | .digest")
+          if [ "$got" != "$WANT" ]; then
+            echo "::error::Uploaded $COPY has digest '$got', expected $WANT."
+            exit 1
+          fi
+          echo "::notice::Attached $COPY to v$V ($got)."

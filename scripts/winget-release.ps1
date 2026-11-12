@@ -8,8 +8,8 @@
     Needs `gh` signed in (GH_TOKEN in CI) with read access to the repository.
 
     The installer is GHManage-<version>-win-winget-Setup.exe, the winget-only copy that
-    every full release carries from 1.2.0 on (ghmanage.yml makes it; 1.2.0's was uploaded by
-    hand), so its download count measures winget installs. A release without that copy
+    every full release carries from 1.2.0 on (ghmanage.yml makes it; 1.2.0's was added
+    afterwards by winget-copy.yml), so its download count measures winget installs. A release without that copy
     (1.1.0 and earlier) uses
     GHManage-win-Setup.exe, the same bytes, whose URL is just as stable because the tag is in
     it. When both are present they must be byte-identical (their GitHub digests are

@@ -39,7 +39,9 @@ Velopack's Setup.exe.
   installs; the website keeps linking `GHManage-win-Setup.exe`. Same bytes, same signature.
   The URL carries the tag, so it stays valid for as long as the release exists, which
   winget-pkgs needs: it keeps older versions' manifests.
-  (1.2.0 itself got the copy by hand, uploaded to its release after it was published.)
+  (1.2.0 was published before that, and got its copy afterwards from
+  `.github/workflows/winget-copy.yml`, which attaches the copy to an existing release on
+  GitHub's side and checks its digest. Run it the same way for any release missing one.)
 - **Releases without the copy (1.1.0 and earlier) use `GHManage-win-Setup.exe`.**
   `scripts/winget-release.ps1` falls back to it when the copy is missing and says so in the
   log. Their URL is just as stable; their winget installs just are not counted separately.

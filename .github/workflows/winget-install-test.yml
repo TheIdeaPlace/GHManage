@@ -54,9 +54,11 @@ jobs:
           NEW: ${{ inputs.new_version }}
           OLD: ${{ inputs.old_version }}
         run: |
-          # Full releases only, newest first.
-          $all = gh release list -R $env:GITHUB_REPOSITORY --exclude-drafts --exclude-pre-releases -L 50 --json tagName,publishedAt |
-            ConvertFrom-Json | Sort-Object publishedAt -Descending | ForEach-Object { $_.tagName.TrimStart('v') }
+          # Full releases only, highest version first: by version, not date, so a hotfix
+          # on an older line is upgraded from the release just below it, never downgraded.
+          $all = @(gh release list -R $env:GITHUB_REPOSITORY --exclude-drafts --exclude-pre-releases -L 50 --json tagName |
+            ConvertFrom-Json | ForEach-Object { $_.tagName.TrimStart('v') } | Where-Object { $_ -match '^\d+\.\d+\.\d+$' } |
+            Sort-Object { [version]$_ } -Descending)
           $new = if ($env:NEW) { $env:NEW.TrimStart('v') } else { $all[0] }
           $at = [array]::IndexOf($all, $new)
           if ($at -lt 0) { throw "$new is not a published full release." }

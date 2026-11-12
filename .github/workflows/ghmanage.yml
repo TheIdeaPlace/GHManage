@@ -672,8 +672,22 @@ jobs:
   # pre-release suffix (v1.3.0-beta.1) is never submitted, and winget-submit.yml
   # also skips a release marked draft or pre-release. A failure here leaves the
   # release itself untouched; rerun the job, or run "Submit to winget" by hand.
+  #
+  # First, winget installs this release fresh from the manifest a submission
+  # would send, upgrades the previous release to it and uninstalls it, on a
+  # Windows runner (winget-install-test.yml). A failure there stops the
+  # submission, not the release.
+  winget-install-test:
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
+    uses: ./.github/workflows/winget-install-test.yml
+    with:
+      new_version: ${{ github.ref_name }}
+    permissions:
+      contents: read
+
   winget:
-    needs: [release, winget-manifest]
+    needs: [release, winget-manifest, winget-install-test]
     if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
     uses: ./.github/workflows/winget-submit.yml
     # No secrets passed: WINGET_TOKEN is an environment secret, which the called

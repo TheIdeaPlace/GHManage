@@ -89,7 +89,14 @@ $baseTree = Invoke-Gh api "repos/$upstream/git/commits/$base" --jq .tree.sha
 
 # The first version in the catalog is a new package, which winget-pkgs titles and reviews
 # differently from a new version of one already there.
+# While the first one is still in review, a later version is an update to it, not a second
+# new package for the same identifier.
 $isNew = -not (Test-GhPath "repos/$upstream/contents/$pkgRoot")
+if ($isNew) {
+    $pending = Invoke-Gh pr list -R $upstream --author $login --state open --search "$id in:title" `
+        --json title --jq "[.[] | select(.title | startswith(`"New package: $id `"))] | length"
+    if ([int]"$pending" -gt 0) { $isNew = $false }
+}
 
 # One commit holding the three files, on top of upstream's master.
 $entries = foreach ($f in $files) {

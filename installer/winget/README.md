@@ -44,8 +44,9 @@ Velopack's Setup.exe.
   log. Their URL is just as stable; their winget installs just are not counted separately.
 - **`Dependencies: GitHub.cli`.** GHManage does everything through `gh` and is no use
   without it, so winget installs the GitHub CLI first if it is not already there. `gh`'s own
-  package installs machine-wide from an MSI, so on a machine without it the install asks for
-  elevation once, for `gh`, not for GHManage.
+  package installs machine-wide from an MSI, so on a machine without it the install should
+  ask for elevation once, for `gh`, not for GHManage. Not yet tested: the CI runner already
+  has `gh`. Check it on a clean machine, as a standard user, before relying on it.
 - **`Moniker: ghmanage`**, so `winget install ghmanage` works without the full id.
 - **No `PrivacyUrl`.** GHManage has no privacy page; the field is optional.
 
@@ -55,7 +56,10 @@ Velopack's Setup.exe is signed (Azure Trusted Signing, "Kelly Ford"), but a new 
 file has little reputation, and SmartScreen can still ask "Windows protected your PC"
 before it runs. QuickMail measured that a winget install from a *local* manifest met
 SmartScreen for its low-reputation installer; from the catalog the download is in a
-different zone and whether the prompt appears was not measurable before publication. Check
+different zone and whether the prompt appears was not measurable before publication.
+GHManage's signed 1.1.0 and 1.2.0 Setup.exe both installed from a local manifest on a
+Windows Server 2025 runner with no SmartScreen hold-up (install test, PR #138), but a
+server image is not a desktop with SmartScreen's consumer settings. Check
 it after the first version is in the catalog: on a machine that has never had GHManage,
 `winget install ghmanage` and note whether a prompt appears and how a screen reader presents
 it. An unattended install would wait on that prompt.
@@ -79,10 +83,19 @@ calls `.github/workflows/winget-submit.yml`, which:
    It never pushes over a branch that already has an open pull request, which may carry fixes
    a moderator asked for.
 
+Before that, the `winget-install-test` job installs the new release with winget from the
+manifest the submission would send (so the winget-only copy is installed before it is
+submitted), upgrades the previous release to it, and uninstalls it. If that fails, nothing
+is submitted; the release itself stands.
+
+Until `WINGET_TOKEN` exists, the automatic run writes and shows the manifests, warns that
+nothing was submitted, and stays green.
+
 A moderator then approves it. A failed submission leaves the release untouched: rerun the
-job, or run **Submit to winget** by hand with the version. With **dry_run** on (the default)
-anyone can run it, and it only shows the manifests it would submit. Only Kelly can run it
-for real, since the pull request is opened in his name.
+job, or run **Submit to winget** by hand with the version, from `main` (the `winget`
+environment admits only `main` and `v*` tags, dry runs included). With **dry_run** on (the
+default) anyone can run it, and it only shows the manifests it would submit. Only Kelly can
+run it for real, since the pull request is opened in his name.
 
 By hand, the same way CI does it:
 

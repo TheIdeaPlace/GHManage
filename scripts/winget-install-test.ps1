@@ -134,6 +134,19 @@ function Test-Uninstalled([string] $Label) {
     Check ($list.Output -notmatch '\bGHManage\b') 'winget list no longer shows GHManage'
 }
 
+# Passes on a clean validation, or on "succeeded with warnings" (exit code 0x8A150028,
+# -1978335192) when every warning is the schema-header one. A runner's winget older than
+# the manifests' schema (1.11 against 1.28) warns that the header URL "does not match the
+# expected pattern"; winget-pkgs accepts that header, and a current winget gives no warning.
+# Any other warning fails.
+function Test-Validated($Result) {
+    if ($Result.ExitCode -eq 0 -and $Result.Output -match 'validation succeeded') { return $true }
+    if ($Result.ExitCode -ne -1978335192 -or $Result.Output -notmatch 'succeeded with warnings') { return $false }
+    $warnings = @($Result.Output -split "`n" | Where-Object { $_ -match '^Manifest Warning:' })
+    $other = @($warnings | Where-Object { $_ -notmatch 'schema header URL does not match the expected pattern' })
+    return ($warnings.Count -gt 0 -and $other.Count -eq 0)
+}
+
 function Install-Manifest([string] $Dir, [string] $Label) {
     $r = Invoke-Winget @('install', '--manifest', $Dir, '--silent', '--accept-package-agreements',
                          '--accept-source-agreements', '--disable-interactivity')
@@ -158,10 +171,10 @@ try {
 
     Add-Report ''
     Add-Report '## Validate'
-    $v = Invoke-Winget @('validate', '--manifest', $newDir, '--disable-interactivity')
-    Check ($v.ExitCode -eq 0 -and $v.Output -match 'succeeded') "winget validate passes for $NewVersion"
-    $v = Invoke-Winget @('validate', '--manifest', $oldDir, '--disable-interactivity')
-    Check ($v.ExitCode -eq 0 -and $v.Output -match 'succeeded') "winget validate passes for $OldVersion"
+    foreach ($pair in @(@($newDir, $NewVersion), @($oldDir, $OldVersion))) {
+        $v = Invoke-Winget @('validate', '--manifest', $pair[0], '--disable-interactivity')
+        Check (Test-Validated $v) "winget validate passes for $($pair[1])"
+    }
 
     $before = Show-State 'Before anything is installed'
     if ($before.Count) { throw 'GHManage is already installed on this machine; this test needs a clean one.' }

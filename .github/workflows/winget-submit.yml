@@ -148,9 +148,16 @@ jobs:
         env:
           V: ${{ steps.version.outputs.version }}
           GH_TOKEN: ${{ secrets.WINGET_TOKEN }}
+          BY_HAND: ${{ inputs.version != '' }}
         run: |
+          # Until the token exists, a release's automatic run only shows the manifests and
+          # stays green; a submission by hand without it is an error.
           if (-not $env:GH_TOKEN) {
-            "::error::WINGET_TOKEN is not set in the winget environment. See installer/winget/README.md, 'Setup'."
-            exit 1
+            if ($env:BY_HAND -eq 'true') {
+              "::error::WINGET_TOKEN is not set in the winget environment. See installer/winget/README.md, 'Setup'."
+              exit 1
+            }
+            "::warning::WINGET_TOKEN is not set in the winget environment, so $env:V was not submitted to winget. Add it, then run Submit to winget with this version. See installer/winget/README.md, 'Setup'."
+            exit 0
           }
           ./scripts/winget-submit.ps1 -Version $env:V -ManifestDir "out/$env:V"

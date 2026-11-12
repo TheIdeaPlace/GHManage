@@ -5,11 +5,19 @@ name: winget install test
 # checks and the report are in scripts/winget-install-test.ps1; the report is the run's
 # summary and an artifact.
 #
-# Runs on every pull request that changes the winget template or scripts, and by hand for
-# any two releases. With no versions given it takes the latest full release and the one
+# Runs on every pull request that changes the winget template or scripts; from ghmanage.yml
+# on every full release, before that release is submitted, so the manifest a submission
+# would send (the winget-only installer copy included) has been installed first; and by hand
+# for any two releases. With no versions given it takes the latest full release and the one
 # before it.
 
 on:
+  workflow_call:
+    inputs:
+      new_version:
+        description: 'Release to install fresh and upgrade to, e.g. 1.2.0 or v1.2.0'
+        type: string
+        required: true
   pull_request:
     branches: [main]
     paths:
@@ -49,8 +57,11 @@ jobs:
           # Full releases only, newest first.
           $all = gh release list -R $env:GITHUB_REPOSITORY --exclude-drafts --exclude-pre-releases -L 50 --json tagName,publishedAt |
             ConvertFrom-Json | Sort-Object publishedAt -Descending | ForEach-Object { $_.tagName.TrimStart('v') }
-          $new = if ($env:NEW) { $env:NEW } else { $all[0] }
-          $old = if ($env:OLD) { $env:OLD } else { $all[[array]::IndexOf($all, $new) + 1] }
+          $new = if ($env:NEW) { $env:NEW.TrimStart('v') } else { $all[0] }
+          $at = [array]::IndexOf($all, $new)
+          if ($at -lt 0) { throw "$new is not a published full release." }
+          $old = if ($env:OLD) { $env:OLD.TrimStart('v') } else { $all[$at + 1] }
+          if ($old -eq $new) { throw 'The two releases are the same.' }
           if (-not $new -or -not $old) { throw "Could not pick two releases (new '$new', old '$old')." }
           foreach ($v in $new, $old) { if ($v -notmatch '^\d+\.\d+\.\d+$') { throw "'$v' is not a release version (X.Y.Z)." } }
           "new=$new" >> $env:GITHUB_OUTPUT

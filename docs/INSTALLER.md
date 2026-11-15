@@ -233,14 +233,23 @@ Windows. With none set the build still succeeds and publishes, ad-hoc signed,
 with a workflow warning — a half-configured signing setup must not be able to
 block a release.
 
-**To set them, run `scripts/setup_macos_secrets.sh`.** It discovers everything
-on the signing Mac — the Developer ID certificate from the login keychain, and
-the notary key, key id and issuer id from `~/.fastweather-keys/asc.json` — then
-verifies the credentials against Apple and uploads the five secrets. Do not
-gather them by hand: nothing about them is specific to this repo, and the same
-five values already back Image-Description-Toolkit. GitHub never reveals a
-secret's value once set, which is why they must be re-derived from those local
-files rather than copied between repositories.
+**The five secrets this build uses are TheIdeaPlace organization secrets, not
+repository secrets.** They are `MACOS_CERTIFICATE_P12`,
+`MACOS_CERTIFICATE_PASSWORD`, `NOTARY_KEY_P8`, `NOTARY_KEY_ID` and
+`NOTARY_ISSUER_ID`. The organization shares them with GHManage and the other
+apps that sign for the Mac. Nobody sets them in this repo by hand. Their values
+live in the signing kit, an Azure Key Vault, and `signing/sync-secrets.py
+--apply` in kellylford/The-Idea-Place-Projects sets them from it. A renewed
+certificate is one run of that script, and every repo picks it up. See
+[signing/README.md](https://github.com/kellylford/The-Idea-Place-Projects/blob/main/signing/README.md)
+for the kit, the secrets, and how to renew or recover them.
+
+Do not add a repository secret with any of those five names. A repository
+secret wins over the organization secret of the same name, so a stale copy here
+would quietly override the real one.
+
+The `MACOS_INSTALLER_*` secrets are not in the kit or the organization yet:
+there is no Developer ID Installer certificate, so the `.pkg` stays unsigned.
 
 | Secret | Purpose |
 |--------|---------|
@@ -287,11 +296,27 @@ window, with nothing in the UI to say why.
 
 ### Signing locally
 
+Local signing uses the signing kit on the Mac, the folder `~/.signing-kit/`:
+
+- `asc-api-key.p8` is the App Store Connect API key, Key ID `38ANZ53D9L`,
+  issuer `d36bb41d-a198-401d-b36c-2e4fd15163e1`.
+- `developer-id-application.p12` is the Developer ID Application certificate.
+  To sign, it must also be imported into the login keychain.
+- The `.p12` passwords are in the macOS Keychain, service `signing-kit`.
+
+If the Mac has no kit, `python3 signing/sync-secrets.py pull-kit`, run from a
+clone of kellylford/The-Idea-Place-Projects after `az login`, recreates it from
+the vault. Its
+[signing/README.md](https://github.com/kellylford/The-Idea-Place-Projects/blob/main/signing/README.md)
+has the details.
+
+Then build, sign and notarize with:
+
 ```bash
 GHM_SIGN_CODE=1 GHM_NOTARIZE=1 \
-  NOTARY_KEY_PATH=~/AuthKey_XXXXXXXXXX.p8 \
-  NOTARY_KEY_ID=XXXXXXXXXX \
-  NOTARY_ISSUER_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx \
+  NOTARY_KEY_PATH=~/.signing-kit/asc-api-key.p8 \
+  NOTARY_KEY_ID=38ANZ53D9L \
+  NOTARY_ISSUER_ID=d36bb41d-a198-401d-b36c-2e4fd15163e1 \
   ./build.sh installer
 ```
 
@@ -300,6 +325,11 @@ those API-key values, so there is one credential source rather than two. If you
 already have a profile, set `GHM_NOTARY_PROFILE` instead. With nothing set the
 build is ad-hoc signed: it runs on the machine that built it, and macOS refuses
 to open it after a download.
+
+To notarize a single file on its own, `bash scripts/notarize_macos.sh <file>`
+needs no settings on a Mac with the kit. With no credentials set, it uses
+`~/.signing-kit/asc-api-key.p8` with the Key ID and issuer above. Setting
+`NOTARY_PROFILE` or the `NOTARY_KEY_*` variables still overrides that.
 
 ## Code signing (Windows)
 

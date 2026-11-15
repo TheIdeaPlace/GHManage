@@ -26,15 +26,17 @@
 #     NOTARY_PASSWORD     App-specific password (NOT the account password)
 #     NOTARY_TEAM_ID      Team ID, e.g. P887QF74N8
 #
-# Local default: on a Mac with the signing kit, nothing needs setting. When
-# none of NOTARY_PROFILE, NOTARY_KEY_PATH or NOTARY_APPLE_ID is set and the
-# kit's API key exists (~/.signing-kit/asc-api-key.p8, or $SIGNING_KIT/...),
-# the script uses it, with Key ID 38ANZ53D9L and issuer
-# d36bb41d-a198-401d-b36c-2e4fd15163e1 unless NOTARY_KEY_ID or
-# NOTARY_ISSUER_ID say otherwise. To recreate the kit on a Mac, run
-# `python3 signing/sync-secrets.py pull-kit` from
-# kellylford/The-Idea-Place-Projects; its signing/README.md explains the kit.
-# CI never uses this default: it passes NOTARY_PROFILE or NOTARY_KEY_* itself.
+# Local default: on a Mac with the signing kit, NOTARY_KEY_PATH can be left
+# unset. When neither NOTARY_PROFILE nor NOTARY_KEY_PATH is set and the kit's
+# API key exists (~/.signing-kit/asc-api-key.p8, or $SIGNING_KIT/...), the
+# script uses that file. NOTARY_KEY_ID and NOTARY_ISSUER_ID are still needed;
+# they are not secret, but they are kept out of this public repo. Both are in
+# signing/README.md and signing/repos.json in Kelly's private projects repo,
+# where `python3 signing/sync-secrets.py pull-kit` recreates the kit.
+#
+# The default applies only when this script runs on its own. build.sh checks
+# for credentials itself and still needs GHM_NOTARY_PROFILE, or all three
+# NOTARY_KEY_* variables. CI passes those explicitly and never uses the kit.
 #
 # Stapling note: `stapler` works on .app, .dmg and .pkg, but NOT on a bare
 # executable or a .zip. A zip gets its ticket by way of the .app inside it
@@ -60,15 +62,12 @@ fi
 # ----------------------------------------------------------------------------
 CRED_ARGS=()
 
-# The signing kit's App Store Connect API key, used only when the caller chose
-# no credentials at all.
+# The signing kit's App Store Connect API key, used as NOTARY_KEY_PATH when no
+# profile or key file was given.
 KIT_KEY="${SIGNING_KIT:-$HOME/.signing-kit}/asc-api-key.p8"
-if [ -z "${NOTARY_PROFILE:-}" ] && [ -z "${NOTARY_KEY_PATH:-}" ] \
-        && [ -z "${NOTARY_APPLE_ID:-}" ] && [ -f "$KIT_KEY" ]; then
-    echo "Using the signing kit's API key: $KIT_KEY"
+if [ -z "${NOTARY_PROFILE:-}" ] && [ -z "${NOTARY_KEY_PATH:-}" ] && [ -f "$KIT_KEY" ]; then
+    echo "Found the signing kit's API key file: $KIT_KEY"
     NOTARY_KEY_PATH="$KIT_KEY"
-    NOTARY_KEY_ID="${NOTARY_KEY_ID:-38ANZ53D9L}"
-    NOTARY_ISSUER_ID="${NOTARY_ISSUER_ID:-d36bb41d-a198-401d-b36c-2e4fd15163e1}"
 fi
 
 if [ -n "${NOTARY_PROFILE:-}" ]; then
@@ -97,8 +96,9 @@ else
     echo "  NOTARY_PROFILE                                       (keychain profile)"
     echo "  NOTARY_KEY_PATH + NOTARY_KEY_ID + NOTARY_ISSUER_ID   (API key)"
     echo "  NOTARY_APPLE_ID + NOTARY_PASSWORD + NOTARY_TEAM_ID   (Apple ID)"
-    echo "or put the signing kit at ${SIGNING_KIT:-$HOME/.signing-kit}"
-    echo "(sync-secrets.py pull-kit, in kellylford/The-Idea-Place-Projects)."
+    echo "With the signing kit at ${SIGNING_KIT:-$HOME/.signing-kit},"
+    echo "NOTARY_KEY_ID + NOTARY_ISSUER_ID are enough (see signing/README.md"
+    echo "in the private projects repo)."
     exit 1
 fi
 

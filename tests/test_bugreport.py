@@ -715,6 +715,30 @@ def test_thread_exceptions_still_reach_the_previous_hook(fresh_log, monkeypatch)
     assert seen == [ZeroDivisionError]
 
 
+def test_a_fatal_exception_is_logged_once_though_the_excepthook_runs_too(fresh_log, monkeypatch):
+    # #142: main() logs what stopped it; from source, Python's excepthook
+    # then runs as well, and mustn't log it a second time.
+    monkeypatch.setattr(sys, "excepthook", lambda *a: None)
+    monkeypatch.setattr(threading, "excepthook", lambda args: None)
+    bugreport.install_handlers()
+    try:
+        raise LookupError("once only")
+    except LookupError as exc:
+        bugreport.record_fatal(exc, "starting GHManage")
+        sys.excepthook(type(exc), exc, exc.__traceback__)
+    for h in bugreport.log.handlers:
+        h.flush()
+    text = (fresh_log / bugreport.LOG_NAME).read_text(encoding="utf-8")
+    assert text.count("LookupError: once only") == 1
+    assert "Unhandled exception in starting GHManage" in text
+
+
+def test_a_fatal_exit_is_not_recorded(fresh_log):
+    bugreport.record_fatal(SystemExit(0), "starting GHManage")
+    assert bugreport.last_error is None
+    assert not (fresh_log / bugreport.LOG_NAME).exists()
+
+
 def test_report_bug_gathers_off_the_ui_thread_and_opens_once(monkeypatch):
     from types import SimpleNamespace
     calls, shown = [], []

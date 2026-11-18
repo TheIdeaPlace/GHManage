@@ -537,11 +537,20 @@ def configure_log() -> None:
         faulthandler.enable(file=_crash_file, all_threads=True)
     except Exception:
         pass
+    _add_log_handler()
+
+
+def _add_log_handler() -> None:
+    """The rotated log file, once. Separate from configure_log so a failure
+    before it ran can still be written down without emptying crash.txt."""
     try:
         folder = log_folder()
+        path = os.path.abspath(folder / LOG_NAME)
+        if any(getattr(h, "baseFilename", None) == path for h in log.handlers):
+            return
         folder.mkdir(parents=True, exist_ok=True)
         handler = logging.handlers.RotatingFileHandler(
-            folder / LOG_NAME, maxBytes=LOG_BYTES, backupCount=LOG_BACKUPS, encoding="utf-8")
+            path, maxBytes=LOG_BYTES, backupCount=LOG_BACKUPS, encoding="utf-8")
         handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
         log.addHandler(handler)
         log.setLevel(logging.INFO)
@@ -563,6 +572,29 @@ def record_exception(exc_type, exc, tb, where: str = "") -> None:
         pass
 
 
+def record_fatal(exc: BaseException, where: str) -> None:
+    """An exception that stopped GHManage (``where``: "starting GHManage",
+    "running GHManage"), written to the log.
+
+    A packaged build shows such an exception in its own "Unhandled exception
+    in script" box, so without this the log may have nothing and the box is
+    the only record (#142). Marked, so neither a sys.excepthook that runs
+    afterwards nor launch.py logs it a second time."""
+    if isinstance(exc, (SystemExit, KeyboardInterrupt)):
+        return
+    _add_log_handler()
+    record_exception(type(exc), exc, exc.__traceback__, where)
+    for h in log.handlers:
+        try:
+            h.flush()
+        except Exception:
+            pass
+    try:
+        exc._ghmanage_logged = True  # type: ignore[attr-defined]
+    except Exception:
+        pass
+
+
 def install_handlers() -> None:
     """Catch what nothing else does: on the UI thread (wxPython hands an
     exception in an event handler to sys.excepthook, and carries on) and on
@@ -571,7 +603,8 @@ def install_handlers() -> None:
     previous_thread = threading.excepthook
 
     def on_exception(exc_type, exc, tb):
-        record_exception(exc_type, exc, tb)
+        if not getattr(exc, "_ghmanage_logged", False):
+            record_exception(exc_type, exc, tb)
         previous(exc_type, exc, tb)
 
     def on_thread_exception(args):

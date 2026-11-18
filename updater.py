@@ -59,7 +59,9 @@ def configure_logging(debug: bool = False) -> None:
     try:
         path = _log_path()
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        handler = logging.FileHandler(path, encoding="utf-8")
+        # delay: created when something is written, so Velopack's uninstall
+        # hook (which runs after this) doesn't make the file just to exit.
+        handler = logging.FileHandler(path, encoding="utf-8", delay=True)
         handler.setFormatter(
             logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
         )
@@ -95,8 +97,14 @@ def bootstrap(auto_apply: bool = True) -> None:
         # on the new version. This is what makes updates automatic — the user
         # never has to act. Set explicitly rather than relying on the default.
         velopack.App().set_auto_apply_on_startup(bool(auto_apply)).run()
-    except Exception as exc:
-        logger.error("Velopack bootstrap failed: %s", exc)
+    except (SystemExit, KeyboardInterrupt):
+        raise
+    except BaseException:  # noqa: BLE001
+        # BaseException, not Exception: velopack is Rust, and a panic in it
+        # reaches Python as pyo3's PanicException, which derives from
+        # BaseException. Uncaught, it stops GHManage before its window opens
+        # and before anything is logged (#142).
+        logger.exception("Velopack bootstrap failed")
 
 
 @dataclass

@@ -89,7 +89,7 @@ REM _parse_dispatch_spec, so it is only needed when setting up a manual run.
 ".venv\Scripts\python.exe" -m PyInstaller --noconsole --onedir --name ghmanage ^
     --icon assets\ghmanage.ico ^
     --version-file build\version_info.txt ^
-    --hidden-import velopack --hidden-import yaml ghviewer.py -y
+    --hidden-import velopack --hidden-import yaml launch.py -y
 if errorlevel 1 (
     echo Error: PyInstaller build failed.
     exit /b 1

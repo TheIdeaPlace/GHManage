@@ -110,7 +110,7 @@ echo "Building $APP_NAME $APP_VERSION..."
     --icon assets/ghmanage.icns \
     --osx-bundle-identifier "$BUNDLE_ID" \
     --hidden-import velopack --hidden-import yaml \
-    --hidden-import wx.dataview ghviewer.py -y
+    --hidden-import wx.dataview launch.py -y
 
 if [ ! -d "$APP_BUNDLE" ]; then
     echo "Error: PyInstaller did not produce $APP_BUNDLE."

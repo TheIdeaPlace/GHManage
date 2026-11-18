@@ -14407,12 +14407,33 @@ def auto_update_setting() -> bool:
 
 
 def main() -> None:
+    # The update log first, so a failure in Velopack's hooks is written down.
+    updater.configure_logging(debug="--debug" in sys.argv[1:])
+    # Whatever stops GHManage, in the log as well as in the packaged build's
+    # "Unhandled exception in script" box (#142); launch.py logs a failure
+    # before this, while the modules are imported.
+    try:
+        app = _start()
+    except BaseException as exc:
+        bugreport.record_fatal(exc, "starting GHManage")
+        raise
+    try:
+        app.MainLoop()
+    except BaseException as exc:
+        bugreport.record_fatal(exc, "running GHManage")
+        raise
+
+
+def _start() -> "wx.App":
+    """Everything up to the window being open; main() runs the app."""
     # Must run before argparse: Velopack relaunches the app with its own hook
     # arguments during install/update/uninstall, and this handles and exits.
     updater.bootstrap(auto_apply=auto_update_setting())
 
     parser = argparse.ArgumentParser(
-        description="GUI viewer and manager for GitHub issues and pull requests."
+        description="GUI viewer and manager for GitHub issues and pull requests.",
+        # No shortened options: --debug is read whole in main(), before this.
+        allow_abbrev=False,
     )
     parser.add_argument(
         "--repo",
@@ -14437,9 +14458,8 @@ def main() -> None:
         action="store_true",
         help="Write verbose update logging to the update log.",
     )
-    args = parser.parse_args()
+    args = parser.parse_args()  # --debug was read before bootstrap, in main
 
-    updater.configure_logging(debug=args.debug)
     service = updater.UpdateService(APP_VERSION, feed=args.update_feed)
 
     # The last run's log is read before this run writes to it, so a crash
@@ -14455,7 +14475,7 @@ def main() -> None:
     frame = GhViewerFrame(repo=args.repo, update_service=service)
     if crashed:
         wx.CallAfter(frame.offer_crash_report, crash_attachments)
-    app.MainLoop()
+    return app
 
 
 if __name__ == "__main__":

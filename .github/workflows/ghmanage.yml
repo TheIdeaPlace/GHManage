@@ -102,7 +102,7 @@ jobs:
           pyinstaller --noconsole --onedir --name ghmanage `
             --icon assets/ghmanage.ico `
             --version-file build/version_info.txt `
-            --hidden-import velopack --hidden-import yaml ghviewer.py -y
+            --hidden-import velopack --hidden-import yaml launch.py -y
 
       - name: Install vpk
         if: startsWith(github.ref, 'refs/tags/v')

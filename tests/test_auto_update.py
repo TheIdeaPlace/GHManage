@@ -73,6 +73,125 @@ def test_startup_installs_a_downloaded_update_only_when_on(frozen_velopack, on):
     assert app.auto is on and app.ran   # the install/uninstall hooks run either way
 
 
+@pytest.fixture(autouse=True)
+def _no_leftover_log_handlers(monkeypatch):
+    """main() now opens the update log; close it so tmp folders can go. And
+    a startup failure recorded here isn't another test's "last error"."""
+    monkeypatch.setattr(ghviewer.bugreport, "last_error", None)
+    yield
+    for logger in (updater.logger, ghviewer.bugreport.log):
+        for h in list(logger.handlers):
+            logger.removeHandler(h)
+            h.close()
+
+
+class PanicException(BaseException):
+    """What pyo3 raises when Rust code in velopack panics: a BaseException."""
+
+
+@pytest.mark.parametrize("raised", [PanicException("panicked"), RuntimeError("bad")])
+def test_a_failure_in_velopack_is_logged_not_fatal(frozen_velopack, monkeypatch, caplog, raised):
+    def boom(self):
+        raise raised
+    monkeypatch.setattr(FakeApp, "run", boom)
+    with caplog.at_level("ERROR", logger="ghmanage.updater"):
+        updater.bootstrap()   # no exception: GHManage goes on starting (#142)
+    assert "Velopack bootstrap failed" in caplog.text
+    assert type(raised).__name__ in caplog.text   # with the traceback
+
+
+def test_velopacks_own_exit_still_exits(frozen_velopack, monkeypatch):
+    def leave(self):
+        raise SystemExit(0)
+    monkeypatch.setattr(FakeApp, "run", leave)
+    with pytest.raises(SystemExit):
+        updater.bootstrap()
+
+
+@pytest.fixture
+def quiet_start(monkeypatch):
+    """main() up to the window, without what would outlive the test: the
+    excepthooks, faulthandler on a tmp crash.txt, a real wx.App."""
+    bugreport = ghviewer.bugreport
+    monkeypatch.setattr(updater, "bootstrap", lambda auto_apply=True: None)
+    monkeypatch.setattr(sys, "argv", ["ghmanage"])
+    monkeypatch.setattr(bugreport, "configure_log", bugreport._add_log_handler)
+    monkeypatch.setattr(bugreport, "install_handlers", lambda: None)
+    monkeypatch.setattr(bugreport, "begin_run", lambda: None)
+    monkeypatch.setattr(ghviewer.wx, "App", lambda redirect=False: SimpleNamespace(
+        MainLoop=lambda: None))
+
+
+def _log_text() -> str:
+    for h in ghviewer.bugreport.log.handlers:
+        h.flush()
+    return (ghviewer.bugreport.log_folder() / ghviewer.bugreport.LOG_NAME).read_text(
+        encoding="utf-8")
+
+
+def test_a_failure_starting_is_written_to_the_log(quiet_start, monkeypatch):
+    # #142: the packaged build's "Unhandled exception in script" box was the
+    # only record; the log said nothing.
+    def broken(*a, **k):
+        raise KeyError("nav_mode")
+    monkeypatch.setattr(ghviewer, "GhViewerFrame", broken)
+    with pytest.raises(KeyError) as caught:
+        ghviewer.main()
+    text = _log_text()
+    assert "Unhandled exception in starting GHManage" in text
+    assert text.count("KeyError: 'nav_mode'") == 1
+    assert caught.value._ghmanage_logged   # so launch.py doesn't log it again
+
+
+def test_a_failure_once_running_says_running(quiet_start, monkeypatch):
+    def loop():
+        raise RuntimeError("closing")
+    monkeypatch.setattr(ghviewer, "GhViewerFrame", lambda **k: SimpleNamespace())
+    monkeypatch.setattr(ghviewer.wx, "App", lambda redirect=False: SimpleNamespace(
+        MainLoop=loop))
+    with pytest.raises(RuntimeError):
+        ghviewer.main()
+    text = _log_text()
+    assert "Unhandled exception in running GHManage" in text
+    assert "in starting GHManage" not in text
+
+
+def test_debug_is_only_the_whole_word(monkeypatch):
+    # main() reads --debug before argparse; a shortened --deb would be read
+    # differently by each, so the parser refuses shortened options.
+    levels = []
+    monkeypatch.setattr(updater, "configure_logging", lambda debug=False: levels.append(debug))
+    monkeypatch.setattr(updater, "bootstrap", lambda auto_apply=True: None)
+    monkeypatch.setattr(sys, "argv", ["ghmanage", "--deb"])
+    with pytest.raises(SystemExit):   # argparse: unrecognized arguments
+        ghviewer.main()
+    assert levels == [False]
+
+
+def test_a_failure_in_velopack_reaches_the_update_log(frozen_velopack, monkeypatch):
+    # The update log is opened before the hooks run, so their failure is in it.
+    def boom(self):
+        raise PanicException("panicked")
+    monkeypatch.setattr(FakeApp, "run", boom)
+    monkeypatch.setattr(sys, "argv", ["ghmanage"])
+    monkeypatch.setattr(ghviewer, "_start", lambda: updater.bootstrap() or SimpleNamespace(
+        MainLoop=lambda: None))
+    ghviewer.main()
+    for h in updater.logger.handlers:
+        h.flush()
+    with open(updater._log_path(), encoding="utf-8") as f:
+        text = f.read()
+    assert "Velopack bootstrap failed" in text and "PanicException: panicked" in text
+
+
+def test_exit_while_starting_is_not_logged_as_a_failure(monkeypatch):
+    monkeypatch.setattr(updater, "bootstrap",
+                        lambda auto_apply=True: (_ for _ in ()).throw(SystemExit))
+    with pytest.raises(SystemExit):
+        ghviewer.main()
+    assert ghviewer.bugreport.last_error is None
+
+
 def test_main_passes_the_setting_to_bootstrap(monkeypatch):
     seen = []
     monkeypatch.setattr(updater, "bootstrap", lambda auto_apply=True: seen.append(auto_apply)

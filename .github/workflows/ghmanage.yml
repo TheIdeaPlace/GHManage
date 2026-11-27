@@ -150,6 +150,35 @@ jobs:
           } | ConvertTo-Json
           [System.IO.File]::WriteAllText("$env:GITHUB_WORKSPACE\signing-metadata.json", $json)
 
+      # Velopack signs the unsigned .exe and .dll files it packs but skips
+      # .pyd, and wxPython, velopack and PyYAML ship theirs unsigned. Smart
+      # App Control and App Control (WDAC) policies then refuse to load them:
+      # `import wx` fails with "An Application Control policy has blocked
+      # this file" (#142). So every unsigned .pyd is signed here first.
+      # Already-signed ones (the Python Software Foundation's) are left alone.
+      - name: List unsigned Python extension modules
+        id: unsigned-pyd
+        if: startsWith(github.ref, 'refs/tags/v') && env.AZURE_CLIENT_ID != ''
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem dist/ghmanage -Recurse -Filter *.pyd |
+            Where-Object { (Get-AuthenticodeSignature $_.FullName).Status -eq 'NotSigned' } |
+            ForEach-Object { $_.FullName }
+          $files | ForEach-Object { Write-Host "Unsigned: $_" }
+          "files=$($files -join ',')" >> $env:GITHUB_OUTPUT
+
+      - name: Sign Python extension modules
+        if: steps.unsigned-pyd.outputs.files != ''
+        uses: azure/artifact-signing-action@v2.0.0
+        with:
+          endpoint: https://eus.codesigning.azure.net/
+          signing-account-name: kellylford
+          certificate-profile-name: kellyford-public
+          files: ${{ steps.unsigned-pyd.outputs.files }}
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
       # --azureTrustedSignFile signs the packaged app binaries and Velopack's
       # own Update.exe / Setup.exe, so the portable zip and the installer are
       # both signed from this one invocation.
@@ -192,6 +221,24 @@ jobs:
             Copy-Item installer/Releases/GHManage-win-Setup.exe "installer/Releases/GHManage-$version-win-winget-Setup.exe"
           }
           Get-ChildItem installer/Releases | Select-Object Name, Length
+
+      # Every binary a signed release ships has to carry a valid signature,
+      # whoever's it is. Checked in the portable zip, which is what users
+      # unpack, so a file Velopack or the step above missed fails the release
+      # instead of reaching someone whose PC blocks it (#142).
+      - name: Check every shipped binary is signed
+        if: startsWith(github.ref, 'refs/tags/v') && env.AZURE_CLIENT_ID != ''
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'portable-check'
+          Expand-Archive installer/Releases/GHManage-win-Portable.zip $dir -Force
+          $bad = Get-ChildItem $dir -Recurse -Include *.exe,*.dll,*.pyd |
+            Where-Object { (Get-AuthenticodeSignature $_.FullName).Status -ne 'Valid' }
+          if ($bad) {
+            $bad | ForEach-Object { Write-Host "::error::Not validly signed: $($_.FullName.Substring($dir.Length + 1))" }
+            exit 1
+          }
+          Write-Host "All shipped binaries are signed."
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v7
